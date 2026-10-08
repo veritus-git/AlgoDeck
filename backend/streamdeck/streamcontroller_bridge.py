@@ -3,7 +3,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from backend.config import settings
 
@@ -112,48 +112,72 @@ class StreamControllerBridge:
         prev_cmd = f'$HOME/.local/bin/sd_algo_switch.sh prev "{problem_id}"'
         next_cmd = f'$HOME/.local/bin/sd_algo_switch.sh next "{problem_id}"'
 
-        def make_key(cmd: str, icon_path: Path):
+        def make_key(cmd: str, icon_path: Optional[Path] = None, labels: Optional[Dict[str, Any]] = None):
+            state_data: Dict[str, Any] = {
+                "actions": [
+                    {
+                        "id": "com_core447_OSPlugin::EasyCommand",
+                        "settings": {
+                            "command": cmd
+                        }
+                    }
+                ],
+                "labels": labels or {},
+                "background": {
+                    "color": [16, 18, 27, 255]
+                },
+                "image-control-action": 0,
+                "label-control-actions": [0, 0, 0],
+                "background-control-action": 0
+            }
+            if icon_path and icon_path.exists():
+                state_data["media"] = {
+                    "path": str(icon_path.resolve()),
+                    "size": 1.0,
+                    "valign": 0.0,
+                    "halign": 0.0,
+                    "fill-mode": "cover"
+                }
             return {
                 "states": {
-                    "0": {
-                        "actions": [
-                            {
-                                "id": "com_core447_OSPlugin::EasyCommand",
-                                "settings": {
-                                    "command": cmd
-                                }
-                            }
-                        ],
-                        "labels": {},
-                        "background": {
-                            "color": [16, 18, 27, 255]
-                        },
-                        "media": {
-                            "path": str(icon_path.resolve()),
-                            "size": 1.0,
-                            "valign": 0.0,
-                            "halign": 0.0,
-                            "fill-mode": "cover"
-                        },
-                        "image-control-action": 0,
-                        "label-control-actions": [0, 0, 0],
-                        "background-control-action": 0
-                    }
+                    "0": state_data
                 }
             }
 
-        # RZĄD 0 (GÓRA): Wskaźnik nazwy aktywnego zadania
-        title = analysis.get("title") or prob_id
+        # RZĄD 0 (GÓRA): Dynamiczny wskaźnik nazwy aktywnego zadania z automatu
+        title = (analysis.get("title") or prob_id).strip()
         from backend.streamdeck.icons_generator import generate_active_task_badge
         icon_badge = generate_active_task_badge(problem_id, title)
         badge_cmd = f'notify-send "AlgoDeck" "Zadanie: {title} ({prob_id})" 2>/dev/null || true'
+
+        # Etykiety natywne StreamControllera jako gwarancja natychmiastowego wyświetlania
+        badge_labels = {
+            "top": {
+                "text": "● ZADANIE",
+                "font_size": 10,
+                "color": [56, 189, 248, 255],
+                "alignment": "center"
+            },
+            "center": {
+                "text": title.upper()[:12],
+                "font_size": 16 if len(title) <= 6 else 13,
+                "color": [255, 255, 255, 255],
+                "alignment": "center"
+            },
+            "bottom": {
+                "text": f"[{prob_id}]",
+                "font_size": 11,
+                "color": [148, 163, 184, 255],
+                "alignment": "center"
+            }
+        }
 
         page_data = {
             "screensaver": {},
             "keys": {
                 # RZĄD 0 (GÓRA):
-                # 2x0: Nazwa aktualnego zadania (widoczna na górnej linii)
-                "2x0": make_key(badge_cmd, icon_badge),
+                # 2x0: Dynamiczna nazwa aktualnego zadania wygenerowana z automatu dla każdego PDF
+                "2x0": make_key(badge_cmd, icon_badge, labels=badge_labels),
 
                 # RZĄD 1 (ŚRODEK):
                 # 0x1: VS CODE (na maksa z lewej)
@@ -258,6 +282,15 @@ class StreamControllerBridge:
             task_icon_path = generate_task_button_icon(pid, title)
             switch_cmd = f'$HOME/.local/bin/sd_algo_switch.sh to "{pid}"'
 
+            task_labels = {
+                "center": {
+                    "text": title.upper()[:12],
+                    "font_size": 16 if len(title) <= 6 else 12,
+                    "color": [255, 255, 255, 255],
+                    "alignment": "center"
+                }
+            }
+
             keys[pos] = {
                 "states": {
                     "0": {
@@ -269,7 +302,7 @@ class StreamControllerBridge:
                                 }
                             }
                         ],
-                        "labels": {},
+                        "labels": task_labels,
                         "background": {"color": [16, 18, 27, 255]},
                         "media": {
                             "path": str(task_icon_path.resolve()),

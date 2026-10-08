@@ -100,6 +100,11 @@ async function loadProblem(problemId, analysisData = null) {
   if (deckActivePage) deckActivePage.textContent = `STRONA: ${upper}`;
   if (deckTaskLabel) deckTaskLabel.textContent = upper;
 
+  const badgeImg = document.getElementById('deck-task-badge-img');
+  if (badgeImg) {
+    badgeImg.src = `icons/badge_${currentProblemId}.png?t=${Date.now()}`;
+  }
+
   dashboardSection.classList.remove("hidden");
 
   let manifest = analysisData;
