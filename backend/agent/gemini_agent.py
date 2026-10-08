@@ -117,35 +117,50 @@ class GeminiAgent:
                 logger.debug(f"Błąd uruchomienia wyroczni: {ex}")
             return None
 
-        # 1. Sprawdź, czy wyrocznia przechodzi oficjalne przykłady
-        official_tests = [t for t in tests if not t.get("is_edge_case", False)]
+        # 1. Sprawdź, czy wyrocznia przechodzi autentyczne przykłady z treści PDF
+        def is_real_official(t: Dict[str, Any]) -> bool:
+            nm = t.get("name", "").lower()
+            desc = t.get("description", "").lower()
+            return ("przykład" in nm or "0a" in nm or "0b" in nm or "0c" in nm or "example" in nm or "sample" in desc) and not t.get("is_edge_case", False)
+
+        real_officials = [t for t in tests if is_real_official(t)]
+        if not real_officials:
+            real_officials = tests[:1]
+
         oracle_verified = True
-        if official_tests:
-            for ot in official_tests:
-                inp = ot.get("input", "")
-                exp = ot.get("expected_output", "").strip()
-                computed = run_oracle(inp)
-                if computed is None:
-                    oracle_verified = False
-                    break
-                norm_comp = "\n".join(l.rstrip() for l in computed.splitlines())
-                norm_exp = "\n".join(l.rstrip() for l in exp.splitlines())
-                if norm_comp != norm_exp:
-                    logger.warning(f"Wyrocznia Pythona nie zgadza się z oficjalnym przykładem '{ot.get('name')}'! Oczekiwano: {norm_exp[:50]}..., wyrocznia dała: {norm_comp[:50]}...")
-                    oracle_verified = False
-                    break
+        for ot in real_officials:
+            inp = ot.get("input", "")
+            exp = ot.get("expected_output", "").strip()
+            if not inp or not exp:
+                continue
+            computed = run_oracle(inp)
+            if computed is None:
+                oracle_verified = False
+                break
+            norm_comp = "\n".join(l.rstrip() for l in computed.splitlines())
+            norm_exp = "\n".join(l.rstrip() for l in exp.splitlines())
+            if norm_comp != norm_exp:
+                logger.warning(f"Wyrocznia Pythona nie zgadza się z oficjalnym przykładem '{ot.get('name')}'! Oczekiwano: {norm_exp[:40]}..., wyrocznia dała: {norm_comp[:40]}...")
+                oracle_verified = False
+                break
 
         if oracle_verified:
-            logger.info("✓ Wyrocznia Pythona zweryfikowana z oficjalnymi przykładami! Przeliczam testy brzegowe...")
+            logger.info(f"✓ Wyrocznia Pythona zweryfikowana z {len(real_officials)} oficjalnymi przykładami! Przeliczam/koryguję testy wygenerowane...")
             for t in tests:
-                if t.get("is_edge_case", False):
+                # Jeśli to nie jest oficjalny przykład z PDF, przelicz wynik komputerową wyrocznią
+                if not is_real_official(t):
                     inp = t.get("input", "")
-                    computed = run_oracle(inp)
-                    if computed is not None:
-                        t["expected_output"] = computed
-                        t["is_verified"] = True
-                        desc = t.get("description", "")
-                        t["description"] = f"{desc} (zweryfikowany wyrocznią Python)".strip()
+                    if inp:
+                        computed = run_oracle(inp)
+                        if computed is not None:
+                            old_exp = t.get("expected_output", "").strip()
+                            if old_exp and old_exp != computed:
+                                logger.info(f"Skorygowano halucynację AI dla '{t.get('name')}': zastąpiono błędny wzorzec wyliczeniem wyroczni.")
+                            t["expected_output"] = computed
+                            t["is_verified"] = True
+                            t["is_edge_case"] = True
+                            desc = t.get("description", "")
+                            t["description"] = f"{desc} (zweryfikowany wyrocznią Python)".strip()
         else:
             logger.warning("Wyrocznia Pythona nie przeszła testów oficjalnych – zachowano oryginalne dane.")
 
