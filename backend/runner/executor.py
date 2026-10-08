@@ -23,7 +23,9 @@ class TestExecutor:
 
     def get_manifest(self, problem_id: str) -> Dict[str, Any]:
         pdir = self.get_problem_dir(problem_id)
-        manifest_file = pdir / "problem.json"
+        manifest_file = pdir / ".algo" / "problem.json"
+        if not manifest_file.exists():
+            manifest_file = pdir / "problem.json"
         if manifest_file.exists():
             return json.loads(manifest_file.read_text(encoding="utf-8"))
         return {}
@@ -98,9 +100,14 @@ class TestExecutor:
                     "error": comp_res.get("error", "Kompilacja nie powiodła się.")
                 }
 
-        # Locate test file
-        in_file = pdir / "tests" / f"{test_id}.in"
-        out_file = pdir / "tests" / f"{test_id}.out"
+        # Locate test file (.algo/tests/ or tests/)
+        in_file = pdir / ".algo" / "tests" / f"{test_id}.in"
+        if not in_file.exists():
+            in_file = pdir / "tests" / f"{test_id}.in"
+
+        out_file = pdir / ".algo" / "tests" / f"{test_id}.out"
+        if not out_file.exists():
+            out_file = pdir / "tests" / f"{test_id}.out"
 
         if not in_file.exists():
             return {"test_id": test_id, "verdict": "ERR", "error": f"Brak pliku wejściowego {in_file.name}"}
@@ -270,7 +277,9 @@ class TestExecutor:
     def copy_test_input(self, problem_id: str, test_id: str) -> Dict[str, Any]:
         """Copies specific test case input to clipboard."""
         pdir = self.get_problem_dir(problem_id)
-        in_file = pdir / "tests" / f"{test_id}.in"
+        in_file = pdir / ".algo" / "tests" / f"{test_id}.in"
+        if not in_file.exists():
+            in_file = pdir / "tests" / f"{test_id}.in"
         if in_file.exists():
             content = in_file.read_text(encoding="utf-8")
             copied = self.copy_to_clipboard(content)

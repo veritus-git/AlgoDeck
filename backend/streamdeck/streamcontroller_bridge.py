@@ -44,9 +44,9 @@ class StreamControllerBridge:
         ButtonRenderer.render_key(label="POWRÓT", icon="🔙", subtext="MAIN", status="IDLE").save(icon_back)
 
         # 2. Utwórz konfigurację strony StreamControllera
-        test_cmd = f'bash "{pdir}/test.sh"'
-        run_cmd = f'x-terminal-emulator -e bash -c \'"{pdir}/run.sh"; echo ""; read -p "Zakończono. Naciśnij Enter..."\' 2>/dev/null || bash "{pdir}/run.sh"'
-        kill_cmd = f'bash "{pdir}/kill.sh"'
+        test_cmd = f'bash "{pdir}/.algo/test.sh"'
+        run_cmd = f'x-terminal-emulator -e bash -c \'"{pdir}/.algo/run.sh"; echo ""; read -p "Zakończono. Naciśnij Enter..."\' 2>/dev/null || bash "{pdir}/.algo/run.sh"'
+        kill_cmd = f'bash "{pdir}/.algo/kill.sh"'
         vscode_cmd = f'code "{pdir}" "{pdir}/{problem_id}.cpp"'
         back_cmd = f'$HOME/.local/bin/sd_page.sh Main'
 
@@ -103,10 +103,24 @@ class StreamControllerBridge:
 
     def switch_to_page(self, page_name: str):
         """Przełącza aktywną stronę na Stream Decku."""
+        # 1. Przez DBus bezpośrednio
+        serial = "A00SA6042JGA63"
+        try:
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "com.core447.StreamController.ChangePage",
+                serial, page_name
+            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info(f"Przełączono stronę StreamControllera na {page_name} przez DBus.")
+        except Exception:
+            pass
+
+        # 2. Przez sd_page.sh
         sd_page_script = Path(os.path.expanduser("~/.local/bin/sd_page.sh"))
         if sd_page_script.exists():
             try:
-                subprocess.run([str(sd_page_script), page_name], timeout=3)
-                logger.info(f"Wywołano sd_page.sh {page_name}")
-            except Exception as e:
-                logger.warning(f"Błąd wywołania sd_page.sh: {e}")
+                subprocess.run([str(sd_page_script), page_name], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
