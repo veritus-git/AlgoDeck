@@ -1,11 +1,17 @@
-// Minimalistyczny Frontend AlgoDeck
+// Minimalistyczny Frontend AlgoDeck ze wsparciem Stream Decka i bazy zadań
 
 let currentProblemId = null;
+let savedProblems = [];
 
+// DOM Elements
 const pdfDropzone = document.getElementById('pdf-dropzone');
 const pdfFileInput = document.getElementById('pdf-file-input');
 const btnBrowseFile = document.getElementById('btn-browse-file');
 const btnDemoTask = document.getElementById('btn-demo-task');
+
+const navBtnPrev = document.getElementById('nav-btn-prev');
+const navBtnNext = document.getElementById('nav-btn-next');
+const activeTaskName = document.getElementById('active-task-name');
 
 const engineInfo = document.getElementById('engine-info');
 const engineName = document.getElementById('engine-name');
@@ -13,19 +19,22 @@ const engineName = document.getElementById('engine-name');
 const dashboardSection = document.getElementById('dashboard-section');
 const problemTitle = document.getElementById('problem-title');
 const problemIdTag = document.getElementById('problem-id-tag');
-const activeTaskPill = document.getElementById('active-task-pill');
-const activeTaskName = document.getElementById('active-task-name');
+const problemLimits = document.getElementById('problem-limits');
 
 const btnTestAll = document.getElementById('btn-test-all');
 const btnRun = document.getElementById('btn-run');
 const btnKill = document.getElementById('btn-kill');
 const btnVscode = document.getElementById('btn-vscode');
-const btnBackMain = document.getElementById('btn-back-main');
+
+const deckActivePage = document.getElementById('deck-active-page');
+const deckTaskLabel = document.getElementById('deck-task-label');
 
 const testSummaryBadge = document.getElementById('test-summary-badge');
 const testsList = document.getElementById('tests-list');
 const consoleOutput = document.getElementById('console-output');
-const deckStatusTest = document.getElementById('deck-status-test');
+
+const workspacesList = document.getElementById('workspaces-list');
+const workspacesCount = document.getElementById('workspaces-count');
 
 function setupUpload() {
   btnBrowseFile.onclick = (e) => { e.stopPropagation(); pdfFileInput.click(); };
@@ -50,7 +59,7 @@ function setupUpload() {
 }
 
 async function uploadFile(file) {
-  consoleOutput.textContent = "Wysyłanie pliku i analiza treści...";
+  consoleOutput.textContent = `Wysyłanie ${file.name} i błyskawiczna analiza lokalna...`;
   const fd = new FormData();
   fd.append("file", file);
 
@@ -59,7 +68,8 @@ async function uploadFile(file) {
     const data = await res.json();
     if (data.success) {
       currentProblemId = data.problem_id;
-      loadProblem(data.problem_id, data.analysis);
+      await loadProblem(data.problem_id, data.analysis);
+      await loadWorkspaces();
     } else {
       alert("Błąd: " + (data.error || "Nie udało się załadować"));
     }
@@ -70,34 +80,56 @@ async function uploadFile(file) {
 }
 
 async function loadDemo() {
-  const blob = new Blob(["%PDF-1.4 demo"], { type: "application/pdf" });
-  const file = new File([blob], "koleje.pdf", { type: "application/pdf" });
-  await uploadFile(file);
+  consoleOutput.textContent = "Pobieranie przykładowego pliku zadania (koleje.pdf)...";
+  try {
+    const res = await fetch("/koleje.pdf");
+    const blob = await res.blob();
+    const file = new File([blob], "koleje.pdf", { type: "application/pdf" });
+    await uploadFile(file);
+  } catch (e) {
+    console.error("Błąd pobierania demo:", e);
+    alert("Nie udało się pobrać pliku demo.");
+  }
 }
 
 async function loadProblem(problemId, analysisData = null) {
-  currentProblemId = problemId;
-  activeTaskPill.classList.remove("hidden");
-  activeTaskName.textContent = problemId.toUpperCase();
+  currentProblemId = problemId.toLowerCase();
+  const upper = currentProblemId.toUpperCase();
+
+  activeTaskName.textContent = upper;
+  if (deckActivePage) deckActivePage.textContent = `STRONA: ${upper}`;
+  if (deckTaskLabel) deckTaskLabel.textContent = upper;
+
   dashboardSection.classList.remove("hidden");
 
   let manifest = analysisData;
   if (!manifest) {
-    const res = await fetch(`/api/problem/${problemId}`);
-    const data = await res.json();
-    manifest = data.manifest;
+    try {
+      const res = await fetch(`/api/problem/${currentProblemId}`);
+      if (res.ok) {
+        const data = await res.json();
+        manifest = data.manifest;
+      }
+    } catch (e) {
+      console.warn("Nie udało się pobrać szczegółów zadania:", e);
+    }
   }
 
-  problemTitle.textContent = manifest.title || problemId;
-  problemIdTag.textContent = problemId;
-
-  if (manifest.used_engine) {
-    engineInfo.classList.remove("hidden");
-    engineName.textContent = manifest.used_engine;
+  if (manifest) {
+    problemTitle.textContent = manifest.title || upper;
+    problemIdTag.textContent = currentProblemId;
+    if (problemLimits) {
+      problemLimits.textContent = `Limit czasu: ${manifest.time_limit_sec || 1.0}s | Pamięć: ${manifest.memory_limit_mb || 128}MB`;
+    }
+    if (manifest.used_engine) {
+      engineInfo.classList.remove("hidden");
+      engineName.textContent = manifest.used_engine;
+    }
+    renderTests(manifest.tests || []);
   }
 
-  renderTests(manifest.tests || []);
-  consoleOutput.textContent = `Zadanie ${problemId} gotowe.\nKatalog roboczy: ~/algodeck-workspace/${problemId}\nSzablon C++ wklejony. VS Code otwarty.\nStrona na Stream Decku przełączona na '${problemId.toUpperCase()}'.`;
+  consoleOutput.textContent = `Aktywne zadanie: ${upper}\nKatalog roboczy: ~/algodeck-workspace/${currentProblemId}\nPlik roboczy: ~/algodeck-workspace/${currentProblemId}/${currentProblemId}.cpp\nVS Code zmaksymalizowany na pełny ekran. Stream Deck przełączony na '${upper}'.`;
+  highlightActiveCard();
 }
 
 function renderTests(tests) {
@@ -122,8 +154,7 @@ function renderTests(tests) {
 // 1 KLIKNIĘCIE: TESTUJ WSZYSTKO (KOMPILUJ, ODPAL, DIFF)
 async function testAll() {
   if (!currentProblemId) return;
-  consoleOutput.textContent = "Kompilacja g++ -O3 i uruchamianie testów...";
-  deckStatusTest.textContent = "RUN...";
+  consoleOutput.textContent = "Kompilacja g++ -O3 i uruchamianie oficjalnych testów...";
 
   try {
     const res = await fetch(`/api/run-all/${currentProblemId}`, { method: "POST" });
@@ -132,7 +163,6 @@ async function testAll() {
     if (data.verdict === "CE") {
       testSummaryBadge.className = "tag tag-red";
       testSummaryBadge.textContent = "BŁĄD KOMPILACJI (CE)";
-      deckStatusTest.textContent = "CE";
       consoleOutput.textContent = `Błąd kompilacji:\n${data.compile_error}`;
       return;
     }
@@ -162,11 +192,9 @@ async function testAll() {
     if (allOk) {
       testSummaryBadge.className = "tag tag-green";
       testSummaryBadge.textContent = `WSZYSTKO OK (${data.total_time_ms} ms)`;
-      deckStatusTest.textContent = "OK";
     } else {
       testSummaryBadge.className = "tag tag-red";
       testSummaryBadge.textContent = "ZNALEZIONO BŁĘDY";
-      deckStatusTest.textContent = "WA";
     }
 
     consoleOutput.textContent = logLines.join("\n");
@@ -185,29 +213,114 @@ async function copyInput(testId) {
   }
 }
 
-async function pressStreamDeckKey(idx) {
-  if (idx === 0) {
+// Obsługa akcji Stream Decka
+async function handleStreamDeckAction(action) {
+  if (!currentProblemId && action !== 'prev' && action !== 'next') return;
+
+  if (action === 'test') {
     testAll();
-  } else if (idx === 1) {
-    fetch(`/api/streamdeck/press/1`, { method: "POST" });
-    consoleOutput.textContent = "Uruchomiono program (run.sh)...";
-  } else if (idx === 2) {
-    fetch(`/api/kill/${currentProblemId}`, { method: "POST" });
-    consoleOutput.textContent = "🛑 Wysłano sygnał KILL do procesu.";
-  } else if (idx === 3) {
-    fetch(`/api/streamdeck/press/3`, { method: "POST" });
-    consoleOutput.textContent = "Otwarto w VS Code.";
-  } else if (idx === 4) {
-    fetch(`/api/streamdeck/press/4`, { method: "POST" });
-    consoleOutput.textContent = "Przełączono Stream Deck na stronę Main.";
+  } else if (action === 'play') {
+    await fetch(`/api/streamdeck/press/6`, { method: "POST" });
+    consoleOutput.textContent = "Uruchomiono program interaktywnie w terminalu...";
+  } else if (action === 'kill') {
+    await fetch(`/api/kill/${currentProblemId}`, { method: "POST" });
+    consoleOutput.textContent = "🛑 Zatrzymano proces (KILL).";
+  } else if (action === 'vscode') {
+    await fetch(`/api/open-vscode/${currentProblemId}`, { method: "POST" });
+    consoleOutput.textContent = "💻 VS Code uruchomiony / zmaksymalizowany na pełny ekran.";
+  } else if (action === 'prev') {
+    await switchTask('prev');
+  } else if (action === 'next' || action === 'cycle') {
+    await switchTask('next');
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+// Przełączanie między zapisanymi zadaniami
+async function switchTask(direction) {
+  consoleOutput.textContent = `Przełączanie zadania (${direction})...`;
+  await fetch(`/api/switch-task/${direction}`, { method: "POST" });
+  
+  // Odczekaj chwilę na wykonanie skryptu i pobierz aktualny stan
+  setTimeout(async () => {
+    await loadWorkspaces();
+    const res = await fetch("/api/problems");
+    const data = await res.json();
+    if (data.active) {
+      await loadProblem(data.active);
+    }
+  }, 250);
+}
+
+// Aktywowanie konkretnego zadania
+async function activateProblem(probId) {
+  consoleOutput.textContent = `Otwieranie zadania ${probId.toUpperCase()}...`;
+  await fetch(`/api/set-active/${probId}`, { method: "POST" });
+  await loadProblem(probId);
+  highlightActiveCard();
+}
+
+function highlightActiveCard() {
+  document.querySelectorAll(".workspace-card").forEach(c => {
+    if (c.getAttribute("data-id") === currentProblemId) {
+      c.classList.add("active");
+    } else {
+      c.classList.remove("active");
+    }
+  });
+}
+
+// Ładowanie listy wszystkich zadań z workspace
+async function loadWorkspaces() {
+  try {
+    const res = await fetch("/api/problems");
+    const data = await res.json();
+    savedProblems = data.problems || [];
+    workspacesCount.textContent = `${savedProblems.length} ${savedProblems.length === 1 ? 'zadanie' : 'zadań'}`;
+
+    workspacesList.innerHTML = "";
+    if (savedProblems.length === 0) {
+      workspacesList.innerHTML = `<div class="empty-hint" style="color:#64748b; font-size:0.9rem;">Brak zadań w katalogu ~/algodeck-workspace. Upuść plik PDF powyżej, aby dodać pierwsze zadanie.</div>`;
+      return;
+    }
+
+    savedProblems.forEach(p => {
+      const pid = (p.problem_id || "zad").toLowerCase();
+      const card = document.createElement("div");
+      card.className = `workspace-card ${pid === currentProblemId ? 'active' : ''}`;
+      card.setAttribute("data-id", pid);
+      card.innerHTML = `
+        <div class="workspace-card-header">
+          <span class="tag tag-cyan">${pid}</span>
+          <span class="workspace-card-info">${(p.tests || []).length} testów</span>
+        </div>
+        <div class="workspace-card-title">${p.title || pid}</div>
+        <div class="workspace-card-info">~/algodeck-workspace/${pid}/${pid}.cpp</div>
+        <div class="workspace-card-actions">
+          <button class="btn btn-sm btn-primary" onclick="activateProblem('${pid}')">
+            📂 Otwórz (VS Code + Deck)
+          </button>
+        </div>
+      `;
+      workspacesList.appendChild(card);
+    });
+
+    if (data.active && (!currentProblemId || currentProblemId !== data.active)) {
+      await loadProblem(data.active);
+    }
+  } catch (e) {
+    console.error("Błąd ładowania workspaces:", e);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
   setupUpload();
   btnTestAll.onclick = testAll;
-  btnRun.onclick = () => pressStreamDeckKey(1);
-  btnKill.onclick = () => pressStreamDeckKey(2);
-  btnVscode.onclick = () => pressStreamDeckKey(3);
-  btnBackMain.onclick = () => pressStreamDeckKey(4);
+  btnRun.onclick = () => handleStreamDeckAction('play');
+  btnKill.onclick = () => handleStreamDeckAction('kill');
+  btnVscode.onclick = () => handleStreamDeckAction('vscode');
+
+  navBtnPrev.onclick = () => switchTask('prev');
+  navBtnNext.onclick = () => switchTask('next');
+
+  await loadWorkspaces();
 });

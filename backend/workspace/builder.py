@@ -34,10 +34,17 @@ class WorkspaceBuilder:
         tests_dir = algo_hidden_dir / "tests"
         tests_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. JEDYNY WIDOCZNY PLIK: <problem_id>.cpp z czystym kodem
+        # 1. JEDYNY WIDOCZNY PLIK: <problem_id>.cpp z czystym kodem i krótkim nagłówkiem
         main_cpp = problem_dir / f"{problem_id}.cpp"
         if not main_cpp.exists():
-            main_cpp.write_text(CPP_TEMPLATE, encoding="utf-8")
+            cpp_content = (
+                CPP_TEMPLATE
+                .replace("__TITLE__", str(title))
+                .replace("__PROBLEM_ID__", str(problem_id))
+                .replace("__TIME_LIMIT__", str(analysis.get("time_limit_sec", 1.0)))
+                .replace("__MEMORY_LIMIT__", str(analysis.get("memory_limit_mb", 128)))
+            )
+            main_cpp.write_text(cpp_content, encoding="utf-8")
 
         # 2. Zapisz testy do ukrytego katalogu .algo/tests/
         tests: List[Dict[str, Any]] = analysis.get("tests", [])
@@ -137,7 +144,15 @@ notify-send "AlgoDeck ({problem_id})" "🛑 Zatrzymano proces {problem_id}" 2>/d
 
     def open_in_vscode(self, problem_dir: Path, source_file: Path):
         try:
-            if shutil.which("code"):
+            sd_code_sh = Path(os.path.expanduser("~/.local/bin/sd_algo_code.sh"))
+            if sd_code_sh.exists():
+                subprocess.Popen(
+                    [str(sd_code_sh), str(problem_dir), str(source_file)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+            elif shutil.which("code"):
                 subprocess.Popen(
                     ["code", str(problem_dir), str(source_file)],
                     stdout=subprocess.DEVNULL,

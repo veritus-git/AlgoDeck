@@ -37,16 +37,20 @@ class StreamDeckController:
         official_tests = [t for t in tests if not t.get("is_edge_case", False)]
         edge_tests = [t for t in tests if t.get("is_edge_case", False)]
 
-        # 5 minimalistycznych klawiszy (dokładnie to, o co prosił użytkownik):
-        self._set_key(0, label="TESTUJ", icon="🚀", subtext="ALL", status="OK", action="run_all")
-        self._set_key(1, label="ODPAL", icon="▶️", subtext="RUN", status="DEBUG", action="run_interactive")
-        self._set_key(2, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
-        self._set_key(3, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
-        self._set_key(4, label="POWRÓT", icon="🔙", subtext="MAIN", status="IDLE", action="back_main")
-
-        # Pozostałe puste
-        for i in range(5, 15):
+        # Czyszczenie wszystkich 15 klawiszy
+        for i in range(15):
             self._set_key(i, label="", icon="", subtext="", status="IDLE", action="")
+
+        # Rząd 0: Nawigacja po zadaniach
+        self._set_key(0, label="POPRZ", icon="⏮️", subtext="PREV", status="IDLE", action="prev_task")
+        self._set_key(4, label="NAST", icon="⏭️", subtext="NEXT", status="IDLE", action="next_task")
+
+        # Rząd 1 (ŚRODEK): 5 głównych przycisków
+        self._set_key(5, label="TESTUJ", icon="🚀", subtext="ALL", status="OK", action="run_all")
+        self._set_key(6, label="ODPAL", icon="▶️", subtext="RUN", status="DEBUG", action="run_interactive")
+        self._set_key(7, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
+        self._set_key(8, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
+        self._set_key(9, label="ZADANIE", icon="🔄", subtext="NEXT", status="IDLE", action="cycle_task")
 
         self._notify_listeners()
 
@@ -153,17 +157,19 @@ class StreamDeckController:
                 pdir = self.executor.get_problem_dir(problem_id)
                 import subprocess
                 subprocess.Popen(
-                    f'x-terminal-emulator -e bash -c \'"{pdir}/run.sh"; echo ""; read -p "Zakończono. Wciśnij Enter..."\' 2>/dev/null || bash "{pdir}/run.sh"',
+                    f'x-terminal-emulator -e bash -c \'"{pdir}/.algo/run.sh"; echo ""; read -p "Zakończono. Wciśnij Enter..."\' 2>/dev/null || bash "{pdir}/.algo/run.sh"',
                     shell=True
                 )
                 self.update_key_status(key_index, "DEBUG", "RUNNING")
                 asyncio.create_task(self._reset_key_after_delay(key_index, "DEBUG", "RUN", 2.0))
                 result = {"success": True}
 
-            elif action == "back_main":
+            elif action in ("prev_task", "next_task", "cycle_task"):
+                direction = "prev" if action == "prev_task" else "next"
                 import subprocess
-                subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_page.sh Main"], timeout=2)
-                self.update_key_status(key_index, "IDLE", "MAIN")
+                subprocess.run(["bash", "-c", f"$HOME/.local/bin/sd_algo_switch.sh {direction} '{problem_id}'"], timeout=3)
+                self.update_key_status(key_index, "IDLE", "SWITCH")
+                asyncio.create_task(self._reset_key_after_delay(key_index, "IDLE", "NEXT" if direction == "next" else "PREV", 1.5))
                 result = {"success": True}
 
             elif action == "kill_process":

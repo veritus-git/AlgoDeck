@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#10121b"/>
+  <!-- Rounded Frame Badge -->
+  <rect x="20" y="16" width="104" height="76" rx="18" ry="18" fill="#141724" stroke="#10b981" stroke-width="3"/>
+  <!-- Icon Glyph -->
+  
+                <!-- Rocket glyph centered at (72, 54) -->
+                <g transform="translate(72, 54)">
+                    <!-- Rocket body -->
+                    <path d="M 0,-24 C 8,-16 12,-4 12,12 L -12,12 C -12,-4 -8,-16 0,-24 Z" fill="#10b981"/>
+                    <!-- Rocket window -->
+                    <circle cx="0" cy="-6" r="4.5" fill="#10121b"/>
+                    <circle cx="0" cy="-6" r="2.5" fill="#34d399"/>
+                    <!-- Left fin -->
+                    <path d="M -12,4 L -20,16 L -12,14 Z" fill="#059669"/>
+                    <!-- Right fin -->
+                    <path d="M 12,4 L 20,16 L 12,14 Z" fill="#059669"/>
+                    <!-- Thruster flame -->
+                    <path d="M -6,14 Q 0,26 0,26 Q 0,26 6,14 Z" fill="#f59e0b"/>
+                    <path d="M -3,14 Q 0,21 0,21 Q 0,21 3,14 Z" fill="#fef08a"/>
+                </g>
+            
+  <!-- Bottom Text Label -->
+  <text x="72" y="122" font-family="'DejaVu Sans', 'Ubuntu', 'Inter', sans-serif" font-weight="bold" font-size="16" fill="#ffffff" text-anchor="middle" letter-spacing="0.75">TESTUJ</text>
+</svg>

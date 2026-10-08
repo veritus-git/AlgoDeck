@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#10121b"/>
+  <!-- Rounded Frame Badge -->
+  <rect x="20" y="16" width="104" height="76" rx="18" ry="18" fill="#141724" stroke="#a855f7" stroke-width="3"/>
+  <!-- Centered Folder & Switch Arrows -->
+  <g transform="translate(72, 54)">
+    <!-- Sleek Folder Outline -->
+    <path d="M -22,-14 L -8,-14 L -3,-9 L 20,-9 C 22.2,-9 24,-7.2 24,-5 L 24,14 C 24,16.2 22.2,18 20,18 L -22,18 C -24.2,18 -26,16.2 -26,14 L -26,-10 C -26,-12.2 -24.2,-14 -22,-14 Z" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-linejoin="round"/>
+    <!-- Horizontal Tab line -->
+    <line x1="-26" y1="-5" x2="24" y2="-5" stroke="#a855f7" stroke-width="1.8" opacity="0.6"/>
+    <!-- Switch / Swap Double Arrows -->
+    <path d="M -9,3 L 7,3 M 3,-1 L 7,3 L 3,7" fill="none" stroke="#e9d5ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 7,10 L -9,10 M -5,6 L -9,10 L -5,14" fill="none" stroke="#e9d5ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Bottom Text Label -->
+  <text x="72" y="122" font-family="'DejaVu Sans', 'Ubuntu', 'Inter', sans-serif" font-weight="bold" font-size="16" fill="#ffffff" text-anchor="middle" letter-spacing="0.75">ZADANIE</text>
+</svg>

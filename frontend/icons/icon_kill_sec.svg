@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#10121b"/>
+  <!-- Rounded Frame Badge -->
+  <rect x="20" y="16" width="104" height="76" rx="18" ry="18" fill="#141724" stroke="#f43f5e" stroke-width="3"/>
+  <!-- Icon Glyph -->
+  
+                <!-- Lightning / Zap bolt centered at (72, 54) -->
+                <g transform="translate(72, 54)">
+                    <path d="M 2,-22 L -16,-2 L -3,-2 L -6,22 L 16,2 L 3,2 Z" fill="#f43f5e"/>
+                </g>
+            
+  <!-- Bottom Text Label -->
+  <text x="72" y="122" font-family="'DejaVu Sans', 'Ubuntu', 'Inter', sans-serif" font-weight="bold" font-size="16" fill="#ffffff" text-anchor="middle" letter-spacing="0.75">KILL</text>
+</svg>

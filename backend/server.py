@@ -146,9 +146,14 @@ def list_problems():
     problems = []
     if wdir.exists():
         for p in wdir.iterdir():
-            if p.is_dir() and (p / "problem.json").exists():
+            if not p.is_dir():
+                continue
+            mfile = p / ".algo" / "problem.json"
+            if not mfile.exists():
+                mfile = p / "problem.json"
+            if mfile.exists():
                 try:
-                    manifest = json.loads((p / "problem.json").read_text(encoding="utf-8"))
+                    manifest = json.loads(mfile.read_text(encoding="utf-8"))
                     problems.append(manifest)
                 except Exception:
                     pass
@@ -172,8 +177,29 @@ def get_problem(problem_id: str):
 
 @app.post("/api/set-active/{problem_id}")
 def set_active_problem(problem_id: str):
-    streamdeck_controller.set_active_problem(problem_id)
-    return {"success": True, "active": problem_id, "keys": streamdeck_controller.keys_state}
+    pid = problem_id.lower()
+    streamdeck_controller.set_active_problem(pid)
+    manifest = executor.get_manifest(pid)
+    streamcontroller_bridge.generate_page_for_problem(pid, manifest)
+    pdir = executor.get_problem_dir(pid)
+    main_cpp = pdir / f"{pid}.cpp"
+    workspace_builder.open_in_vscode(pdir, main_cpp)
+    return {"success": True, "active": pid, "keys": streamdeck_controller.keys_state}
+
+@app.post("/api/open-vscode/{problem_id}")
+def open_vscode(problem_id: str):
+    pid = problem_id.lower()
+    pdir = executor.get_problem_dir(pid)
+    main_cpp = pdir / f"{pid}.cpp"
+    workspace_builder.open_in_vscode(pdir, main_cpp)
+    return {"success": True}
+
+@app.post("/api/switch-task/{direction}")
+def switch_task(direction: str = "next"):
+    curr = streamdeck_controller.active_problem_id or ""
+    import subprocess
+    subprocess.run(["bash", "-c", f"$HOME/.local/bin/sd_algo_switch.sh {direction} '{curr}'"], timeout=3)
+    return {"success": True}
 
 @app.post("/api/compile/{problem_id}")
 def compile_code(problem_id: str, debug: bool = False):

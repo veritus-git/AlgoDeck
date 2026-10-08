@@ -1,4 +1,9 @@
-CPP_TEMPLATE = """#include <iostream>
+CPP_TEMPLATE = """/*
+ * Zadanie: __TITLE__ (__PROBLEM_ID__)
+ * Limit czasu: __TIME_LIMIT__s | Pamięć: __MEMORY_LIMIT__MB
+ */
+
+#include <iostream>
 using namespace std;
 
 int main() {
@@ -6,19 +11,4 @@ int main() {
     cin.tie(NULL);
 
 }
-"""
-
-MAKEFILE_TEMPLATE = """CXX = g++
-CXXFLAGS = -O3 -std=c++20 -Wall -Wextra
-TARGET = {problem_id}
-
-all: $(TARGET)
-
-$(TARGET): {problem_id}.cpp
-	$(CXX) $(CXXFLAGS) -o $(TARGET) {problem_id}.cpp
-
-clean:
-	rm -f $(TARGET) *.out
-
-.PHONY: all clean
 """
