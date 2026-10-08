@@ -61,10 +61,15 @@ Repozytorium zawiera w pełni zautomatyzowany skrypt instalacyjny `bootstrap.sh`
 
 ```bash
 # Sklonuj repozytorium i uruchom instalator:
-git clone https://github.com/twoj-login/algodeck.git
-cd algodeck
+git clone https://github.com/veritus-git/AlgoDeck.git
+cd AlgoDeck
 chmod +x bootstrap.sh
 ./bootstrap.sh
+```
+
+Lub jedno polecenie bezpośrednio z terminala:
+```bash
+curl -fsSL https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/bootstrap.sh | bash
 ```
 
 ### Co automatycznie wykonuje skrypt bootstrap:

@@ -201,6 +201,12 @@ def switch_task(direction: str = "next"):
     subprocess.run(["bash", "-c", f"$HOME/.local/bin/sd_algo_switch.sh {direction} '{curr}'"], timeout=3)
     return {"success": True}
 
+@app.post("/api/streamdeck/menu")
+def open_streamdeck_menu():
+    import subprocess
+    subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_algo_switch.sh menu"], timeout=3)
+    return {"success": True}
+
 @app.post("/api/compile/{problem_id}")
 def compile_code(problem_id: str, debug: bool = False):
     res = executor.compile(problem_id, debug_mode=debug)
@@ -224,6 +230,11 @@ def copy_input(problem_id: str, test_id: str):
 @app.post("/api/kill/{problem_id}")
 def kill_process(problem_id: str):
     stopped = executor.kill_process(problem_id)
+    pdir = executor.get_problem_dir(problem_id)
+    kill_sh = pdir / ".algo" / "kill.sh"
+    if kill_sh.exists():
+        import subprocess
+        subprocess.run(["bash", str(kill_sh)], timeout=3)
     return {"success": True, "stopped": stopped}
 
 @app.post("/api/streamdeck/press/{key_index}")

@@ -64,51 +64,89 @@ class WorkspaceBuilder:
                 "out_file": f"{t_id}.out"
             })
 
-        # 3. Ukryty test.sh (skrypt wywoływany przez Stream Deck)
+        # 3. Ukryty test.sh - Pełny log w oknie terminala (Wejście, Wyjście, Diff, Czasy)
         test_sh = algo_hidden_dir / "test.sh"
         test_sh.write_text(f"""#!/usr/bin/env bash
 cd "{problem_dir.resolve()}"
-echo -e "\\e[1;36m[AlgoDeck] Kompilacja {problem_id}.cpp...\\e[0m"
-g++ -O3 -std=c++20 "{problem_id}.cpp" -o ".algo/{problem_id}" || {{
-    notify-send -u critical "AlgoDeck ({problem_id})" "❌ Błąd kompilacji!" 2>/dev/null
-    exit 1
-}}
 
+echo -e "\\e[1;36m=====================================================\\e[0m"
+echo -e "\\e[1;36m       🚀 AlgoDeck Test Runner - {problem_id.upper()} ({title})\\e[0m"
+echo -e "\\e[1;36m=====================================================\\e[0m"
+echo ""
+
+echo -e "\\e[1;33m[1/2] Kompilacja {problem_id}.cpp (g++ -O3 -std=c++20)...\\e[0m"
+if ! g++ -O3 -std=c++20 "{problem_id}.cpp" -o ".algo/{problem_id}"; then
+    echo -e "\\e[1;31m❌ BŁĄD KOMPILACJI!\\e[0m"
+    notify-send -u critical "AlgoDeck ({problem_id})" "❌ Błąd kompilacji!" 2>/dev/null
+    read -p "Naciśnij Enter, aby zamknąć..."
+    exit 1
+fi
+echo -e "\\e[1;32m✓ Skompilowano pomyślnie!\\e[0m"
+echo ""
+
+echo -e "\\e[1;33m[2/2] Uruchamianie oficjalnych testów...\\e[0m"
 ALL_OK=true
-echo -e "\\e[1;36m[AlgoDeck] Testowanie...\\e[0m"
-for in_file in .algo/tests/*.in; do
+TEST_COUNT=0
+
+for in_file in $(ls -1 .algo/tests/*.in 2>/dev/null | sort -V); do
     [ -e "$in_file" ] || continue
+    TEST_COUNT=$((TEST_COUNT + 1))
     base=$(basename "$in_file" .in)
     out_file=".algo/tests/$base.out"
+    my_out=".algo/tests/$base.my"
+    
+    echo -e "\\e[1;34m-----------------------------------------------------\\e[0m"
+    echo -e "\\e[1;35m▶ TEST: $base\\e[0m"
+    echo -e "\\e[0;36m[DANE WEJŚCIOWE (INPUT)]:\\e[0m"
+    cat "$in_file"
+    echo ""
+    echo -e "\\e[0;33m[ODPALANIE]: ./.algo/{problem_id} < $in_file > $my_out\\e[0m"
     
     start=$(date +%s%N)
-    ./.algo/{problem_id} < "$in_file" > "/tmp/{problem_id}_out.tmp" 2>/dev/null
+    ./.algo/{problem_id} < "$in_file" > "$my_out" 2>/dev/null
     ret=$?
     end=$(date +%s%N)
     diff_ms=$(( (end - start) / 1000000 ))
 
     if [ $ret -ne 0 ]; then
-        echo -e "\\e[1;31m[$base] RTE / Crash ($diff_ms ms)\\e[0m"
+        echo -e "\\e[1;31m❌ RTE / Crash programu (Kod: $ret, Czas: $diff_ms ms)\\e[0m"
         ALL_OK=false
         continue
     fi
 
+    echo -e "\\e[0;32m[TWOJE WYJŚCIE (OUTPUT)]:\\e[0m"
+    cat "$my_out"
+    echo ""
+
     if [ -f "$out_file" ] && [ -s "$out_file" ]; then
-        if diff -B -w -u "$out_file" "/tmp/{problem_id}_out.tmp" > "/tmp/{problem_id}_diff.tmp"; then
-            echo -e "\\e[1;32m[$base] OK ($diff_ms ms)\\e[0m"
+        echo -e "\\e[0;34m[OCZEKIWANE WYJŚCIE]:\\e[0m"
+        cat "$out_file"
+        echo ""
+        if diff -q -w -B "$out_file" "$my_out" >/dev/null 2>&1; then
+            echo -e "\\e[1;32m✓ WYNIK: OK ($diff_ms ms)\\e[0m"
         else
-            echo -e "\\e[1;31m[$base] WA ($diff_ms ms)\\e[0m"
-            cat "/tmp/{problem_id}_diff.tmp" | head -n 8
+            echo -e "\\e[1;31m✗ WYNIK: WA (Wrong Answer - niezgodność z wzorcem!)\\e[0m"
+            echo -e "\\e[1;31m--- DIFF (--wzorzec ++twoje) ---\\e[0m"
+            diff -u -w -B "$out_file" "$my_out" || true
+            echo -e "\\e[1;31m--------------------------------\\e[0m"
             ALL_OK=false
         fi
+    else
+        echo -e "\\e[1;32m✓ WYNIK: OK ($diff_ms ms, brak pliku referencyjnego)\\e[0m"
     fi
 done
 
+echo ""
+echo -e "\\e[1;34m=====================================================\\e[0m"
 if [ "$ALL_OK" = true ]; then
-    notify-send -u normal "AlgoDeck ({problem_id})" "🎉 Wszystkie testy OK!" 2>/dev/null
+    echo -e "\\e[1;32m🎉 WSZYSTKIE TESTY ZALICZONE (Liczba: $TEST_COUNT)!\\e[0m"
+    notify-send "AlgoDeck ({problem_id})" "✅ Wszystkie testy zaliczone!" 2>/dev/null
 else
+    echo -e "\\e[1;31m❌ ZNALEZIONO BŁĘDY W TESTACH!\\e[0m"
     notify-send -u critical "AlgoDeck ({problem_id})" "❌ Błąd w testach (WA)!" 2>/dev/null
 fi
+echo ""
+read -p "Naciśnij Enter, aby zamknąć okno testów..."
 """, encoding="utf-8")
         test_sh.chmod(0o755)
 
@@ -116,19 +154,99 @@ fi
         run_sh = algo_hidden_dir / "run.sh"
         run_sh.write_text(f"""#!/usr/bin/env bash
 cd "{problem_dir.resolve()}"
-g++ -O3 -std=c++20 "{problem_id}.cpp" -o ".algo/{problem_id}" && ./.algo/{problem_id}
+
+echo -e "\\e[1;36m[AlgoDeck] Kompilacja {problem_id}.cpp...\\e[0m"
+if ! g++ -O3 -std=c++20 "{problem_id}.cpp" -o ".algo/{problem_id}"; then
+    echo -e "\\e[1;31m❌ Błąd kompilacji!\\e[0m"
+    exit 1
+fi
+
+echo -e "\\e[1;32m✓ Skompilowano pomyślnie!\\e[0m"
+echo -e "\\e[1;33m▶ Program uruchomiony (oczekuje na dane wejściowe / cin):\\e[0m"
+echo -e "\\e[0;90m---------------------------------------------------------\\e[0m"
+
+./.algo/{problem_id}
+RET=$?
+
+echo ""
+echo -e "\\e[0;90m---------------------------------------------------------\\e[0m"
+if [ $RET -eq 0 ]; then
+    echo -e "\\e[1;32m✓ Program zakończony pomyślnie (kod wyjścia: 0).\\e[0m"
+else
+    echo -e "\\e[1;31m❌ Program zakończony z błędem (kod wyjścia: $RET).\\e[0m"
+fi
 """, encoding="utf-8")
         run_sh.chmod(0o755)
 
         # 5. Ukryty kill.sh
         kill_sh = algo_hidden_dir / "kill.sh"
         kill_sh.write_text(f"""#!/usr/bin/env bash
-pkill -9 -f "{problem_id}" 2>/dev/null
-notify-send "AlgoDeck ({problem_id})" "🛑 Zatrzymano proces {problem_id}" 2>/dev/null
+PROB="{problem_id}"
+PROB_UPPER="{problem_id.upper()}"
+
+# 1. Zabij skompilowaną binarkę programu (dokładna nazwa comm: {problem_id})
+# NIGDY nie dotyka VS Code ani powłoki systemowej!
+pgrep -x "${{PROB}}" 2>/dev/null | while read -r p; do
+    comm=$(ps -p "$p" -o comm= 2>/dev/null || true)
+    if [ "$comm" = "${{PROB}}" ]; then
+        kill -9 "$p" 2>/dev/null || true
+    fi
+done
+
+# 2. Zabij skrypty wykonawcze run.sh i test.sh dla tego konkretnego zadania
+pgrep -f "${{PROB}}/\\.algo/run\\.sh" 2>/dev/null | while read -r p; do
+    if [ "$p" != "$$" ]; then
+        kill -9 "$p" 2>/dev/null || true
+    fi
+done
+
+pgrep -f "${{PROB}}/\\.algo/test\\.sh" 2>/dev/null | while read -r p; do
+    if [ "$p" != "$$" ]; then
+        kill -9 "$p" 2>/dev/null || true
+    fi
+done
+
+# 3. Jeśli kompilator g++ wisi na błędach lub pętlach szablonów, ubij go
+pgrep -f "g\\+\\+.*${{PROB}}" 2>/dev/null | while read -r p; do
+    comm=$(ps -p "$p" -o comm= 2>/dev/null || true)
+    if [[ "$comm" == *"g++"* || "$comm" == *"cc1plus"* ]]; then
+        kill -9 "$p" 2>/dev/null || true
+    fi
+done
+
+# 4. Zamknij TYLKO dedykowane okno testów (nigdy okno z VS Code)
+wmctrl -c "AlgoDeck Testy - ${{PROB_UPPER}}" 2>/dev/null || true
+
+notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program / testy" 2>/dev/null || true
 """, encoding="utf-8")
         kill_sh.chmod(0o755)
 
-        # 6. Zapisz manifest w ukrytym katalogu
+        # 6. Ukryty .vscode/tasks.json do odpalania w terminalu VS Code
+        vscode_dir = problem_dir / ".vscode"
+        vscode_dir.mkdir(parents=True, exist_ok=True)
+        (vscode_dir / "tasks.json").write_text(json.dumps({
+            "version": "2.0.0",
+            "tasks": [
+                {
+                    "label": "AlgoDeck: ODPAL",
+                    "type": "shell",
+                    "command": f"bash ${{workspaceFolder}}/.algo/run.sh",
+                    "problemMatcher": [],
+                    "presentation": {
+                        "reveal": "always",
+                        "panel": "shared",
+                        "focus": True,
+                        "clear": True
+                    },
+                    "group": {
+                        "kind": "build",
+                        "isDefault": True
+                    }
+                }
+            ]
+        }, indent=4), encoding="utf-8")
+
+        # 7. Zapisz manifest w ukrytym katalogu
         manifest = {
             "problem_id": problem_id,
             "title": title,
@@ -137,7 +255,7 @@ notify-send "AlgoDeck ({problem_id})" "🛑 Zatrzymano proces {problem_id}" 2>/d
         }
         (algo_hidden_dir / "problem.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        # 7. Otwórz VS Code
+        # 8. Otwórz VS Code
         self.open_in_vscode(problem_dir, main_cpp)
 
         return problem_dir

@@ -41,16 +41,17 @@ class StreamDeckController:
         for i in range(15):
             self._set_key(i, label="", icon="", subtext="", status="IDLE", action="")
 
-        # Rząd 0: Nawigacja po zadaniach
-        self._set_key(0, label="POPRZ", icon="⏮️", subtext="PREV", status="IDLE", action="prev_task")
-        self._set_key(4, label="NAST", icon="⏭️", subtext="NEXT", status="IDLE", action="next_task")
-
         # Rząd 1 (ŚRODEK): 5 głównych przycisków
-        self._set_key(5, label="TESTUJ", icon="🚀", subtext="ALL", status="OK", action="run_all")
-        self._set_key(6, label="ODPAL", icon="▶️", subtext="RUN", status="DEBUG", action="run_interactive")
-        self._set_key(7, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
-        self._set_key(8, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
-        self._set_key(9, label="ZADANIE", icon="🔄", subtext="NEXT", status="IDLE", action="cycle_task")
+        # [VS CODE] [TESTUJ] [ODPAL] [KILL] [ZADANIA]
+        self._set_key(5, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
+        self._set_key(6, label="TESTUJ", icon="🚀", subtext="ALL", status="OK", action="run_all")
+        self._set_key(7, label="ODPAL", icon="▶️", subtext="RUN", status="DEBUG", action="run_interactive")
+        self._set_key(8, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
+        self._set_key(9, label="ZADANIA", icon="🔄", subtext="MENU", status="IDLE", action="open_menu")
+
+        # Rząd 2 (DÓŁ): Nawigacja estetycznymi strzałkami bez tekstu
+        self._set_key(10, label="<", icon="◀", subtext="", status="IDLE", action="prev_task")
+        self._set_key(14, label=">", icon="▶", subtext="", status="IDLE", action="next_task")
 
         self._notify_listeners()
 
@@ -156,12 +157,15 @@ class StreamDeckController:
             elif action == "run_interactive":
                 pdir = self.executor.get_problem_dir(problem_id)
                 import subprocess
-                subprocess.Popen(
-                    f'x-terminal-emulator -e bash -c \'"{pdir}/.algo/run.sh"; echo ""; read -p "Zakończono. Wciśnij Enter..."\' 2>/dev/null || bash "{pdir}/.algo/run.sh"',
-                    shell=True
-                )
+                subprocess.run(["bash", "-c", f"$HOME/.local/bin/sd_algo_run_vscode.sh '{pdir}' '{problem_id}'"], timeout=3)
                 self.update_key_status(key_index, "DEBUG", "RUNNING")
                 asyncio.create_task(self._reset_key_after_delay(key_index, "DEBUG", "RUN", 2.0))
+                result = {"success": True}
+
+            elif action == "open_menu":
+                import subprocess
+                subprocess.run(["bash", "-c", f"$HOME/.local/bin/sd_algo_switch.sh menu '{problem_id}'"], timeout=3)
+                self.update_key_status(key_index, "IDLE", "MENU")
                 result = {"success": True}
 
             elif action in ("prev_task", "next_task", "cycle_task"):
@@ -174,8 +178,11 @@ class StreamDeckController:
 
             elif action == "kill_process":
                 stopped = self.executor.kill_process(problem_id)
-                import subprocess
-                subprocess.run(["pkill", "-9", "-f", f"./{problem_id}"], timeout=2)
+                pdir = self.executor.get_problem_dir(problem_id)
+                kill_sh = pdir / ".algo" / "kill.sh"
+                if kill_sh.exists():
+                    import subprocess
+                    subprocess.run(["bash", str(kill_sh)], timeout=3)
                 self.update_key_status(key_index, "DANGER", "KILLED")
                 asyncio.create_task(self._reset_key_after_delay(key_index, "DANGER", "STOP", 1.5))
                 result = {"success": True, "stopped": stopped}

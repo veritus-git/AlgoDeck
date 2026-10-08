@@ -86,42 +86,43 @@
           </div>
           
           <div class="deck-grid-15">
-            <!-- RZĄD 0: Szybka nawigacja projektów -->
-            <button class="deck-key-sec" id="key-prev" onclick="handleStreamDeckAction('prev')">
-              <img src="icons/icon_prev_sec.png" alt="POPRZ">
-            </button>
+            <!-- RZĄD 0: PUSTY / CZYSTY -->
+            <div class="deck-key-sec empty"></div>
             <div class="deck-key-sec empty"></div>
             <div class="deck-key-sec display-center">
               <span class="active-task-glance" id="deck-task-label">CHW</span>
             </div>
             <div class="deck-key-sec empty"></div>
-            <button class="deck-key-sec" id="key-next" onclick="handleStreamDeckAction('next')">
-              <img src="icons/icon_next_sec.png" alt="NAST">
-            </button>
+            <div class="deck-key-sec empty"></div>
 
             <!-- RZĄD 1 (ŚRODEK): 5 GŁÓWNYCH PRZYCISKÓW -->
-            <button class="deck-key-sec" id="key-test" onclick="handleStreamDeckAction('test')">
-              <img src="icons/icon_test_sec.png" alt="TESTUJ">
-            </button>
-            <button class="deck-key-sec" id="key-play" onclick="handleStreamDeckAction('play')">
-              <img src="icons/icon_play_sec.png" alt="ODPAL">
-            </button>
-            <button class="deck-key-sec" id="key-kill" onclick="handleStreamDeckAction('kill')">
-              <img src="icons/icon_kill_sec.png" alt="KILL">
-            </button>
-            <button class="deck-key-sec" id="key-vscode" onclick="handleStreamDeckAction('vscode')">
+            <!-- [VS CODE] [TESTUJ] [ODPAL (ŚRODEK)] [KILL] [ZADANIA] -->
+            <button class="deck-key-sec" id="key-vscode" onclick="handleStreamDeckAction('vscode')" title="Otwórz VS Code na pełny ekran">
               <img src="icons/icon_vscode_sec.png" alt="VS CODE">
             </button>
-            <button class="deck-key-sec" id="key-task" onclick="handleStreamDeckAction('cycle')">
-              <img src="icons/icon_task_sec.png" alt="ZADANIE">
+            <button class="deck-key-sec" id="key-test" onclick="handleStreamDeckAction('test')" title="Uruchom testy w terminalu systemowym z pełnymi logami">
+              <img src="icons/icon_test_sec.png" alt="TESTUJ">
+            </button>
+            <button class="deck-key-sec" id="key-play" onclick="handleStreamDeckAction('play')" title="Odpal w terminalu VS Code">
+              <img src="icons/icon_play_sec.png" alt="ODPAL">
+            </button>
+            <button class="deck-key-sec" id="key-kill" onclick="handleStreamDeckAction('kill')" title="Zatrzymaj zapętlony program">
+              <img src="icons/icon_kill_sec.png" alt="KILL">
+            </button>
+            <button class="deck-key-sec" id="key-task" onclick="handleStreamDeckAction('menu')" title="Otwórz submenu z listą wszystkich zadań">
+              <img src="icons/icon_task_sec.png" alt="ZADANIA">
             </button>
 
-            <!-- RZĄD 2: PUSTY / CZYSTY -->
+            <!-- RZĄD 2 (DÓŁ): NAWIGACJA STRZAŁKAMI BEZ TEKSTU -->
+            <button class="deck-key-sec" id="key-prev" onclick="handleStreamDeckAction('prev')" title="Poprzednie zadanie">
+              <img src="icons/icon_arrow_left.png" alt="<">
+            </button>
             <div class="deck-key-sec empty"></div>
             <div class="deck-key-sec empty"></div>
             <div class="deck-key-sec empty"></div>
-            <div class="deck-key-sec empty"></div>
-            <div class="deck-key-sec empty"></div>
+            <button class="deck-key-sec" id="key-next" onclick="handleStreamDeckAction('next')" title="Następne zadanie">
+              <img src="icons/icon_arrow_right.png" alt=">">
+            </button>
           </div>
         </div>
 

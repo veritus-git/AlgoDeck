@@ -52,21 +52,29 @@ class GeminiAgent:
                     logger.info(f"Błąd CLI agy: {e}")
 
         # 2. Próba: google-genai z kluczem API
-        if self.api_key:
+        api_key = self.api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
+        if api_key:
             try:
                 from google import genai
                 from google.genai import types
-                client = genai.Client(api_key=self.api_key)
+                client = genai.Client(api_key=api_key)
+                logger.info(f"Wysyłam zapytanie do Gemini API ({settings.gemini_model})...")
                 response = client.models.generate_content(
                     model=settings.gemini_model,
-                    contents=raw_text,
+                    contents=f"Oto pełna treść zadania z pliku PDF:\n\n{raw_text}",
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
                         response_mime_type="application/json"
                     )
                 )
-                parsed = json.loads(response.text.strip())
-                parsed["used_engine"] = "Google GenAI API (klucz API)"
+                text = response.text.strip()
+                if text.startswith("```json"):
+                    text = text[7:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                parsed = json.loads(text.strip())
+                parsed["used_engine"] = f"Google Gemini ({settings.gemini_model})"
+                logger.info(f"Gemini API pomyślnie przeanalizowało zadanie '{parsed.get('title')}' i wygenerowało {len(parsed.get('tests', []))} testów!")
                 return parsed
             except Exception as e:
                 logger.warning(f"Błąd Gemini API: {e}")

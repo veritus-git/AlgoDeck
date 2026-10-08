@@ -22,3 +22,6 @@ test_workspace/
 # System and logs
 *.log
 .DS_Store
+.env
+*.env
+*.key

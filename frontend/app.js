@@ -217,20 +217,23 @@ async function copyInput(testId) {
 async function handleStreamDeckAction(action) {
   if (!currentProblemId && action !== 'prev' && action !== 'next') return;
 
-  if (action === 'test') {
+  if (action === 'vscode') {
+    await fetch(`/api/open-vscode/${currentProblemId}`, { method: "POST" });
+    consoleOutput.textContent = "💻 VS Code uruchomiony / zmaksymalizowany na pełny ekran.";
+  } else if (action === 'test') {
     testAll();
   } else if (action === 'play') {
-    await fetch(`/api/streamdeck/press/6`, { method: "POST" });
-    consoleOutput.textContent = "Uruchomiono program interaktywnie w terminalu...";
+    await fetch(`/api/streamdeck/press/7`, { method: "POST" });
+    consoleOutput.textContent = "▶️ Uruchomiono program w terminalu VS Code...";
   } else if (action === 'kill') {
     await fetch(`/api/kill/${currentProblemId}`, { method: "POST" });
     consoleOutput.textContent = "🛑 Zatrzymano proces (KILL).";
-  } else if (action === 'vscode') {
-    await fetch(`/api/open-vscode/${currentProblemId}`, { method: "POST" });
-    consoleOutput.textContent = "💻 VS Code uruchomiony / zmaksymalizowany na pełny ekran.";
+  } else if (action === 'menu') {
+    await fetch(`/api/streamdeck/menu`, { method: "POST" });
+    consoleOutput.textContent = "📂 Otwarto submenu zadań na Stream Decku.";
   } else if (action === 'prev') {
     await switchTask('prev');
-  } else if (action === 'next' || action === 'cycle') {
+  } else if (action === 'next') {
     await switchTask('next');
   }
 }

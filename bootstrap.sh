@@ -6,6 +6,14 @@
 
 set -e
 
+# Wyłączenie wszelkich interaktywnych zapytań o hasła/tokeny (git, keyring, debconf, pip)
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/bin/true
+export SSH_ASKPASS=/bin/true
+export PIP_NO_INPUT=1
+export DEBIAN_FRONTEND=noninteractive
+export ELECTRON_DISABLE_SECURITY_WARNINGS=1
+
 # Kolory do logowania w terminalu
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -24,6 +32,13 @@ echo " ╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚�
 echo -e "${NC}"
 echo -e "${BOLD}One-Click Bootstrap dla Fedora KDE Plasma${NC}"
 echo -e "Instalacja narzędzi C++, Stream Decka, VS Code oraz środowiska AlgoDeck...\n"
+
+# Jednorazowa weryfikacja sudo i podtrzymywanie tokenu w tle (bez ponownych pytań)
+if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
+    echo -e "${YELLOW}Weryfikacja uprawnień sudo do instalacji pakietów systemowych...${NC}"
+    sudo -v
+    while true; do sudo -n true; sleep 40; kill -0 "$$" || exit; done 2>/dev/null &
+fi
 
 # 1. Weryfikacja systemu operacyjnego
 if [ -f /etc/os-release ]; then
@@ -111,25 +126,25 @@ fi
 
 if command -v code &> /dev/null; then
     echo "Instalacja rozszerzeń C++ w VS Code..."
-    code --install-extension ms-vscode.cpptools --force || true
-    code --install-extension ms-vscode.cpptools-extension-pack --force || true
+    code --password-store="basic" --no-sandbox --install-extension ms-vscode.cpptools --force || true
+    code --password-store="basic" --no-sandbox --install-extension ms-vscode.cpptools-extension-pack --force || true
     echo -e "${GREEN}✓ VS Code i rozszerzenia C++ zainstalowane.${NC}"
 else
     echo -e "${YELLOW}Uwaga: VS Code nie został zainstalowany automatycznie.${NC}"
 fi
 
-# 5. Instalacja StreamController (Flatpak)
+# 5. Instalacja StreamController (Flatpak --user)
 echo -e "\n${CYAN}[5/8] Konfiguracja StreamControllera (oprogramowanie Stream Deck pod Linuksem)...${NC}"
 if command -v flatpak &> /dev/null; then
-    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
-    flatpak install -y flathub com.core447.StreamController || true
-    echo -e "${GREEN}✓ StreamController zainstalowany z Flathuba.${NC}"
+    # Flaga --user zapobiega jakimkolwiek pytaniom o hasła i uprawnienia Polkit
+    flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+    flatpak install --user -y flathub com.core447.StreamController || true
+    echo -e "${GREEN}✓ StreamController zainstalowany z Flathuba (tryb bezobsługowy).${NC}"
 fi
 
 # 6. Konfiguracja środowiska Python dla AlgoDeck
 echo -e "\n${CYAN}[6/8] Tworzenie środowiska Python i instalacja zależności AlgoDeck...${NC}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 INSTALL_DIR="$HOME/.local/share/algodeck"
 VENV_DIR="$INSTALL_DIR/venv"
 
@@ -137,14 +152,34 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$HOME/algodeck-workspace"
 mkdir -p "$HOME/.local/bin"
 
-# Kopiowanie plików aplikacji do ~/.local/share/algodeck jeśli instalujemy globalnie
-if [ "$PROJECT_ROOT" != "$INSTALL_DIR" ]; then
-    rsync -av --exclude='.venv' --exclude='__pycache__' "$PROJECT_ROOT/" "$INSTALL_DIR/"
+# Sprawdź, czy uruchamiamy z pełnego repozytorium, czy pobrano pojedynczy skrypt bootstrap.sh
+if [ -d "$SCRIPT_DIR/backend" ]; then
+    PROJECT_ROOT="$SCRIPT_DIR"
+    if [ "$PROJECT_ROOT" != "$INSTALL_DIR" ]; then
+        echo "Kopiowanie plików AlgoDeck do $INSTALL_DIR..."
+        rsync -av --exclude='.venv' --exclude='__pycache__' "$PROJECT_ROOT/" "$INSTALL_DIR/"
+    fi
+else
+    echo "Pobieranie plików AlgoDeck z publicznego repozytorium GitHub..."
+    if [ ! -d "$INSTALL_DIR/backend" ]; then
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/veritus-git/AlgoDeck.git "$INSTALL_DIR" 2>/dev/null || {
+            curl -fsSL https://github.com/veritus-git/AlgoDeck/archive/refs/heads/main.tar.gz | tar -xz -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || true
+        }
+    fi
 fi
 
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
-"$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+
+# Odporna instalacja zależności - sprawdza plik lub instaluje bezpośrednio
+if [ -f "$INSTALL_DIR/requirements.txt" ]; then
+    "$VENV_DIR/bin/pip" install --no-input -r "$INSTALL_DIR/requirements.txt"
+elif [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    "$VENV_DIR/bin/pip" install --no-input -r "$SCRIPT_DIR/requirements.txt"
+else
+    echo "Instalacja pakietów z PyPI..."
+    "$VENV_DIR/bin/pip" install --no-input fastapi uvicorn pydantic python-multipart pypdf pillow websockets psutil google-genai streamdeck
+fi
 echo -e "${GREEN}✓ Środowisko Python i pakiety zainstalowane.${NC}"
 
 # 7. Utworzenie skrótu CLI i wpisu w menu KDE Plasma (.desktop)
