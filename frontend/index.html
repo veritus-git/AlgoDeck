@@ -3,245 +3,125 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlgoDeck - Zautomatyzowane Środowisko Olimpijskie ze Stream Deckiem</title>
-  <meta name="description" content="Błyskawiczne środowisko do zadań ze Szkopuła, MAP i Olimpiady Informatycznej z automatyczną analizą AI i integracją ze Stream Deckiem.">
+  <title>AlgoDeck - Minimalistyczne Środowisko do Algorytmiki</title>
+  <meta name="description" content="Proste, szybkie przygotowanie zadań algorytmicznych ze wsparciem Stream Decka.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app-background">
-    <div class="glow-orb orb-1"></div>
-    <div class="glow-orb orb-2"></div>
-    <div class="glow-orb orb-3"></div>
-  </div>
-
   <div class="app-container">
-    <!-- Navbar -->
+    
+    <!-- Prosty nagłówek -->
     <header class="navbar">
-      <div class="brand-group">
-        <div class="brand-logo">
-          <span class="logo-icon">⚡</span>
-          <div class="logo-text">
-            <span class="logo-name">Algo<span class="accent-text">Deck</span></span>
-            <span class="logo-badge">OI / Szkopuł Edition</span>
-          </div>
-        </div>
+      <div class="brand-logo">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-name">Algo<span class="accent-text">Deck</span></span>
       </div>
-
       <div class="nav-status-group">
-        <div id="deck-status-badge" class="status-pill offline">
-          <span class="status-dot"></span>
-          <span id="deck-status-text">Inicjalizacja...</span>
-        </div>
-        <div id="active-task-pill" class="active-task-pill hidden">
-          <span class="task-label">Aktywne zadanie:</span>
-          <span id="active-task-name" class="task-code">---</span>
-        </div>
-        <button id="btn-open-settings" class="btn-icon" title="Ustawienia">
-          ⚙️
-        </button>
+        <span id="active-task-pill" class="status-pill hidden">Zadanie: <strong id="active-task-name">---</strong></span>
+        <button id="btn-back-main" class="btn btn-action" title="Przełącz Stream Deck na Main">🔙 Stream Deck: Main</button>
       </div>
     </header>
 
-    <!-- Main Content -->
     <main class="main-content">
       
-      <!-- Upload / Dropzone Section -->
-      <section id="upload-section" class="upload-section card glass">
+      <!-- Strefa upuszczania PDF -->
+      <section class="upload-section card glass">
         <div class="dropzone" id="pdf-dropzone">
           <input type="file" id="pdf-file-input" accept="application/pdf" hidden>
-          <div class="dropzone-content">
-            <div class="drop-icon-wrapper">
-              <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="12" y1="18" x2="12" y2="12"></line>
-                <line x1="9" y1="15" x2="15" y2="15"></line>
-              </svg>
-            </div>
-            <h1 class="dropzone-title">Przeciągnij plik PDF z zadaniem</h1>
-            <p class="dropzone-subtitle">Obsługuje Szkopuł, MAP, Olimpiadę Informatyczną oraz własne zadania</p>
-            
-            <div class="dropzone-actions">
-              <button id="btn-browse-file" class="btn btn-primary">
-                <span>Wybierz plik PDF</span>
-              </button>
-              <button id="btn-demo-task" class="btn btn-secondary">
-                <span>Załaduj zadanie demo (Koleje)</span>
-              </button>
-            </div>
+          <div class="drop-icon">📄</div>
+          <h2>Upuść plik PDF z zadaniem</h2>
+          <p class="dropzone-subtitle">lub kliknij poniżej, aby wybrać plik</p>
+          <div class="dropzone-actions">
+            <button id="btn-browse-file" class="btn btn-primary">Wybierz plik PDF</button>
+            <button id="btn-demo-task" class="btn btn-secondary">Załaduj zadanie demo (Koleje)</button>
           </div>
         </div>
 
-        <!-- Processing Stepper -->
-        <div id="pipeline-stepper" class="pipeline-stepper hidden">
-          <div class="stepper-header">
-            <span class="stepper-title">Praca Agenta AI w tle:</span>
-            <span id="stepper-status-msg" class="stepper-current-msg">Rozpoczynanie...</span>
-          </div>
-          <div class="steps-grid">
-            <div id="step-pdf" class="step-card">
-              <span class="step-icon">📄</span>
-              <span class="step-label">PDF Zapisany</span>
-            </div>
-            <div id="step-ai" class="step-card">
-              <span class="step-icon">🧠</span>
-              <span class="step-label">Analiza Gemini</span>
-            </div>
-            <div id="step-workspace" class="step-card">
-              <span class="step-icon">📁</span>
-              <span class="step-label">Szablon C++</span>
-            </div>
-            <div id="step-tests" class="step-card">
-              <span class="step-icon">🧪</span>
-              <span class="step-label">Testy & Corner</span>
-            </div>
-            <div id="step-deck" class="step-card">
-              <span class="step-icon">🎮</span>
-              <span class="step-label">Stream Deck</span>
-            </div>
-            <div id="step-vscode" class="step-card">
-              <span class="step-icon">🚀</span>
-              <span class="step-label">VS Code</span>
-            </div>
-          </div>
+        <div id="engine-info" class="engine-info hidden">
+          ℹ️ Silnik analizy: <strong id="engine-name">Lokalny parser</strong>
         </div>
       </section>
 
-      <!-- Problem Command Dashboard (Visible when task loaded) -->
+      <!-- Panel aktywnego zadania (Gdy załadowano) -->
       <section id="dashboard-section" class="dashboard-section hidden">
-        <div class="dashboard-grid">
-          
-          <!-- Left Column: Problem Details & Test Suite -->
-          <div class="dashboard-col left-col">
-            <!-- Problem Header Card -->
-            <div class="card glass problem-card">
-              <div class="problem-meta-header">
-                <div>
-                  <div class="tag-row">
-                    <span id="problem-id-tag" class="tag tag-cyan">kol</span>
-                    <span id="problem-limits-tag" class="tag tag-amber">⏱️ 1.0s | 💾 256MB</span>
-                  </div>
-                  <h2 id="problem-title" class="problem-title">Koleje</h2>
-                </div>
-                <div class="action-buttons-group">
-                  <button id="btn-open-in-vscode" class="btn btn-action" title="Otwórz w VS Code">
-                    💻 Otwórz w VS Code
-                  </button>
-                  <button id="btn-recompile" class="btn btn-action" title="Skompiluj (O3)">
-                    🔨 Kompiluj
-                  </button>
-                </div>
-              </div>
-
-              <div id="problem-summary-box" class="summary-box">
-                <span class="box-label">Sugerowane podejście & Opis:</span>
-                <p id="problem-summary-text" class="summary-text">Ładowanie opisu...</p>
-              </div>
-
-              <div class="constraints-box">
-                <span class="box-label">Ograniczenia:</span>
-                <p id="problem-constraints-text" class="constraints-text">---</p>
-              </div>
+        <div class="card glass task-card">
+          <div class="task-header-row">
+            <div>
+              <span id="problem-id-tag" class="tag tag-cyan">kol</span>
+              <h1 id="problem-title" class="problem-heading">Koleje</h1>
             </div>
-
-            <!-- Test Suite Card -->
-            <div class="card glass test-suite-card">
-              <div class="test-suite-header">
-                <div class="title-with-count">
-                  <h3 class="section-title">Zestaw Testów</h3>
-                  <span id="tests-count-badge" class="count-badge">0 testów</span>
-                </div>
-                <div class="suite-actions">
-                  <button id="btn-run-all-tests" class="btn btn-primary btn-sm">
-                    🚀 Uruchom wszystkie testy
-                  </button>
-                </div>
-              </div>
-
-              <!-- Tests List -->
-              <div id="tests-list" class="tests-list">
-                <!-- Injected via JavaScript -->
-              </div>
-            </div>
-          </div>
-
-          <!-- Right Column: Virtual Stream Deck & Live Console -->
-          <div class="dashboard-col right-col">
             
-            <!-- Stream Deck Hardware Simulator Card -->
-            <div class="card glass streamdeck-card">
-              <div class="streamdeck-header">
-                <div class="deck-branding">
-                  <span class="deck-badge">STREAM DECK</span>
-                  <span class="deck-subline">15 Klawiszy (3×5) • Synchronizacja ze sprzętem</span>
-                </div>
-                <span id="virtual-deck-indicator" class="indicator-active">LIVE</span>
-              </div>
-
-              <!-- 15-Key Interactive Grid (3 rows x 5 cols) -->
-              <div class="streamdeck-grid" id="streamdeck-grid">
-                <!-- 15 Buttons generated dynamically -->
-              </div>
+            <!-- 4 GŁÓWNE PRZYCISKI - PROSTO I NA TEMAT -->
+            <div class="primary-controls">
+              <button id="btn-test-all" class="btn btn-big-green">
+                🚀 TESTUJ WSZYSTKO (1 PRZYCISK)
+              </button>
+              <button id="btn-run" class="btn btn-action">
+                ▶️ Kompiluj i odpal
+              </button>
+              <button id="btn-kill" class="btn btn-danger">
+                🛑 STOP (KILL)
+              </button>
+              <button id="btn-vscode" class="btn btn-action">
+                💻 VS Code
+              </button>
             </div>
+          </div>
+        </div>
 
-            <!-- Live Output & Diff Inspector Card -->
-            <div class="card glass console-card">
-              <div class="console-header">
-                <span class="console-title">🖥️ Konsola / Wyniki / Diff</span>
-                <button id="btn-clear-console" class="btn-text">Wyczyść</button>
-              </div>
-              <div id="console-output" class="console-output">
-                <div class="console-placeholder">
-                  Kliknij przycisk na Stream Decku lub w tabeli testów, aby zobaczyć wynik, czas wykonania lub różnicę (diff).
-                </div>
-              </div>
-            </div>
+        <!-- Symulator Stream Decka (5 kluczowych przycisków) -->
+        <div class="card glass deck-preview-card">
+          <div class="deck-preview-title">🎮 Stream Deck (Profil zadania)</div>
+          <div class="deck-row-simple">
+            <button class="deck-key key-green" onclick="pressStreamDeckKey(0)">
+              <span class="k-icon">🚀</span>
+              <span class="k-lbl">TESTUJ</span>
+              <span class="k-sub" id="deck-status-test">ALL</span>
+            </button>
+            <button class="deck-key key-blue" onclick="pressStreamDeckKey(1)">
+              <span class="k-icon">▶️</span>
+              <span class="k-lbl">ODPAL</span>
+              <span class="k-sub">RUN</span>
+            </button>
+            <button class="deck-key key-red" onclick="pressStreamDeckKey(2)">
+              <span class="k-icon">🛑</span>
+              <span class="k-lbl">KILL</span>
+              <span class="k-sub">STOP</span>
+            </button>
+            <button class="deck-key key-purple" onclick="pressStreamDeckKey(3)">
+              <span class="k-icon">💻</span>
+              <span class="k-lbl">VS CODE</span>
+              <span class="k-sub">OPEN</span>
+            </button>
+            <button class="deck-key key-gray" onclick="pressStreamDeckKey(4)">
+              <span class="k-icon">🔙</span>
+              <span class="k-lbl">POWRÓT</span>
+              <span class="k-sub">MAIN</span>
+            </button>
+          </div>
+        </div>
 
+        <!-- Wyniki testów i konsola -->
+        <div class="card glass results-card">
+          <div class="results-header">
+            <h3>Wyniki Testów</h3>
+            <span id="test-summary-badge" class="tag tag-amber">Nieuruchomione</span>
+          </div>
+          <div id="tests-list" class="tests-list">
+            <!-- Testy wstrzykiwane dynamicznie -->
           </div>
 
+          <div class="console-box">
+            <div class="console-title">Log wykonania / Diff:</div>
+            <pre id="console-output">Gotowy. Naciśnij 'TESTUJ WSZYSTKO' lub użyj przycisku na Stream Decku.</pre>
+          </div>
         </div>
       </section>
 
     </main>
-
-    <!-- Footer -->
-    <footer class="app-footer">
-      <span>AlgoDeck v1.0 • Zoptymalizowane pod Fedorę KDE Plasma & Elgato Stream Deck</span>
-      <span class="footer-links">
-        <a href="http://127.0.0.1:8080/docs" target="_blank" class="footer-link">Dokumentacja API (Swagger)</a>
-      </span>
-    </footer>
-  </div>
-
-  <!-- Settings Modal -->
-  <div id="settings-modal" class="modal-overlay hidden">
-    <div class="modal-card card glass">
-      <div class="modal-header">
-        <h3>Ustawienia AlgoDeck</h3>
-        <button id="btn-close-settings" class="btn-icon">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="input-api-key">Klucz Gemini API (opcjonalny, gdy używasz logowania CLI):</label>
-          <input type="password" id="input-api-key" placeholder="AIzaSy...">
-          <small>Możesz także ustawić zmienną środowiskową GEMINI_API_KEY lub zalogować się przez CLI.</small>
-        </div>
-        <div class="form-group">
-          <label for="input-workspace-path">Ścieżka do katalogu roboczego zadań:</label>
-          <input type="text" id="input-workspace-path" value="~/algodeck-workspace">
-        </div>
-        <div class="form-group">
-          <label for="input-cxx-flags">Flagi kompilatora C++ (Release):</label>
-          <input type="text" id="input-cxx-flags" value="-O3 -std=c++20 -Wall -Wextra">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="btn-save-settings" class="btn btn-primary">Zapisz ustawienia</button>
-      </div>
-    </div>
   </div>
 
   <script src="app.js"></script>

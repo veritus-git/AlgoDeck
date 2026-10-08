@@ -37,49 +37,16 @@ class StreamDeckController:
         official_tests = [t for t in tests if not t.get("is_edge_case", False)]
         edge_tests = [t for t in tests if t.get("is_edge_case", False)]
 
-        # Row 1 (Index 0-4): Main Commands
-        self._set_key(0, label="BUILD", icon="🔨", subtext="O3", status="IDLE", action="compile_fast")
-        self._set_key(1, label="DEBUG", icon="🐞", subtext="ASan", status="DEBUG", action="compile_debug")
-        self._set_key(2, label="ALL", icon="🚀", subtext="TESTS", status="ACTION", action="run_all")
-        self._set_key(3, label="BENCH", icon="⏱️", subtext="SPEED", status="IDLE", action="bench_test_1")
-        self._set_key(4, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
+        # 5 minimalistycznych klawiszy (dokładnie to, o co prosił użytkownik):
+        self._set_key(0, label="TESTUJ", icon="🚀", subtext="ALL", status="OK", action="run_all")
+        self._set_key(1, label="ODPAL", icon="▶️", subtext="RUN", status="DEBUG", action="run_interactive")
+        self._set_key(2, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
+        self._set_key(3, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
+        self._set_key(4, label="POWRÓT", icon="🔙", subtext="MAIN", status="IDLE", action="back_main")
 
-        # Row 2 (Index 5-9): Official Tests & Copying
-        # Key 5: Test 1
-        t1_id = official_tests[0]["id"] if len(official_tests) > 0 else "test_1"
-        self._set_key(5, label="TEST 1", icon="🧪", subtext="RUN", status="IDLE", action=f"run_test:{t1_id}")
-
-        # Key 6: Test 2
-        t2_id = official_tests[1]["id"] if len(official_tests) > 1 else "test_2"
-        self._set_key(6, label="TEST 2", icon="🧪", subtext="RUN", status="IDLE", action=f"run_test:{t2_id}")
-
-        # Key 7: Test 3
-        t3_id = official_tests[2]["id"] if len(official_tests) > 2 else "test_3"
-        self._set_key(7, label="TEST 3", icon="🧪", subtext="RUN", status="IDLE", action=f"run_test:{t3_id}")
-
-        # Key 8: Copy In 1
-        self._set_key(8, label="COPY 1", icon="📋", subtext="CLIP", status="IDLE", action=f"copy_in:{t1_id}")
-
-        # Key 9: Copy In 2
-        self._set_key(9, label="COPY 2", icon="📋", subtext="CLIP", status="IDLE", action=f"copy_in:{t2_id}")
-
-        # Row 3 (Index 10-14): Edge cases, Stress & Navigation
-        # Key 10: Edge 1
-        e1_id = edge_tests[0]["id"] if len(edge_tests) > 0 else "edge_1"
-        self._set_key(10, label="EDGE 1", icon="⚠️", subtext="CORNER", status="IDLE", action=f"run_test:{e1_id}")
-
-        # Key 11: Edge 2
-        e2_id = edge_tests[1]["id"] if len(edge_tests) > 1 else "edge_2"
-        self._set_key(11, label="EDGE 2", icon="⚠️", subtext="CORNER", status="IDLE", action=f"run_test:{e2_id}")
-
-        # Key 12: Stress Test
-        self._set_key(12, label="STRESS", icon="⚔️", subtext="BRUTE", status="IDLE", action="toggle_stress")
-
-        # Key 13: Open VS Code
-        self._set_key(13, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
-
-        # Key 14: Switch Task
-        self._set_key(14, label=self.active_problem_id.upper(), icon="🔄", subtext="NEXT", status="IDLE", action="cycle_task")
+        # Pozostałe puste
+        for i in range(5, 15):
+            self._set_key(i, label="", icon="", subtext="", status="IDLE", action="")
 
         self._notify_listeners()
 
@@ -182,9 +149,27 @@ class StreamDeckController:
                     self.update_key_status(key_index, "TLE", "TLE")
                 result = res
 
+            elif action == "run_interactive":
+                pdir = self.executor.get_problem_dir(problem_id)
+                import subprocess
+                subprocess.Popen(
+                    f'x-terminal-emulator -e bash -c \'"{pdir}/run.sh"; echo ""; read -p "Zakończono. Wciśnij Enter..."\' 2>/dev/null || bash "{pdir}/run.sh"',
+                    shell=True
+                )
+                self.update_key_status(key_index, "DEBUG", "RUNNING")
+                asyncio.create_task(self._reset_key_after_delay(key_index, "DEBUG", "RUN", 2.0))
+                result = {"success": True}
+
+            elif action == "back_main":
+                import subprocess
+                subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_page.sh Main"], timeout=2)
+                self.update_key_status(key_index, "IDLE", "MAIN")
+                result = {"success": True}
+
             elif action == "kill_process":
                 stopped = self.executor.kill_process(problem_id)
-                self.stress_tester.stop()
+                import subprocess
+                subprocess.run(["pkill", "-9", "-f", f"./{problem_id}"], timeout=2)
                 self.update_key_status(key_index, "DANGER", "KILLED")
                 asyncio.create_task(self._reset_key_after_delay(key_index, "DANGER", "STOP", 1.5))
                 result = {"success": True, "stopped": stopped}

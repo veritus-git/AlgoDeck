@@ -7,14 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 from backend.config import settings
-from backend.workspace.templates import (
-    CPP_TEMPLATE,
-    BRUTE_CPP_TEMPLATE,
-    GEN_PY_TEMPLATE,
-    MAKEFILE_TEMPLATE,
-    VSCODE_TASKS_TEMPLATE,
-    VSCODE_LAUNCH_TEMPLATE,
-)
+from backend.workspace.templates import CPP_TEMPLATE, MAKEFILE_TEMPLATE
 
 logger = logging.getLogger("algodeck.workspace")
 
@@ -25,19 +18,16 @@ class WorkspaceBuilder:
 
     def create_problem_workspace(self, analysis: Dict[str, Any], original_pdf: Path = None) -> Path:
         """
-        Builds complete competitive programming workspace for a given problem:
-        - Creates folder <workspace>/<problem_id>/
-        - Generates Olympic C++ template
-        - Generates Brute force template & random test generator
-        - Writes all test cases to tests/ (in and out files)
-        - Configures Makefile & VS Code settings
-        - Copies problem statement PDF
-        - Automatically launches VS Code
+        Tworzy minimalistyczny, czysty katalog dla zadania:
+        - <problem_id>.cpp (czysty szablon bez śmieci)
+        - tests/ (in i out dla każdego testu)
+        - test.sh (jednym kliknięciem kompiluje, odpala i sprawdza wszystko)
+        - run.sh (kompiluje i odpala)
+        - kill.sh (ubija proces w razie nieskończonej pętli)
+        - otwiera VS Code
         """
         problem_id = analysis.get("problem_id", "zad").lower()
         title = analysis.get("title", problem_id)
-        time_limit = analysis.get("time_limit_sec", 1.0)
-        memory_limit = analysis.get("memory_limit_mb", 256)
 
         problem_dir = self.base_dir / problem_id
         problem_dir.mkdir(parents=True, exist_ok=True)
@@ -45,123 +35,118 @@ class WorkspaceBuilder:
         tests_dir = problem_dir / "tests"
         tests_dir.mkdir(parents=True, exist_ok=True)
 
-        vscode_dir = problem_dir / ".vscode"
-        vscode_dir.mkdir(parents=True, exist_ok=True)
-
-        # 1. Main C++ source file
+        # 1. Czysty plik źródłowy C++
         main_cpp = problem_dir / f"{problem_id}.cpp"
         if not main_cpp.exists():
-            cpp_content = (
-                CPP_TEMPLATE
-                .replace("__TITLE__", str(title))
-                .replace("__PROBLEM_ID__", str(problem_id))
-                .replace("__TIME_LIMIT__", str(time_limit))
-                .replace("__MEMORY_LIMIT__", str(memory_limit))
-            )
-            main_cpp.write_text(cpp_content, encoding="utf-8")
+            main_cpp.write_text(CPP_TEMPLATE, encoding="utf-8")
 
-        # 2. Brute-force template (for stress-testing)
-        brute_cpp = problem_dir / "brute.cpp"
-        if not brute_cpp.exists():
-            brute_cpp.write_text(
-                BRUTE_CPP_TEMPLATE.format(
-                    title=title,
-                    problem_id=problem_id
-                ),
-                encoding="utf-8"
-            )
-
-        # 3. Test generator script
-        gen_py = problem_dir / "gen.py"
-        if not gen_py.exists():
-            gen_py.write_text(
-                GEN_PY_TEMPLATE.format(
-                    title=title,
-                    problem_id=problem_id
-                ),
-                encoding="utf-8"
-            )
-            # Make executable
-            gen_py.chmod(0o755)
-
-        # 4. Makefile
-        makefile = problem_dir / "Makefile"
-        makefile.write_text(
-            MAKEFILE_TEMPLATE.format(problem_id=problem_id),
-            encoding="utf-8"
-        )
-
-        # 5. VS Code configurations
-        tasks_json = vscode_dir / "tasks.json"
-        tasks_json.write_text(
-            VSCODE_TASKS_TEMPLATE.format(problem_id=problem_id),
-            encoding="utf-8"
-        )
-
-        launch_json = vscode_dir / "launch.json"
-        launch_json.write_text(
-            VSCODE_LAUNCH_TEMPLATE.format(problem_id=problem_id),
-            encoding="utf-8"
-        )
-
-        # 6. Save tests to files
+        # 2. Zapisz testy do tests/
         tests: List[Dict[str, Any]] = analysis.get("tests", [])
         saved_tests = []
         for i, test in enumerate(tests, 1):
-            prefix = "edge" if test.get("is_edge_case") else "test"
-            in_filename = f"{prefix}_{i}.in"
-            out_filename = f"{prefix}_{i}.out"
-
-            in_path = tests_dir / in_filename
-            out_path = tests_dir / out_filename
+            t_id = f"test_{i}"
+            in_path = tests_dir / f"{t_id}.in"
+            out_path = tests_dir / f"{t_id}.out"
 
             in_path.write_text(test.get("input", "").strip() + "\n", encoding="utf-8")
             out_path.write_text(test.get("expected_output", "").strip() + "\n", encoding="utf-8")
 
             saved_tests.append({
-                "id": f"{prefix}_{i}",
+                "id": t_id,
                 "name": test.get("name", f"Test {i}"),
-                "in_file": in_filename,
-                "out_file": out_filename,
-                "is_edge_case": test.get("is_edge_case", False),
-                "description": test.get("description", "")
+                "in_file": f"{t_id}.in",
+                "out_file": f"{t_id}.out"
             })
 
-        # 7. Copy PDF if provided
+        # 3. test.sh - Skrypt JEDNEGO PRZYCISKU (kompiluje, odpala, diffuje)
+        test_sh = problem_dir / "test.sh"
+        test_sh.write_text(f"""#!/usr/bin/env bash
+cd "{problem_dir.resolve()}"
+echo -e "\\e[1;36m[AlgoDeck] Kompilacja {problem_id}.cpp...\\e[0m"
+g++ -O3 -std=c++20 "{problem_id}.cpp" -o "{problem_id}" || {{
+    notify-send -u critical "AlgoDeck ({problem_id})" "Błąd kompilacji!" 2>/dev/null
+    exit 1
+}}
+
+ALL_OK=true
+echo -e "\\e[1;36m[AlgoDeck] Uruchamianie testów...\\e[0m"
+for in_file in tests/*.in; do
+    [ -e "$in_file" ] || continue
+    base=$(basename "$in_file" .in)
+    out_file="tests/$base.out"
+    
+    start=$(date +%s%N)
+    ./{problem_id} < "$in_file" > "/tmp/{problem_id}_out.tmp" 2>/dev/null
+    ret=$?
+    end=$(date +%s%N)
+    diff_ms=$(( (end - start) / 1000000 ))
+
+    if [ $ret -ne 0 ]; then
+        echo -e "\\e[1;31m[$base] RTE / BŁĄD WYKONANIA ($diff_ms ms)\\e[0m"
+        ALL_OK=false
+        continue
+    fi
+
+    if [ -f "$out_file" ] && [ -s "$out_file" ]; then
+        if diff -B -w -u "$out_file" "/tmp/{problem_id}_out.tmp" > "/tmp/{problem_id}_diff.tmp"; then
+            echo -e "\\e[1;32m[$base] OK ($diff_ms ms)\\e[0m"
+        else
+            echo -e "\\e[1;31m[$base] WA / BŁĄD ODPOWIEDZI ($diff_ms ms)\\e[0m"
+            cat "/tmp/{problem_id}_diff.tmp" | head -n 10
+            ALL_OK=false
+        fi
+    else
+        echo -e "\\e[1;34m[$base] WYKONANO ($diff_ms ms)\\e[0m"
+        cat "/tmp/{problem_id}_out.tmp"
+    fi
+done
+
+if [ "$ALL_OK" = true ]; then
+    notify-send -u normal "AlgoDeck ({problem_id})" "🎉 Wszystkie testy zaliczone!" 2>/dev/null
+else
+    notify-send -u critical "AlgoDeck ({problem_id})" "❌ Błąd w testach! Sprawdź terminal." 2>/dev/null
+fi
+""", encoding="utf-8")
+        test_sh.chmod(0o755)
+
+        # 4. run.sh - Kompiluje i odpala interaktywnie
+        run_sh = problem_dir / "run.sh"
+        run_sh.write_text(f"""#!/usr/bin/env bash
+cd "{problem_dir.resolve()}"
+g++ -O3 -std=c++20 "{problem_id}.cpp" -o "{problem_id}" && ./{problem_id}
+""", encoding="utf-8")
+        run_sh.chmod(0o755)
+
+        # 5. kill.sh - Natychmiastowe ubicie pętli
+        kill_sh = problem_dir / "kill.sh"
+        kill_sh.write_text(f"""#!/usr/bin/env bash
+pkill -9 -f "./{problem_id}" 2>/dev/null
+echo "Urzędujący proces {problem_id} zatrzymany."
+notify-send "AlgoDeck ({problem_id})" "🛑 Zatrzymano proces {problem_id}" 2>/dev/null
+""", encoding="utf-8")
+        kill_sh.chmod(0o755)
+
+        # 6. Kopia PDF jeśli dostępna
         if original_pdf and original_pdf.exists():
             shutil.copy2(original_pdf, problem_dir / "statement.pdf")
 
-        # 8. problem.json metadata manifest
-        problem_manifest = {
+        # 7. Metadata manifest
+        manifest = {
             "problem_id": problem_id,
             "title": title,
-            "time_limit_sec": time_limit,
-            "memory_limit_mb": memory_limit,
-            "summary": analysis.get("summary", ""),
-            "input_format": analysis.get("input_format", ""),
-            "output_format": analysis.get("output_format", ""),
-            "constraints": analysis.get("constraints", ""),
-            "recommended_approach": analysis.get("recommended_approach", ""),
             "tests": saved_tests,
-            "workspace_path": str(problem_dir.resolve()),
-            "source_file": str(main_cpp.resolve())
+            "workspace_path": str(problem_dir.resolve())
         }
-        (problem_dir / "problem.json").write_text(
-            json.dumps(problem_manifest, indent=2, ensure_ascii=False),
-            encoding="utf-8"
-        )
+        (problem_dir / "problem.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        # 9. Auto-launch VS Code
-        if settings.auto_launch_vscode:
-            self.open_in_vscode(problem_dir, main_cpp)
+        # 8. Automatycznie otwórz w VS Code
+        self.open_in_vscode(problem_dir, main_cpp)
 
-        logger.info(f"Problem workspace generated at {problem_dir}")
         return problem_dir
 
     def open_in_vscode(self, problem_dir: Path, source_file: Path):
-        """Launches VS Code with the workspace and source file open."""
+        """Otwiera VS Code z osobnym folderem zadania."""
         try:
-            # Check if 'code' command is in PATH
             if shutil.which("code"):
                 subprocess.Popen(
                     ["code", str(problem_dir), str(source_file)],
@@ -169,8 +154,5 @@ class WorkspaceBuilder:
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-                logger.info("Launched Visual Studio Code.")
-            else:
-                logger.warning("'code' executable not found in PATH. Skipping auto-launch.")
         except Exception as e:
-            logger.warning(f"Failed to auto-launch VS Code: {e}")
+            logger.warning(f"Błąd otwierania VS Code: {e}")

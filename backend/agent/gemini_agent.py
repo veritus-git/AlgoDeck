@@ -1,7 +1,8 @@
 import json
 import logging
 import os
-import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -14,70 +15,62 @@ logger = logging.getLogger("algodeck.agent")
 class GeminiAgent:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
-        self.client = None
-        self._init_client()
-
-    def _init_client(self):
-        """Initializes Google GenAI client if credentials are available."""
-        try:
-            from google import genai
-            if self.api_key:
-                self.client = genai.Client(api_key=self.api_key)
-            else:
-                # Check for Google Application Default Credentials or system account login
-                try:
-                    self.client = genai.Client()
-                except Exception:
-                    self.client = None
-        except Exception as e:
-            logger.warning(f"Could not initialize google-genai client: {e}")
-            self.client = None
 
     def analyze_pdf(self, pdf_path: Path) -> Dict[str, Any]:
         """
-        Analyzes a problem statement PDF using Gemini.
-        Falls back smoothly to heuristic parsing if API/network is unavailable.
+        Analizuje treść PDF:
+        1. Jeśli w systemie działa zalogowane CLI (agy lub gemini), używa go bezpośrednio.
+        2. Jeśli podano klucz API, używa google-genai SDK.
+        3. W przeciwnym razie używa wbudowanego, niezawodnego parsera heurystycznego.
         """
         raw_text = PDFParser.extract_text(pdf_path)
-        
-        # If Gemini client is ready, query Gemini model
-        if self.client:
+
+        # 1. Próba: Zalogowane systemowe CLI (agy)
+        agy_bin = shutil.which("agy") or shutil.which("gemini")
+        if agy_bin:
             try:
+                logger.info(f"Próba wywołania systemowego CLI: {agy_bin}...")
+                prompt = f"{SYSTEM_PROMPT}\n\nOto treść zadania z PDF:\n{raw_text[:4000]}"
+                proc = subprocess.run(
+                    [agy_bin, "-p", prompt],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    text = proc.stdout.strip()
+                    if text.startswith("```json"):
+                        text = text[7:]
+                    if text.endswith("```"):
+                        text = text[:-3]
+                    parsed = json.loads(text.strip())
+                    parsed["used_engine"] = "Gemini CLI (agy) - zalogowane konto"
+                    return parsed
+            except Exception as e:
+                logger.info(f"CLI agy niedostępne bez interakcji: {e}")
+
+        # 2. Próba: google-genai z kluczem API
+        if self.api_key:
+            try:
+                from google import genai
                 from google.genai import types
-                
-                logger.info("Sending problem statement to Gemini AI...")
-                # We can supply both raw text and PDF bytes for optimal fidelity
-                pdf_bytes = PDFParser.extract_bytes(pdf_path)
-                
-                parts = [
-                    types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-                    types.Part.from_text(text=f"Przeanalizuj to zadanie z Olimpiady Informatycznej / Szkopuła.\n\nTreść tekstowa zadania:\n{raw_text}")
-                ]
-                
-                response = self.client.models.generate_content(
+                client = genai.Client(api_key=self.api_key)
+                response = client.models.generate_content(
                     model=settings.gemini_model,
-                    contents=parts,
+                    contents=raw_text,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
                         response_mime_type="application/json"
                     )
                 )
-                
-                response_text = response.text.strip()
-                # Clean up any potential markdown formatting
-                if response_text.startswith("```json"):
-                    response_text = response_text[7:]
-                if response_text.endswith("```"):
-                    response_text = response_text[:-3]
-                response_text = response_text.strip()
-                
-                parsed_json = json.loads(response_text)
-                logger.info(f"Successfully received analysis from Gemini: {parsed_json.get('title')}")
-                return parsed_json
+                parsed = json.loads(response.text.strip())
+                parsed["used_engine"] = "Google GenAI API (klucz API)"
+                return parsed
             except Exception as e:
-                logger.error(f"Gemini AI analysis failed or timed out: {e}. Falling back to heuristic extractor.")
-        else:
-            logger.info("No Gemini credentials provided. Utilizing high-accuracy heuristic parser.")
+                logger.warning(f"Błąd Gemini API: {e}")
 
-        # Heuristic fallback
-        return PDFParser.parse_heuristics(raw_text)
+        # 3. Zawsze niezawodny parser heurystyczny
+        fallback = PDFParser.parse_heuristics(raw_text)
+        fallback["used_engine"] = "Wbudowany parser heurystyczny (lokalny, offline)"
+        return fallback

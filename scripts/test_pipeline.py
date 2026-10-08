@@ -8,6 +8,7 @@ exec python3 "$0" "$@"
 
 import sys
 import json
+import os
 from pathlib import Path
 
 from backend.agent.pdf_parser import PDFParser
@@ -41,23 +42,25 @@ def main():
     print(f"   -> Katalog utworzony: {pdir}")
     assert (pdir / f"{analysis['problem_id']}.cpp").exists()
     assert (pdir / "problem.json").exists()
-    assert (pdir / "Makefile").exists()
-    assert (pdir / ".vscode" / "tasks.json").exists()
+    assert (pdir / "test.sh").exists()
+    assert (pdir / "run.sh").exists()
+    assert (pdir / "kill.sh").exists()
 
-    print("\n3. Konfiguracja Stream Decka (15 klawiszy)...")
+    print("\n3. Konfiguracja Stream Decka (5 kluczowych przycisków)...")
     executor = TestExecutor(workspace_dir=test_workspace_dir)
     controller = StreamDeckController(executor)
     controller.set_active_problem(analysis["problem_id"])
     print(f"   -> Aktywne zadanie: {controller.active_problem_id}")
-    print(f"   -> Klawisze Stream Decka skonfigurowane:")
-    for idx, k in enumerate(controller.keys_state):
-        print(f"      [{idx:02d}] {k.get('icon', ' ')} {k.get('label'):<8} | status: {k.get('status'):<8} | action: {k.get('action')}")
+    for idx in range(5):
+        k = controller.keys_state[idx]
+        print(f"      [{idx}] {k.get('icon')} {k.get('label'):<8} | {k.get('subtext'):<6} | akcja: {k.get('action')}")
 
-    print("\n4. Generowanie profilu dla StreamController (Linuks)...")
+    print("\n4. Zapisywanie strony bezpośrednio do StreamControllera...")
     bridge = StreamControllerBridge(workspace_dir=test_workspace_dir)
-    page_cfg = bridge.generate_page_for_problem(analysis["problem_id"], analysis)
-    print(f"   -> Utworzono profil StreamController: {page_cfg.get('name')}")
-    assert (pdir / f"{analysis['problem_id']}_streamcontroller.json").exists()
+    bridge.generate_page_for_problem(analysis["problem_id"], analysis)
+    sc_page = Path(os.path.expanduser("~/.var/app/com.core447.StreamController/data/pages")) / f"{analysis['problem_id'].upper()}.json"
+    print(f"   -> Strona StreamControllera: {sc_page}")
+    assert sc_page.exists()
 
     print("\n5. Renderowanie obrazów LCD (PIL 72x72 px)...")
     img = ButtonRenderer.render_key(
