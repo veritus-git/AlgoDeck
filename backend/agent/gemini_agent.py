@@ -25,30 +25,31 @@ class GeminiAgent:
         """
         raw_text = PDFParser.extract_text(pdf_path)
 
-        # 1. Próba: Zalogowane systemowe CLI (agy)
-        agy_bin = shutil.which("agy") or shutil.which("gemini")
-        if agy_bin:
-            try:
-                logger.info(f"Próba wywołania systemowego CLI: {agy_bin}...")
-                prompt = f"{SYSTEM_PROMPT}\n\nOto treść zadania z PDF:\n{raw_text[:4000]}"
-                proc = subprocess.run(
-                    [agy_bin, "-p", prompt],
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if proc.returncode == 0 and proc.stdout.strip():
-                    text = proc.stdout.strip()
-                    if text.startswith("```json"):
-                        text = text[7:]
-                    if text.endswith("```"):
-                        text = text[:-3]
-                    parsed = json.loads(text.strip())
-                    parsed["used_engine"] = "Gemini CLI (agy) - zalogowane konto"
-                    return parsed
-            except Exception as e:
-                logger.info(f"CLI agy niedostępne bez interakcji: {e}")
+        # 1. Próba: Zalogowane systemowe CLI (tylko gdy użytkownik jawnie włączy USE_AGY_CLI=1)
+        if os.getenv("USE_AGY_CLI") == "1":
+            agy_bin = shutil.which("agy") or shutil.which("gemini")
+            if agy_bin:
+                try:
+                    logger.info("Wywołuję systemowe CLI agy...")
+                    prompt = f"{SYSTEM_PROMPT}\n\nOto treść zadania z PDF:\n{raw_text[:4000]}"
+                    proc = subprocess.run(
+                        [agy_bin, "-p", prompt],
+                        stdin=subprocess.DEVNULL,
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if proc.returncode == 0 and proc.stdout.strip():
+                        text = proc.stdout.strip()
+                        if text.startswith("```json"):
+                            text = text[7:]
+                        if text.endswith("```"):
+                            text = text[:-3]
+                        parsed = json.loads(text.strip())
+                        parsed["used_engine"] = "Gemini CLI (agy)"
+                        return parsed
+                except Exception as e:
+                    logger.info(f"Błąd CLI agy: {e}")
 
         # 2. Próba: google-genai z kluczem API
         if self.api_key:
