@@ -53,15 +53,28 @@ class WorkspaceBuilder:
             t_id = f"test_{i}"
             in_path = tests_dir / f"{t_id}.in"
             out_path = tests_dir / f"{t_id}.out"
+            tag_path = tests_dir / f"{t_id}.tag"
 
             in_path.write_text(test.get("input", "").strip() + "\n", encoding="utf-8")
             out_path.write_text(test.get("expected_output", "").strip() + "\n", encoding="utf-8")
+
+            is_edge = test.get("is_edge_case", False)
+            is_verified = test.get("is_verified", False)
+            if not is_edge:
+                tag = "[OFICJALNY Z TREŚCI]"
+            elif is_verified:
+                tag = "[AI: WYROCZNIA PYTHON ✓]"
+            else:
+                tag = "[AI: GENEROWANY]"
+            tag_path.write_text(tag, encoding="utf-8")
 
             saved_tests.append({
                 "id": t_id,
                 "name": test.get("name", f"Test {i}"),
                 "in_file": f"{t_id}.in",
-                "out_file": f"{t_id}.out"
+                "out_file": f"{t_id}.out",
+                "is_edge_case": is_edge,
+                "tag": tag
             })
 
         # 3. Ukryty test.sh - Pełny log w oknie terminala (Wejście, Wyjście, Diff, Czasy)
@@ -84,7 +97,7 @@ fi
 echo -e "\\e[1;32m✓ Skompilowano pomyślnie!\\e[0m"
 echo ""
 
-echo -e "\\e[1;33m[2/2] Uruchamianie oficjalnych testów...\\e[0m"
+echo -e "\\e[1;33m[2/2] Uruchamianie testów...\\e[0m"
 ALL_OK=true
 TEST_COUNT=0
 
@@ -94,9 +107,11 @@ for in_file in $(ls -1 .algo/tests/*.in 2>/dev/null | sort -V); do
     base=$(basename "$in_file" .in)
     out_file=".algo/tests/$base.out"
     my_out=".algo/tests/$base.my"
+    tag_file=".algo/tests/$base.tag"
+    tag_text=$(cat "$tag_file" 2>/dev/null || echo "")
     
     echo -e "\\e[1;34m-----------------------------------------------------\\e[0m"
-    echo -e "\\e[1;35m▶ TEST: $base\\e[0m"
+    echo -e "\\e[1;35m▶ TEST: $base \\e[0;90m$tag_text\\e[0m"
     echo -e "\\e[0;36m[DANE WEJŚCIOWE (INPUT)]:\\e[0m"
     cat "$in_file"
     echo ""
@@ -143,12 +158,31 @@ if [ "$ALL_OK" = true ]; then
     notify-send "AlgoDeck ({problem_id})" "✅ Wszystkie testy zaliczone!" 2>/dev/null
 else
     echo -e "\\e[1;31m❌ ZNALEZIONO BŁĘDY W TESTACH!\\e[0m"
+    echo -e "\\e[0;33m💡 Wskazówka: Jeśli Twój program jest poprawny, a test AI ma błędny wzorzec,\\e[0m"
+    echo -e "\\e[0;33m   możesz zatwierdzić swoje wyjście: bash .algo/accept.sh <nazwa_testu>\\e[0m"
     notify-send -u critical "AlgoDeck ({problem_id})" "❌ Błąd w testach (WA)!" 2>/dev/null
 fi
 echo ""
 read -p "Naciśnij Enter, aby zamknąć okno testów..."
 """, encoding="utf-8")
         test_sh.chmod(0o755)
+
+        # 3b. Skrypt pomocniczy accept.sh do szybkiej akceptacji własnego wyniku
+        accept_sh = algo_hidden_dir / "accept.sh"
+        accept_sh.write_text("""#!/usr/bin/env bash
+TEST_NAME="${1:-}"
+if [ -z "$TEST_NAME" ]; then
+    echo "Użycie: bash .algo/accept.sh <nazwa_testu> (np. test_7)"
+    exit 1
+fi
+if [ -f ".algo/tests/$TEST_NAME.my" ]; then
+    cp ".algo/tests/$TEST_NAME.my" ".algo/tests/$TEST_NAME.out"
+    echo "✓ Zaktualizowano oczekiwany wzorzec dla $TEST_NAME wyjściem Twojego programu!"
+else
+    echo "Błąd: Brak pliku .algo/tests/$TEST_NAME.my (najpierw uruchom testy!)"
+fi
+""", encoding="utf-8")
+        accept_sh.chmod(0o755)
 
         # 4. Ukryty run.sh
         run_sh = algo_hidden_dir / "run.sh"

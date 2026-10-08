@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -47,7 +48,7 @@ class GeminiAgent:
                             text = text[:-3]
                         parsed = json.loads(text.strip())
                         parsed["used_engine"] = "Gemini CLI (agy)"
-                        return parsed
+                        return self._verify_and_compute_tests(parsed)
                 except Exception as e:
                     logger.info(f"Błąd CLI agy: {e}")
 
@@ -74,6 +75,7 @@ class GeminiAgent:
                     text = text[:-3]
                 parsed = json.loads(text.strip())
                 parsed["used_engine"] = f"Google Gemini ({settings.gemini_model})"
+                parsed = self._verify_and_compute_tests(parsed)
                 logger.info(f"Gemini API pomyślnie przeanalizowało zadanie '{parsed.get('title')}' i wygenerowało {len(parsed.get('tests', []))} testów!")
                 return parsed
             except Exception as e:
@@ -83,3 +85,68 @@ class GeminiAgent:
         fallback = PDFParser.parse_heuristics(raw_text)
         fallback["used_engine"] = "Wbudowany parser heurystyczny (lokalny, offline)"
         return fallback
+
+    @staticmethod
+    def _verify_and_compute_tests(parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Weryfikuje i wylicza poprawne 'expected_output' dla wszystkich testów przy użyciu
+        dostarczonego kodu 'python_reference_solution' (Python Oracle).
+        Gwarantuje brak halucynacji LLM na wynikach testów.
+        """
+        py_solution = parsed.get("python_reference_solution")
+        tests = parsed.get("tests", [])
+        if not tests or not py_solution or not isinstance(py_solution, str):
+            return parsed
+
+        py_code = py_solution.strip()
+        if not py_code:
+            return parsed
+
+        def run_oracle(inp: str) -> Optional[str]:
+            try:
+                res = subprocess.run(
+                    [sys.executable, "-c", py_code],
+                    input=inp,
+                    capture_output=True,
+                    text=True,
+                    timeout=3
+                )
+                if res.returncode == 0:
+                    return res.stdout.rstrip("\r\n")
+            except Exception as ex:
+                logger.debug(f"Błąd uruchomienia wyroczni: {ex}")
+            return None
+
+        # 1. Sprawdź, czy wyrocznia przechodzi oficjalne przykłady
+        official_tests = [t for t in tests if not t.get("is_edge_case", False)]
+        oracle_verified = True
+        if official_tests:
+            for ot in official_tests:
+                inp = ot.get("input", "")
+                exp = ot.get("expected_output", "").strip()
+                computed = run_oracle(inp)
+                if computed is None:
+                    oracle_verified = False
+                    break
+                norm_comp = "\n".join(l.rstrip() for l in computed.splitlines())
+                norm_exp = "\n".join(l.rstrip() for l in exp.splitlines())
+                if norm_comp != norm_exp:
+                    logger.warning(f"Wyrocznia Pythona nie zgadza się z oficjalnym przykładem '{ot.get('name')}'! Oczekiwano: {norm_exp[:50]}..., wyrocznia dała: {norm_comp[:50]}...")
+                    oracle_verified = False
+                    break
+
+        if oracle_verified:
+            logger.info("✓ Wyrocznia Pythona zweryfikowana z oficjalnymi przykładami! Przeliczam testy brzegowe...")
+            for t in tests:
+                if t.get("is_edge_case", False):
+                    inp = t.get("input", "")
+                    computed = run_oracle(inp)
+                    if computed is not None:
+                        t["expected_output"] = computed
+                        t["is_verified"] = True
+                        desc = t.get("description", "")
+                        t["description"] = f"{desc} (zweryfikowany wyrocznią Python)".strip()
+        else:
+            logger.warning("Wyrocznia Pythona nie przeszła testów oficjalnych – zachowano oryginalne dane.")
+
+        return parsed
