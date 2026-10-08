@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Compiled C++ binaries
+*.out
+*.exe
+*_debug
+kol
+test_workspace/
+
+# System and logs
+*.log
+.DS_Store
