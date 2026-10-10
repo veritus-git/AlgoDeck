@@ -439,7 +439,8 @@ async def import_task(
 
     # 5. Konfiguracja Stream Decka
     streamdeck_controller.set_active_problem(final_id)
-    streamcontroller_bridge.generate_page_for_problem(final_id, analysis)
+    streamcontroller_bridge.sync_all_problems()
+    streamcontroller_bridge.switch_to_page(final_id)
 
     await ws_manager.broadcast({
         "type": "PIPELINE_STEP",
@@ -507,7 +508,8 @@ async def create_manual(payload: Dict[str, Any] = Body(...)):
 
     problem_dir = workspace_builder.create_problem_workspace(analysis)
     streamdeck_controller.set_active_problem(problem_id)
-    streamcontroller_bridge.generate_page_for_problem(problem_id, analysis)
+    streamcontroller_bridge.sync_all_problems()
+    streamcontroller_bridge.switch_to_page(problem_id)
 
     await ws_manager.broadcast({
         "type": "PIPELINE_STEP",
@@ -605,8 +607,6 @@ def delete_problem(problem_id: str):
 def set_active_problem(problem_id: str):
     pid = problem_id.lower()
     streamdeck_controller.set_active_problem(pid)
-    manifest = executor.get_manifest(pid)
-    streamcontroller_bridge.generate_page_for_problem(pid, manifest)
     pdir = executor.get_problem_dir(pid)
     main_cpp = pdir / f"{pid}.cpp"
     workspace_builder.open_in_vscode(pdir, main_cpp)

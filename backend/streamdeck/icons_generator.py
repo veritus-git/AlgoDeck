@@ -2,10 +2,27 @@ import os
 import shutil
 import textwrap
 from pathlib import Path
+import cairo
 from PIL import Image, ImageDraw, ImageFont
 
 ICONS_DIR = Path.home() / ".var/app/com.core447.StreamController/data/custom_icons"
 WORKSPACE_FRONTEND = Path(__file__).resolve().parent.parent.parent / "frontend" / "icons"
+
+def _save_cairo_surf(surf: cairo.ImageSurface, filename: str) -> Path:
+    ICONS_DIR.mkdir(parents=True, exist_ok=True)
+    WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
+    p1 = ICONS_DIR / filename
+    p2 = WORKSPACE_FRONTEND / filename
+    surf.write_to_png(str(p1))
+    surf.write_to_png(str(p2))
+    return p1
+
+def _new_cairo_surface():
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 144, 144)
+    cr = cairo.Context(surf)
+    cr.set_source_rgb(0, 0, 0)
+    cr.paint()
+    return surf, cr
 
 def _get_font(size: int) -> ImageFont.ImageFont:
     """Wyszukuje systemowy font TrueType bez potrzeby dodatkowych instalacji."""
@@ -25,18 +42,17 @@ def _get_font(size: int) -> ImageFont.ImageFont:
             except Exception:
                 pass
     return ImageFont.load_default()
+
 SCALE = 4
-SIZE_HI = 144 * SCALE  # 576
+SIZE_HI = 144 * SCALE
 SIZE_FINAL = (144, 144)
 
 def _create_canvas_hi():
-    """Tworzy czarne płótno 4x wysokiej rozdzielczości (576x576) do supersamplingu."""
     img = Image.new("RGBA", (SIZE_HI, SIZE_HI), (0, 0, 0, 255))
     draw = ImageDraw.Draw(img)
     return img, draw
 
 def _downsample(img: Image.Image) -> Image.Image:
-    """Downsampling z 576x576 do 144x144 z użyciem filtru Lanczosa dla idealnej ostrości bez rozmycia."""
     return img.resize(SIZE_FINAL, resample=Image.Resampling.LANCZOS)
 
 def generate_letter_icon(char: str) -> Path:
@@ -47,151 +63,178 @@ def generate_letter_icon(char: str) -> Path:
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
 
-    img, draw = _create_canvas_hi()
     clean_char = (char or "?").upper()[:1]
-    font = _get_font(84 * SCALE)
-    # Czysty, wyrazisty biały kolor
-    draw.text((288, 272), clean_char, fill=(255, 255, 255, 255), font=font, anchor="mm")
-
-    final_img = _downsample(img)
-
     filename = f"letter_{clean_char.lower()}.png"
     p1 = ICONS_DIR / filename
     p2 = WORKSPACE_FRONTEND / filename
+
+    if p1.exists():
+        return p1
+
+    img, draw = _create_canvas_hi()
+    font = _get_font(84 * SCALE)
+    draw.text((288, 272), clean_char, fill=(255, 255, 255, 255), font=font, anchor="mm")
+
+    final_img = _downsample(img)
     final_img.save(p1, format="PNG")
     final_img.save(p2, format="PNG")
     return p1
 
-def generate_equals_icon() -> Image.Image:
-    """Dwa poziome paski '=' na czarnym tle (#000000) wypełniające klawisze 1 i 5 górnego rzędu."""
-    img, draw = _create_canvas_hi()
-    c_white = (226, 232, 240, 255)
-    draw.rounded_rectangle((160, 216, 416, 256), radius=16, fill=c_white)
-    draw.rounded_rectangle((160, 320, 416, 360), radius=16, fill=c_white)
-    return _downsample(img)
+def generate_all_alphabet_letters():
+    """Pre-generuje cały polski alfabet (A-Z + Ą, Ć, Ę, itd.) oraz cyfry."""
+    chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZĄĆĘŁŃÓŚŹŻ0123456789_-"
+    for ch in chars:
+        generate_letter_icon(ch)
 
-def generate_vscode_icon() -> Image.Image:
-    """Czysty geometryczny symbol kodu: < / > na czarnym tle (#000000)."""
-    img, draw = _create_canvas_hi()
-    c_cyan = (56, 189, 248, 255)
-    c_slash = (148, 163, 184, 255)
-    
-    # Lewy nawias <
-    draw.line([(168, 288), (240, 192)], fill=c_cyan, width=32)
-    draw.line([(168, 288), (240, 384)], fill=c_cyan, width=32)
-    draw.ellipse([152, 272, 184, 304], fill=c_cyan)
-    draw.ellipse([224, 176, 256, 208], fill=c_cyan)
-    draw.ellipse([224, 368, 256, 400], fill=c_cyan)
-
-    # Ukośnik /
-    draw.line([(272, 400), (304, 176)], fill=c_slash, width=28)
-    draw.ellipse([258, 386, 286, 414], fill=c_slash)
-    draw.ellipse([290, 162, 318, 190], fill=c_slash)
-
-    # Prawy nawias >
-    draw.line([(408, 288), (336, 192)], fill=c_cyan, width=32)
-    draw.line([(408, 288), (336, 384)], fill=c_cyan, width=32)
-    draw.ellipse([392, 272, 424, 304], fill=c_cyan)
-    draw.ellipse([320, 176, 352, 208], fill=c_cyan)
-    draw.ellipse([320, 368, 352, 400], fill=c_cyan)
-
-    return _downsample(img)
-
-def generate_test_icon() -> Image.Image:
+def generate_equals_icon() -> Path:
     """
-    Ujednolicony geometryczny symbol testów: wyrazisty checkmark ✓
-    o stałej grubości, z idealnie wypełnionym i zaokrąglonym narożnikiem bez wycięć.
+    Subtelny akcent '=': lekko przyciemniony szary (#64748b),
+    mniejszy rozmiar i ostre krawędzie 90°.
     """
-    img, draw = _create_canvas_hi()
-    c_emerald = (16, 185, 129, 255)
+    surf, cr = _new_cairo_surface()
+    cr.set_source_rgb(100/255, 116/255, 139/255)  # #64748b slate-500
+    cr.rectangle(53, 60, 38, 6)
+    cr.rectangle(53, 78, 38, 6)
+    cr.fill()
+    return _save_cairo_surf(surf, "icon_equals.png")
 
-    p1 = (144, 304)
-    p2 = (240, 400)
-    p3 = (436, 164)
-    w = 56
-    r = w // 2
+def generate_plus_icon() -> Path:
+    """
+    Duży, geometryczny i idealnie wyśrodkowany '+' w jasnoszarym odcieniu (#e2e8f0).
+    Wielkość (56x56 px) jest ujednolicona z pozostałymi ikonami środkowego rzędu.
+    """
+    surf, cr = _new_cairo_surface()
+    cr.set_source_rgb(226/255, 232/255, 240/255)  # #e2e8f0 jasny szary
+    cr.rectangle(44, 67, 56, 10)
+    cr.rectangle(67, 44, 10, 56)
+    cr.fill()
+    return _save_cairo_surf(surf, "icon_plus.png")
 
-    draw.line([p1, p2], fill=c_emerald, width=w)
-    draw.line([p2, p3], fill=c_emerald, width=w)
-    # Końcówki
-    draw.ellipse([p1[0]-r, p1[1]-r, p1[0]+r, p1[1]+r], fill=c_emerald)
-    draw.ellipse([p3[0]-r, p3[1]-r, p3[0]+r, p3[1]+r], fill=c_emerald)
-    # Wierzchołek z pełnym promieniem miter (zerowe wycięcia czy braki px)
-    draw.ellipse([p2[0]-38, p2[1]-38, p2[0]+38, p2[1]+38], fill=c_emerald)
+def generate_test_icon() -> Path:
+    """
+    Wektorowy zielony tick ✓ z ostrym wierzchołkiem (miter join)
+    oraz prostokątnymi końcówkami (square cap).
+    """
+    surf, cr = _new_cairo_surface()
+    cr.set_line_width(13.0)
+    cr.set_line_cap(cairo.LINE_CAP_SQUARE)
+    cr.set_line_join(cairo.LINE_JOIN_MITER)
+    cr.set_miter_limit(10.0)
+    cr.set_source_rgb(16/255, 185/255, 129/255)  # Emerald #10b981
+    cr.move_to(40, 72)
+    cr.line_to(62, 94)
+    cr.line_to(104, 52)
+    cr.stroke()
+    return _save_cairo_surf(surf, "icon_test_sec.png")
 
-    return _downsample(img)
+def generate_play_icon() -> Path:
+    """Czysty geometryczny zielony trójkąt Play ▶ (54x54 px) z ostrymi rogami."""
+    surf, cr = _new_cairo_surface()
+    cr.set_source_rgb(34/255, 197/255, 94/255)  # Green #22c55e
+    cr.set_line_join(cairo.LINE_JOIN_MITER)
+    cr.set_miter_limit(10.0)
+    cr.move_to(48, 45)
+    cr.line_to(102, 72)
+    cr.line_to(48, 99)
+    cr.close_path()
+    cr.fill()
+    return _save_cairo_surf(surf, "icon_play_sec.png")
 
-def generate_play_icon() -> Image.Image:
-    """Czysty, geometryczny zielony trójkąt Play ▶ na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_hi()
-    c_green = (34, 197, 94, 255)
-    pts = [(192, 150), (432, 288), (192, 426)]
-    draw.polygon(pts, fill=c_green)
-    return _downsample(img)
+def generate_kill_icon() -> Path:
+    """Czysty geometryczny czerwony kwadrat Stop ⏹ (54x54 px) z ostrymi kątami."""
+    surf, cr = _new_cairo_surface()
+    cr.set_source_rgb(239/255, 68/255, 68/255)  # Red #ef4444
+    cr.rectangle(45, 45, 54, 54)
+    cr.fill()
+    return _save_cairo_surf(surf, "icon_kill_sec.png")
 
-def generate_kill_icon() -> Image.Image:
-    """Czysty, geometryczny czerwony kwadrat Stop ⏹ na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_hi()
-    c_red = (239, 68, 68, 255)
-    draw.rounded_rectangle((160, 160, 416, 416), radius=32, fill=c_red)
-    return _downsample(img)
+def generate_menu_icon() -> Path:
+    """Czyste, geometryczne 4 kwadraty ⊞ (54x54 px) z ostrymi rogami."""
+    surf, cr = _new_cairo_surface()
+    cr.set_source_rgb(129/255, 140/255, 248/255)  # Indigo #818cf8
+    cr.rectangle(45, 45, 23, 23)
+    cr.rectangle(76, 45, 23, 23)
+    cr.rectangle(45, 76, 23, 23)
+    cr.rectangle(76, 76, 23, 23)
+    cr.fill()
+    return _save_cairo_surf(surf, "icon_task_sec.png")
 
-def generate_menu_icon() -> Image.Image:
-    """Czyste, geometryczne 4 kwadraciki ⊞ (Zadania/Galeria) na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_hi()
-    c_indigo = (129, 140, 248, 255)
-    draw.rounded_rectangle((152, 152, 272, 272), radius=24, fill=c_indigo)
-    draw.rounded_rectangle((304, 152, 424, 272), radius=24, fill=c_indigo)
-    draw.rounded_rectangle((152, 304, 272, 424), radius=24, fill=c_indigo)
-    draw.rounded_rectangle((304, 304, 424, 424), radius=24, fill=c_indigo)
-    return _downsample(img)
+def generate_arrow_left_icon(disabled: bool = False) -> Path:
+    """Kompaktowy szewron ‹ (~30 px) dopasowany do skali znaku '='."""
+    surf, cr = _new_cairo_surface()
+    cr.set_line_width(7.0)
+    cr.set_line_cap(cairo.LINE_CAP_SQUARE)
+    cr.set_line_join(cairo.LINE_JOIN_MITER)
+    cr.set_miter_limit(10.0)
+    if disabled:
+        cr.set_source_rgb(51/255, 65/255, 85/255)  # #334155
+        filename = "icon_arrow_left_disabled.png"
+    else:
+        cr.set_source_rgb(1.0, 1.0, 1.0)  # #ffffff
+        filename = "icon_arrow_left.png"
+    cr.move_to(79, 57)
+    cr.line_to(64, 72)
+    cr.line_to(79, 87)
+    cr.stroke()
+    return _save_cairo_surf(surf, filename)
 
-def generate_arrow_left_icon() -> Image.Image:
-    """Minimalistyczny szewron w lewo ‹ z idealnym, pełnym wierzchołkiem bez braków px."""
-    img, draw = _create_canvas_hi()
-    c_slate = (203, 213, 225, 255)
-    draw.line([(352, 160), (224, 288)], fill=c_slate, width=38)
-    draw.line([(224, 288), (352, 416)], fill=c_slate, width=38)
-    draw.ellipse([224-27, 288-27, 224+27, 288+27], fill=c_slate)
-    draw.ellipse([352-19, 160-19, 352+19, 160+19], fill=c_slate)
-    draw.ellipse([352-19, 416-19, 352+19, 416+19], fill=c_slate)
-    return _downsample(img)
+def generate_arrow_right_icon(disabled: bool = False) -> Path:
+    """Kompaktowy szewron › (~30 px) dopasowany do skali znaku '='."""
+    surf, cr = _new_cairo_surface()
+    cr.set_line_width(7.0)
+    cr.set_line_cap(cairo.LINE_CAP_SQUARE)
+    cr.set_line_join(cairo.LINE_JOIN_MITER)
+    cr.set_miter_limit(10.0)
+    if disabled:
+        cr.set_source_rgb(51/255, 65/255, 85/255)  # #334155
+        filename = "icon_arrow_right_disabled.png"
+    else:
+        cr.set_source_rgb(1.0, 1.0, 1.0)  # #ffffff
+        filename = "icon_arrow_right.png"
+    cr.move_to(65, 57)
+    cr.line_to(80, 72)
+    cr.line_to(65, 87)
+    cr.stroke()
+    return _save_cairo_surf(surf, filename)
 
-def generate_arrow_right_icon() -> Image.Image:
-    """Minimalistyczny szewron w prawo › z idealnym, pełnym wierzchołkiem bez braków px."""
-    img, draw = _create_canvas_hi()
-    c_slate = (203, 213, 225, 255)
-    draw.line([(224, 160), (352, 288)], fill=c_slate, width=38)
-    draw.line([(352, 288), (224, 416)], fill=c_slate, width=38)
-    draw.ellipse([352-27, 288-27, 352+27, 288+27], fill=c_slate)
-    draw.ellipse([224-19, 160-19, 224+19, 160+19], fill=c_slate)
-    draw.ellipse([224-19, 416-19, 224+19, 416+19], fill=c_slate)
-    return _downsample(img)
+def generate_arrow_back_icon() -> Path:
+    """Geometryczna strzałka ← z ostrym grotem miter dla widoku menu."""
+    surf, cr = _new_cairo_surface()
+    cr.set_line_width(11.0)
+    cr.set_line_cap(cairo.LINE_CAP_SQUARE)
+    cr.set_line_join(cairo.LINE_JOIN_MITER)
+    cr.set_miter_limit(10.0)
+    cr.set_source_rgb(203/255, 213/255, 225/255)  # Slate-300 #cbd5e1
+    cr.move_to(68, 46)
+    cr.line_to(42, 72)
+    cr.line_to(68, 98)
+    cr.stroke()
+    cr.move_to(44, 72)
+    cr.line_to(102, 72)
+    cr.stroke()
+    return _save_cairo_surf(surf, "icon_arrow_back.png")
 
-def generate_arrow_back_icon() -> Image.Image:
-    """Minimalistyczna geometryczna strzałka powrotu ← z idealnym grotem bez braków px."""
-    img, draw = _create_canvas_hi()
-    c_slate = (203, 213, 225, 255)
-    # Trzon
-    draw.line([(168, 288), (416, 288)], fill=c_slate, width=38)
-    # Skrzydła
-    draw.line([(168, 288), (276, 180)], fill=c_slate, width=38)
-    draw.line([(168, 288), (276, 396)], fill=c_slate, width=38)
-    # Zaokrąglenia i pełny grot
-    draw.ellipse([168-27, 288-27, 168+27, 288+27], fill=c_slate)
-    draw.ellipse([416-19, 288-19, 416+19, 288+19], fill=c_slate)
-    draw.ellipse([276-19, 180-19, 276+19, 180+19], fill=c_slate)
-    draw.ellipse([276-19, 396-19, 276+19, 396+19], fill=c_slate)
-    return _downsample(img)
+def generate_vscode_icon() -> Path:
+    """Ikona kodu zachowana dla wstecznej kompatybilności."""
+    surf, cr = _new_cairo_surface()
+    cr.set_line_width(9.0)
+    cr.set_line_cap(cairo.LINE_CAP_SQUARE)
+    cr.set_line_join(cairo.LINE_JOIN_MITER)
+    cr.set_miter_limit(10.0)
+    cr.set_source_rgb(56/255, 189/255, 248/255)
+    cr.move_to(56, 52); cr.line_to(38, 72); cr.line_to(56, 92); cr.stroke()
+    cr.move_to(88, 52); cr.line_to(106, 72); cr.line_to(88, 92); cr.stroke()
+    cr.set_source_rgb(148/255, 163/255, 184/255)
+    cr.move_to(64, 96); cr.line_to(80, 48); cr.stroke()
+    return _save_cairo_surf(surf, "icon_vscode_sec.png")
 
 # ----------------- KAFLE ZADAŃ W GALERII (ALGO_MENU) -----------------
 def generate_task_button_icon(problem_id: str, title: str, is_active: bool = False) -> Path:
     """
-    Kafel zadania do widoku zadań (ALGO_MENU) - pozostawiony dokładnie 1:1 tak jak jest,
-    zgodnie z życzeniem użytkownika (pełna nazwa, elegancka ramka i wskaźnik).
+    Kafel zadania do widoku zadań (ALGO_MENU) - generowany dynamicznie tylko w ICONS_DIR,
+    bez zaśmiecania repozytorium gita.
     """
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
-    WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
 
     clean_title = (title or problem_id).upper().strip()
     words = clean_title.split()
@@ -229,41 +272,29 @@ def generate_task_button_icon(problem_id: str, title: str, is_active: bool = Fal
         draw.text((72, 72), lines[1], fill=(255, 255, 255, 255), font=font, anchor="mm")
         draw.text((72, 102), lines[2], fill=(255, 255, 255, 255), font=font, anchor="mm")
 
-    png_target1 = ICONS_DIR / f"task_{problem_id.lower()}.png"
-    png_target2 = WORKSPACE_FRONTEND / f"task_{problem_id.lower()}.png"
-    img.save(png_target1, format="PNG")
-    img.save(png_target2, format="PNG")
-    return png_target1
+    png_target = ICONS_DIR / f"task_{problem_id.lower()}.png"
+    img.save(png_target, format="PNG")
+    return png_target
 
 def generate_all_base_icons():
-    """Generuje komplet czystych geometrycznych ikon akcji na czarnym tle w 4x SSAA."""
+    """Generuje komplet czystych ostrych wektorowych ikon akcji oraz alfabet."""
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
 
-    icons_map = {
-        "icon_vscode_sec.png": generate_vscode_icon(),
-        "icon_test_sec.png": generate_test_icon(),
-        "icon_play_sec.png": generate_play_icon(),
-        "icon_kill_sec.png": generate_kill_icon(),
-        "icon_task_sec.png": generate_menu_icon(),
-        "icon_arrow_left.png": generate_arrow_left_icon(),
-        "icon_arrow_right.png": generate_arrow_right_icon(),
-        "icon_arrow_back.png": generate_arrow_back_icon(),
-        "icon_equals.png": generate_equals_icon(),
-    }
-
-    for name, img in icons_map.items():
-        dst1 = ICONS_DIR / name
-        dst2 = WORKSPACE_FRONTEND / name
-        img.save(dst1, format="PNG")
-        img.save(dst2, format="PNG")
-
-    for name, img in icons_map.items():
-        dst1 = ICONS_DIR / name
-        dst2 = WORKSPACE_FRONTEND / name
-        img.save(dst1, format="PNG")
-        img.save(dst2, format="PNG")
+    generate_test_icon()
+    generate_play_icon()
+    generate_kill_icon()
+    generate_menu_icon()
+    generate_equals_icon()
+    generate_plus_icon()
+    generate_arrow_left_icon(disabled=False)
+    generate_arrow_left_icon(disabled=True)
+    generate_arrow_right_icon(disabled=False)
+    generate_arrow_right_icon(disabled=True)
+    generate_arrow_back_icon()
+    generate_vscode_icon()
+    generate_all_alphabet_letters()
 
 if __name__ == "__main__":
     generate_all_base_icons()
-    print("Wygenerowano geometryczne ikony na czarnym tle.")
+    print("Wygenerowano ujednolicone ostre ikony oraz alfabet.")

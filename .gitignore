@@ -25,3 +25,7 @@ test_workspace/
 .env
 *.env
 *.key
+
+# Stream Deck runtime dynamic icons
+frontend/icons/task_*
+frontend/icons/badge_*

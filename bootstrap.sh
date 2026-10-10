@@ -348,7 +348,18 @@ gdbus call --session --dest com.core447.StreamController --object-path /com/core
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_menu_back.sh"
 
-# 7f. Skrypt uruchamiający przeglądarkę z wczytanym rozszerzeniem AlgoDeck
+# 7f. Skrypt sd_algo_new_task.sh (Okno modalne dodawania nowego zadania)
+cat > "$HOME/.local/bin/sd_algo_new_task.sh" << 'EOF'
+#!/usr/bin/env bash
+SCRIPT="$HOME/.local/share/algodeck/scripts/add_task_dialog.py"
+if [ ! -f "$SCRIPT" ]; then
+    SCRIPT="/home/linux/.gemini/antigravity-ide/scratch/algodeck/scripts/add_task_dialog.py"
+fi
+DISPLAY=:0 python3 "$SCRIPT" >/dev/null 2>&1 &
+EOF
+chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
+
+# 7g. Skrypt uruchamiający przeglądarkę z wczytanym rozszerzeniem AlgoDeck
 cat > "$HOME/.local/bin/algodeck-browser" << EOF
 #!/usr/bin/env bash
 EXT_DIR="$INSTALL_DIR/extension"
