@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import logging
 import os
@@ -600,8 +601,181 @@ def delete_problem(problem_id: str):
             streamcontroller_bridge.switch_to_page(new_active)
         else:
             streamdeck_controller.set_active_problem("")
+            streamcontroller_bridge.switch_to_page("ALGO_IDLE")
 
     return {"success": True, "deleted": pid}
+
+@app.post("/api/problems/{problem_id}/add-tests")
+async def add_tests_to_problem(
+    problem_id: str,
+    file: UploadFile = File(...)
+):
+    """
+    Dodaje zestaw testów (z pliku ZIP) do istniejącego zadania w workspace.
+    Aktualizuje .algo/tests/, problem.json oraz regeneruje .algo/test.sh.
+    """
+    pid = problem_id.lower().strip()
+    pdir = settings.workspace_dir / pid
+    if not pdir.exists() or not pdir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Zadanie '{pid}' nie istnieje w workspace.")
+
+    algo_dir = pdir / ".algo"
+    tests_dir = algo_dir / "tests"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Plik ZIP jest pusty.")
+
+    try:
+        parsed = ZipParser.parse_zip(io.BytesIO(content))
+    except Exception as e:
+        logger.error(f"Błąd rozpakowywania ZIP dla {pid}: {e}")
+        raise HTTPException(status_code=400, detail=f"Błąd czytania archiwum ZIP: {e}")
+
+    new_tests = parsed.get("tests", [])
+    if not new_tests:
+        raise HTTPException(status_code=400, detail="Nie znaleziono testów (.in / .out) w pliku ZIP.")
+
+    # Wczytaj istniejący manifest problem.json
+    manifest_path = algo_dir / "problem.json"
+    manifest: Dict[str, Any] = {}
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+
+    existing_tests = manifest.get("tests", [])
+    existing_ids = {t.get("id") for t in existing_tests}
+
+    added_count = 0
+    for t in new_tests:
+        tid = t.get("id") or f"test_{len(existing_tests) + 1}"
+        in_p = tests_dir / f"{tid}.in"
+        out_p = tests_dir / f"{tid}.out"
+        tag_p = tests_dir / f"{tid}.tag"
+
+        in_p.write_text(t.get("input", "").strip() + "\n", encoding="utf-8")
+        if t.get("expected_output"):
+            out_p.write_text(t.get("expected_output", "").strip() + "\n", encoding="utf-8")
+        tag_p.write_text(t.get("tag", "[PAKIET TESTÓW ZIP]"), encoding="utf-8")
+
+        if tid not in existing_ids:
+            existing_tests.append({
+                "id": tid,
+                "name": t.get("name", tid),
+                "in_file": f"{tid}.in",
+                "out_file": f"{tid}.out" if t.get("expected_output") else "",
+                "tag": t.get("tag", "[PAKIET TESTÓW ZIP]")
+            })
+            existing_ids.add(tid)
+            added_count += 1
+
+    manifest["tests"] = existing_tests
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # Zregeneruj .algo/test.sh
+    time_limit = float(manifest.get("time_limit_sec", 1.0))
+    title = manifest.get("title", pid.upper())
+    WorkspaceBuilder.generate_test_script(pdir, pid, title, time_limit)
+
+    # Odśwież widok StreamControllera
+    try:
+        streamcontroller_bridge.sync_all_problems()
+    except Exception as e:
+        logger.warning(f"Błąd sync_all_problems: {e}")
+
+    return {
+        "success": True,
+        "problem_id": pid,
+        "tests_added": added_count,
+        "total_tests": len(existing_tests),
+        "message": f"Pomyślnie dodano {added_count} testów do zadania {pid.upper()}!"
+    }
+
+@app.post("/api/auto-import-pdf")
+async def auto_import_pdf(payload: Dict[str, Any] = Body(...)):
+    """
+    Automatyczny import pliku PDF pobranego przez przeglądarkę.
+    Odczytuje plik z dysku, tworzy workspace lub przygotowuje metadane.
+    """
+    file_path_str = payload.get("file_path", "").strip()
+    if not file_path_str:
+        raise HTTPException(status_code=400, detail="Brak ścieżki pliku (file_path).")
+
+    pdf_path = Path(file_path_str).expanduser().resolve()
+    if not pdf_path.exists() or not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Plik PDF nie istnieje: {pdf_path}")
+
+    try:
+        text = PDFParser.extract_text(pdf_path)
+        pdf_info = PDFParser.parse_heuristics(text)
+    except Exception as e:
+        logger.error(f"Błąd parsowania PDF {pdf_path}: {e}")
+        raise HTTPException(status_code=400, detail=f"Nie udało się odczytać pliku PDF: {e}")
+
+    # Zapisz w stagingu
+    STAGING_DIR.mkdir(parents=True, exist_ok=True)
+    staged_pdf = STAGING_DIR / "staged_pdf.pdf"
+    shutil.copy2(pdf_path, staged_pdf)
+
+    # Przygotuj metadane
+    pid = payload.get("problem_id") or pdf_info.get("problem_id") or pdf_path.stem.lower()
+    pid = re.sub(r'[^a-zA-Z0-9_-]', '', pid.lower()) or "zad"
+    title = payload.get("title") or pdf_info.get("title") or pid.capitalize()
+    time_limit = float(payload.get("time_limit") or pdf_info.get("time_limit_sec") or 1.0)
+    memory_limit = int(payload.get("memory_limit") or pdf_info.get("memory_limit_mb") or 128)
+    tests = pdf_info.get("tests", [])
+
+    meta = {
+        "problem_id": pid,
+        "title": title,
+        "time_limit_sec": time_limit,
+        "memory_limit_mb": memory_limit,
+        "pdf_filename": pdf_path.name,
+        "pdf_size": pdf_path.stat().st_size
+    }
+    (STAGING_DIR / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    auto_create = payload.get("auto_create", False)
+    if auto_create:
+        analysis = {
+            "problem_id": pid,
+            "title": title,
+            "time_limit_sec": time_limit,
+            "memory_limit_mb": memory_limit,
+            "tests": tests
+        }
+        problem_dir = workspace_builder.create_problem_workspace(analysis)
+        streamdeck_controller.set_active_problem(pid)
+        streamcontroller_bridge.sync_all_problems()
+        streamcontroller_bridge.switch_to_page(pid)
+
+        # Wyczyść staging
+        staged_pdf.unlink(missing_ok=True)
+        (STAGING_DIR / "staged_zip.zip").unlink(missing_ok=True)
+        (STAGING_DIR / "meta.json").unlink(missing_ok=True)
+
+        return {
+            "success": True,
+            "created": True,
+            "problem_id": pid,
+            "title": title,
+            "workspace_dir": str(problem_dir),
+            "tests_count": len(tests)
+        }
+
+    return {
+        "success": True,
+        "created": False,
+        "problem_id": pid,
+        "title": title,
+        "time_limit_sec": time_limit,
+        "memory_limit_mb": memory_limit,
+        "tests_count": len(tests),
+        "pdf_filename": pdf_path.name
+    }
 
 @app.post("/api/set-active/{problem_id}")
 def set_active_problem(problem_id: str):

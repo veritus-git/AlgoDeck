@@ -214,6 +214,51 @@ def generate_arrow_back_icon() -> Path:
     cr.stroke()
     return _save_cairo_surf(surf, "icon_arrow_back.png")
 
+def generate_settings_icon() -> Path:
+    """Czysty geometryczny trybik / ustawienia ⚙ na czarnym tle."""
+    import math
+    surf, cr = _new_cairo_surface()
+    cx, cy = 72, 72
+    cr.set_source_rgb(203/255, 213/255, 225/255)  # Slate-300
+
+    # 6 zębów na zewnątrz
+    cr.set_line_width(9.0)
+    cr.set_line_cap(cairo.LINE_CAP_SQUARE)
+    for i in range(6):
+        a = i * (2 * math.pi / 6)
+        cr.move_to(cx + 20 * math.cos(a), cy + 20 * math.sin(a))
+        cr.line_to(cx + 33 * math.cos(a), cy + 33 * math.sin(a))
+        cr.stroke()
+
+    # Korpus pierścienia
+    cr.set_line_width(12.0)
+    cr.arc(cx, cy, 20, 0, 2 * math.pi)
+    cr.stroke()
+
+    # Wewnętrzny otwór
+    cr.set_source_rgb(0, 0, 0)
+    cr.arc(cx, cy, 9, 0, 2 * math.pi)
+    cr.fill()
+
+    return _save_cairo_surf(surf, "icon_settings.png")
+
+def generate_task_number_icon(index: int, total: int) -> Path:
+    """Generuje minimalistyczny numer zadania w formacie '1/3'."""
+    filename = f"task_num_{index}_{total}.png"
+    p1 = ICONS_DIR / filename
+    p2 = WORKSPACE_FRONTEND / filename
+    if p1.exists():
+        return p1
+
+    img, draw = _create_canvas_hi()
+    text = f"{index}/{total}" if total > 0 else f"{index}"
+    font = _get_font(38 * SCALE)
+    draw.text((288, 280), text, fill=(226, 232, 240, 255), font=font, anchor="mm")
+    final_img = _downsample(img)
+    final_img.save(p1, format="PNG")
+    final_img.save(p2, format="PNG")
+    return p1
+
 def generate_vscode_icon() -> Path:
     """Ikona kodu zachowana dla wstecznej kompatybilności."""
     surf, cr = _new_cairo_surface()
@@ -287,6 +332,7 @@ def generate_all_base_icons():
     generate_menu_icon()
     generate_equals_icon()
     generate_plus_icon()
+    generate_settings_icon()
     generate_arrow_left_icon(disabled=False)
     generate_arrow_left_icon(disabled=True)
     generate_arrow_right_icon(disabled=False)

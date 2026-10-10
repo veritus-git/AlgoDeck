@@ -263,7 +263,45 @@ fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_run_vscode.sh"
 
-# 7d. Skrypt sd_algo_switch.sh (Przełączanie zadań i galerii)
+# 7d. Skrypt sd_algo_test_vscode.sh (Wbudowany terminal VS Code: Ctrl+Alt+E)
+cat > "$HOME/.local/bin/sd_algo_test_vscode.sh" << 'EOF'
+#!/usr/bin/env bash
+PDIR="$1"
+PROB="$2"
+
+WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB" | awk '{print $1}' | head -n 1)
+if [ -z "$WID" ]; then
+    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+fi
+
+if [ -z "$WID" ]; then
+    code "$PDIR" "$PDIR/$PROB.cpp" &
+    sleep 0.8
+    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+fi
+
+if [ -n "$WID" ]; then
+    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+    sleep 0.1
+    DISPLAY=:0 xdotool key --window "$WID" --clearmodifiers ctrl+alt+e 2>/dev/null || true
+fi
+EOF
+chmod +x "$HOME/.local/bin/sd_algo_test_vscode.sh"
+
+# 7e. Skrypt sd_algo_panel.sh (Panel kontrolny AlgoDeck / Ustawienia)
+cat > "$HOME/.local/bin/sd_algo_panel.sh" << 'EOF'
+#!/usr/bin/env bash
+WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck" | awk '{print $1}' | head -n 1)
+
+if [ -n "$WID" ]; then
+    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+else
+    google-chrome --app="http://127.0.0.1:8080" --window-size=460,680 >/dev/null 2>&1 &
+fi
+EOF
+chmod +x "$HOME/.local/bin/sd_algo_panel.sh"
+
+# 7f. Skrypt sd_algo_switch.sh (Przełączanie zadań i galerii)
 cat > "$HOME/.local/bin/sd_algo_switch.sh" << 'EOF'
 #!/usr/bin/env bash
 set -e
@@ -273,6 +311,7 @@ CURRENT="${2:-}"
 WORKSPACE="$HOME/algodeck-workspace"
 SERIAL="A00SA6042JGA63"
 
+# Zbierz listę wszystkich zadań
 PROJECTS=()
 for dir in "$WORKSPACE"/*; do
     [ -d "$dir" ] || continue
@@ -284,9 +323,14 @@ for dir in "$WORKSPACE"/*; do
 done
 
 if [ ${#PROJECTS[@]} -eq 0 ]; then
-    notify-send "AlgoDeck" "Brak zapisanych zadań w workspace." 2>/dev/null || true
+    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
+    notify-send "AlgoDeck" "Brak zadań w workspace. Przełączono na ekran zachęty." 2>/dev/null || true
     exit 0
 fi
+
+# Posortuj alfabetycznie
+IFS=$'\n' PROJECTS=($(sort <<<"${PROJECTS[*]}"))
+unset IFS
 
 if [ "$ACTION" = "menu" ]; then
     if [ -n "$CURRENT" ]; then
@@ -332,23 +376,39 @@ if [ -f "$HOME/.local/bin/sd_algo_code.sh" ]; then
     "$HOME/.local/bin/sd_algo_code.sh" "$WORKSPACE/$TARGET" "$WORKSPACE/$TARGET/$TARGET.cpp" >/dev/null 2>&1 || true
 fi
 
-notify-send -u low "AlgoDeck" "📂 Aktywne zadanie: $TARGET_UPPER" 2>/dev/null || true
+notify-send -u low "AlgoDeck" "📂 Zadanie: $TARGET_UPPER" 2>/dev/null || true
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_switch.sh"
 
-# 7e. Skrypt sd_algo_menu_back.sh
+# 7g. Skrypt sd_algo_menu_back.sh
 cat > "$HOME/.local/bin/sd_algo_menu_back.sh" << 'EOF'
 #!/usr/bin/env bash
 SERIAL="A00SA6042JGA63"
-TARGET="AKC"
+WORKSPACE="$HOME/algodeck-workspace"
+TARGET=""
 if [ -f /tmp/algodeck_active_task.txt ]; then
-    TARGET=$(cat /tmp/algodeck_active_task.txt)
+    TARGET=$(cat /tmp/algodeck_active_task.txt 2>/dev/null || echo "")
 fi
+if [ -z "$TARGET" ]; then
+    for dir in "$WORKSPACE"/*; do
+        [ -d "$dir" ] || continue
+        bname=$(basename "$dir")
+        [ "$bname" = "tests" ] && continue
+        if [ -f "$dir/$bname.cpp" ] || [ -d "$dir/.algo" ]; then
+            TARGET=$(echo "$bname" | tr '[:lower:]' '[:upper:]')
+            break
+        fi
+    done
+fi
+if [ -z "$TARGET" ]; then
+    TARGET="ALGO_IDLE"
+fi
+
 gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "$TARGET" >/dev/null 2>&1 || true
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_menu_back.sh"
 
-# 7f. Skrypt sd_algo_new_task.sh (Okno modalne dodawania nowego zadania)
+# 7h. Skrypt sd_algo_new_task.sh (Okno modalne dodawania nowego zadania)
 cat > "$HOME/.local/bin/sd_algo_new_task.sh" << 'EOF'
 #!/usr/bin/env bash
 SCRIPT="$HOME/.local/share/algodeck/scripts/add_task_dialog.py"
@@ -359,7 +419,34 @@ DISPLAY=:0 python3 "$SCRIPT" >/dev/null 2>&1 &
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
 
-# 7g. Skrypt uruchamiający przeglądarkę z wczytanym rozszerzeniem AlgoDeck
+# 7i. Skróty klawiszowe VS Code (Ctrl+Alt+R dla Run, Ctrl+Alt+E dla Test)
+python3 -c '
+import json, os
+p = os.path.expanduser("~/.config/Code/User/keybindings.json")
+try:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            kb = json.load(f)
+    except Exception:
+        kb = []
+    
+    keys = {item.get("key") for item in kb}
+    changed = False
+    if "ctrl+alt+r" not in keys:
+        kb.append({"key": "ctrl+alt+r", "command": "workbench.action.terminal.sendSequence", "args": {"text": "clear && bash .algo/run.sh\r"}})
+        changed = True
+    if "ctrl+alt+e" not in keys:
+        kb.append({"key": "ctrl+alt+e", "command": "workbench.action.terminal.sendSequence", "args": {"text": "clear && bash .algo/test.sh\r"}})
+        changed = True
+    if changed:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(kb, f, indent=4)
+except Exception:
+    pass
+' 2>/dev/null || true
+
+# 7j. Skrypt uruchamiający przeglądarkę z wczytanym rozszerzeniem AlgoDeck
 cat > "$HOME/.local/bin/algodeck-browser" << EOF
 #!/usr/bin/env bash
 EXT_DIR="$INSTALL_DIR/extension"

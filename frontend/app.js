@@ -68,8 +68,86 @@ document.addEventListener("DOMContentLoaded", () => {
 
   checkDaemonHealth();
   loadStagedState();
+  checkAutoPdfParam();
   setInterval(checkDaemonHealth, 3000);
 });
+
+async function checkAutoPdfParam() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const autoPdf = urlParams.get("auto_pdf");
+  if (!autoPdf) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auto-import-pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_path: autoPdf, auto_create: false })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const tabImportBtn = document.querySelector('[data-tab="tab-import"]');
+    if (tabImportBtn) tabImportBtn.click();
+
+    const importPane = document.getElementById("tab-import");
+    const existingBanner = document.getElementById("auto-pdf-banner");
+    if (existingBanner) existingBanner.remove();
+
+    const banner = document.createElement("div");
+    banner.id = "auto-pdf-banner";
+    banner.className = "auto-pdf-banner";
+    const filename = data.pdf_filename || "zadanie.pdf";
+    const code = (data.problem_id || "zad").toUpperCase();
+    banner.innerHTML = `
+      <div class="auto-pdf-header">
+        <span class="auto-pdf-title">⚡ Wykryto pobrany PDF z zadaniem</span>
+        <button type="button" class="btn-card-remove" id="btn-close-pdf-banner">✕</button>
+      </div>
+      <div class="auto-pdf-desc">
+        Plik: <strong>${escapeHtml(filename)}</strong> &bull; Zadanie: <strong>${escapeHtml(code)}</strong>
+      </div>
+      <button type="button" id="btn-auto-create-now" class="btn-primary w-full" style="margin-top: 4px;">
+        <span>⚡ Utwórz Workspace i Otwórz VS Code</span>
+      </button>
+    `;
+
+    importPane.prepend(banner);
+
+    banner.querySelector("#btn-close-pdf-banner").addEventListener("click", () => banner.remove());
+    banner.querySelector("#btn-auto-create-now").addEventListener("click", async () => {
+      const btn = banner.querySelector("#btn-auto-create-now");
+      btn.disabled = true;
+      btn.innerHTML = "<span>Tworzenie workspace...</span>";
+      try {
+        const createRes = await fetch(`${API_BASE}/api/auto-import-pdf`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_path: autoPdf, auto_create: true })
+        });
+        const createData = await createRes.json();
+        if (createRes.ok && createData.success) {
+          showToast(`Utworzono zadanie ${createData.problem_id.toUpperCase()}! Otwarto VS Code`, "success");
+          activeProblemId = createData.problem_id;
+          activeTaskBar.classList.remove("hidden");
+          activeTaskName.textContent = `[${createData.problem_id.toUpperCase()}]`;
+          banner.remove();
+          renderStagedUI({ has_pdf: false, has_zip: false });
+        } else {
+          showToast(createData.detail || "Błąd tworzenia zadania", "error");
+          btn.disabled = false;
+          btn.innerHTML = "<span>⚡ Utwórz Workspace i Otwórz VS Code</span>";
+        }
+      } catch (err) {
+        showToast("Błąd połączenia z serwerem!", "error");
+        btn.disabled = false;
+      }
+    });
+
+    loadStagedState();
+  } catch (err) {
+    console.debug("Błąd auto_pdf:", err);
+  }
+}
 
 // ---------------- Nawigacja Zakładek ----------------
 function setupTabs() {
@@ -483,12 +561,13 @@ function renderGallery(problems) {
       <div class="problem-header">
         <span class="problem-code-badge">${escapeHtml(pid.toUpperCase())}</span>
         <span class="problem-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-        <span class="problem-tests-count">${testsCount} testów</span>
+        <span class="problem-tests-count" id="count-prob-${pid}">${testsCount} testów</span>
       </div>
       <div class="problem-actions">
         <button class="btn-secondary btn-act-activate" title="Aktywuj i przełącz Stream Deck">Aktywuj</button>
         <button class="btn-secondary btn-act-code" title="Otwórz w edytorze">VS Code</button>
         <button class="btn-secondary btn-act-test" title="Uruchom testy">Testy</button>
+        <button class="btn-secondary btn-act-add-tests" title="Dodaj paczkę testów (.zip)">+ Testy (ZIP)</button>
         <button class="btn-act-delete" title="Usuń to zadanie">Usuń</button>
       </div>
     `;
@@ -516,6 +595,36 @@ function renderGallery(problems) {
       } else {
         showToast(`Wykryto błędy w testach (${data.summary || "WA"})`, "error");
       }
+    });
+
+    // Dodawanie testów z ZIP do istniejącego zadania
+    card.querySelector(".btn-act-add-tests").addEventListener("click", () => {
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = ".zip";
+      fileInput.onchange = async () => {
+        if (!fileInput.files || fileInput.files.length === 0) return;
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+        showToast(`Wgrywanie testów dla '${pid.toUpperCase()}'...`, "info");
+        try {
+          const res = await fetch(`${API_BASE}/api/problems/${pid}/add-tests`, {
+            method: "POST",
+            body: formData
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            showToast(`✓ Dodano ${data.tests_added} testów (łącznie: ${data.total_tests})!`, "success");
+            loadProblems();
+          } else {
+            showToast(data.detail || "Błąd dodawania testów!", "error");
+          }
+        } catch (err) {
+          showToast("Błąd połączenia z serwerem!", "error");
+        }
+      };
+      fileInput.click();
     });
 
     // Usuwanie zadania

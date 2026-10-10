@@ -613,10 +613,21 @@ textarea {
 
 .btn-act-activate,
 .btn-act-code,
-.btn-act-test {
+.btn-act-test,
+.btn-act-add-tests {
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.btn-act-add-tests {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent-cyan);
+}
+
+.btn-act-add-tests:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-cyan);
 }
 
 .btn-act-delete {
@@ -635,6 +646,36 @@ textarea {
 .btn-act-delete:hover {
   background: rgba(239, 68, 68, 0.3);
   color: #fff;
+}
+
+/* Auto-detected PDF Banner */
+.auto-pdf-banner {
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.18), rgba(18, 23, 34, 0.8));
+  border: 1px solid var(--accent-cyan);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fadeIn 0.2s ease;
+}
+
+.auto-pdf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.auto-pdf-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.auto-pdf-desc {
+  font-size: 11px;
+  color: var(--text-main);
 }
 
 /* ---------------- States & Utilities ---------------- */
