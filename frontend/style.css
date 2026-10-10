@@ -25,7 +25,7 @@
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
 }
 
-* {
+*, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -63,6 +63,7 @@ body::-webkit-scrollbar-thumb:hover {
 .app-container {
   display: flex;
   flex-direction: column;
+  width: 100%;
   position: relative;
 }
 
@@ -83,9 +84,9 @@ body::-webkit-scrollbar-thumb:hover {
 }
 
 .logo-badge {
-  font-size: 16px;
-  width: 26px;
-  height: 26px;
+  font-size: 15px;
+  width: 24px;
+  height: 24px;
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(129, 140, 248, 0.2));
   border: 1px solid rgba(56, 189, 248, 0.4);
   border-radius: 6px;
@@ -174,20 +175,21 @@ body::-webkit-scrollbar-thumb:hover {
   font-weight: 700;
 }
 
-.btn-icon {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 4px;
+.btn-quick-vscode {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--accent-cyan);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
   border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.btn-icon:hover {
+.btn-quick-vscode:hover {
   background-color: var(--bg-hover);
+  border-color: var(--accent-cyan);
 }
 
 /* ---------------- Navigation Tabs ---------------- */
@@ -203,7 +205,6 @@ body::-webkit-scrollbar-thumb:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
   padding: 8px 4px;
   background: none;
   border: none;
@@ -222,10 +223,6 @@ body::-webkit-scrollbar-thumb:hover {
 .tab-btn.active {
   color: var(--accent-cyan);
   border-bottom-color: var(--accent-cyan);
-}
-
-.tab-icon {
-  font-size: 12px;
 }
 
 /* ---------------- Tab Content ---------------- */
@@ -374,7 +371,7 @@ body::-webkit-scrollbar-thumb:hover {
   color: #fff;
 }
 
-/* ---------------- Form Cards ---------------- */
+/* ---------------- Form Cards & Inputs ---------------- */
 .card-form {
   background-color: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -384,21 +381,31 @@ body::-webkit-scrollbar-thumb:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .form-row {
   display: flex;
   gap: 8px;
+  width: 100%;
 }
 
-.flex-1 { flex: 1; }
-.flex-2 { flex: 2; }
+.flex-1 {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.flex-2 {
+  flex: 2 1 0;
+  min-width: 0;
+}
 
 label {
   font-size: 11px;
@@ -414,6 +421,9 @@ label.required::after {
 input[type="text"],
 input[type="number"],
 textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   background-color: var(--bg-input);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
@@ -446,6 +456,11 @@ textarea {
   font-size: 11px;
   color: var(--accent-emerald);
   font-weight: 600;
+}
+
+.badge-dot {
+  font-size: 8px;
+  color: var(--accent-emerald);
 }
 
 .collapsible-section {
@@ -525,6 +540,7 @@ textarea {
 
 #gallery-search {
   flex: 1;
+  min-width: 0;
 }
 
 .gallery-list {
@@ -597,8 +613,9 @@ textarea {
 .btn-act-activate,
 .btn-act-code,
 .btn-act-test {
-  padding: 3px 7px;
-  font-size: 10px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .btn-act-delete {
@@ -607,8 +624,9 @@ textarea {
   border: 1px solid rgba(239, 68, 68, 0.25);
   color: var(--accent-crimson);
   border-radius: 6px;
-  padding: 3px 6px;
+  padding: 3px 8px;
   font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
 }

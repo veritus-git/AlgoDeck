@@ -25,121 +25,164 @@ def _get_font(size: int) -> ImageFont.ImageFont:
             except Exception:
                 pass
     return ImageFont.load_default()
+SCALE = 4
+SIZE_HI = 144 * SCALE  # 576
+SIZE_FINAL = (144, 144)
 
-def _create_canvas_black():
-    """Tworzy bazowe, całkowicie czarne tło OLED (144x144) bez żadnych obramowań ani kart."""
-    img = Image.new("RGBA", (144, 144), (0, 0, 0, 255))
+def _create_canvas_hi():
+    """Tworzy czarne płótno 4x wysokiej rozdzielczości (576x576) do supersamplingu."""
+    img = Image.new("RGBA", (SIZE_HI, SIZE_HI), (0, 0, 0, 255))
     draw = ImageDraw.Draw(img)
     return img, draw
+
+def _downsample(img: Image.Image) -> Image.Image:
+    """Downsampling z 576x576 do 144x144 z użyciem filtru Lanczosa dla idealnej ostrości bez rozmycia."""
+    return img.resize(SIZE_FINAL, resample=Image.Resampling.LANCZOS)
 
 def generate_letter_icon(char: str) -> Path:
     """
     Pojedyncza duża, geometryczna litera (np. 'C', 'H', 'W')
-    na całkowicie czarnym tle (#000000) dla górnego rzędu Stream Decka.
+    w CZYSTEJ BIELI (255, 255, 255) na całkowicie czarnym tle (#000000).
     """
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
 
-    img, draw = _create_canvas_black()
+    img, draw = _create_canvas_hi()
     clean_char = (char or "?").upper()[:1]
-    font = _get_font(84)
-    # Czysta, wyrazista litera w neonowym cyjanie
-    draw.text((72, 68), clean_char, fill=(56, 189, 248, 255), font=font, anchor="mm")
+    font = _get_font(84 * SCALE)
+    # Czysty, wyrazisty biały kolor
+    draw.text((288, 272), clean_char, fill=(255, 255, 255, 255), font=font, anchor="mm")
+
+    final_img = _downsample(img)
 
     filename = f"letter_{clean_char.lower()}.png"
     p1 = ICONS_DIR / filename
     p2 = WORKSPACE_FRONTEND / filename
-    img.save(p1, format="PNG")
-    img.save(p2, format="PNG")
+    final_img.save(p1, format="PNG")
+    final_img.save(p2, format="PNG")
     return p1
 
+def generate_equals_icon() -> Image.Image:
+    """Dwa poziome paski '=' na czarnym tle (#000000) wypełniające klawisze 1 i 5 górnego rzędu."""
+    img, draw = _create_canvas_hi()
+    c_white = (226, 232, 240, 255)
+    draw.rounded_rectangle((160, 216, 416, 256), radius=16, fill=c_white)
+    draw.rounded_rectangle((160, 320, 416, 360), radius=16, fill=c_white)
+    return _downsample(img)
+
 def generate_vscode_icon() -> Image.Image:
-    """Prosty, geometryczny symbol kodu: < / > na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    """Czysty geometryczny symbol kodu: < / > na czarnym tle (#000000)."""
+    img, draw = _create_canvas_hi()
     c_cyan = (56, 189, 248, 255)
     c_slash = (148, 163, 184, 255)
     
     # Lewy nawias <
-    draw.line([(42, 72), (60, 48)], fill=c_cyan, width=8)
-    draw.line([(42, 72), (60, 96)], fill=c_cyan, width=8)
+    draw.line([(168, 288), (240, 192)], fill=c_cyan, width=32)
+    draw.line([(168, 288), (240, 384)], fill=c_cyan, width=32)
+    draw.ellipse([152, 272, 184, 304], fill=c_cyan)
+    draw.ellipse([224, 176, 256, 208], fill=c_cyan)
+    draw.ellipse([224, 368, 256, 400], fill=c_cyan)
+
     # Ukośnik /
-    draw.line([(68, 100), (76, 44)], fill=c_slash, width=7)
+    draw.line([(272, 400), (304, 176)], fill=c_slash, width=28)
+    draw.ellipse([258, 386, 286, 414], fill=c_slash)
+    draw.ellipse([290, 162, 318, 190], fill=c_slash)
+
     # Prawy nawias >
-    draw.line([(102, 72), (84, 48)], fill=c_cyan, width=8)
-    draw.line([(102, 72), (84, 96)], fill=c_cyan, width=8)
-    return img
+    draw.line([(408, 288), (336, 192)], fill=c_cyan, width=32)
+    draw.line([(408, 288), (336, 384)], fill=c_cyan, width=32)
+    draw.ellipse([392, 272, 424, 304], fill=c_cyan)
+    draw.ellipse([320, 176, 352, 208], fill=c_cyan)
+    draw.ellipse([320, 368, 352, 400], fill=c_cyan)
+
+    return _downsample(img)
 
 def generate_test_icon() -> Image.Image:
     """
     Ujednolicony geometryczny symbol testów: wyrazisty checkmark ✓
-    w szmaragdowej zieleni, idealnie pasujący do trójkąta ▶, kwadratu ⏹ i siatki ⊞.
+    o stałej grubości, z idealnie wypełnionym i zaokrąglonym narożnikiem bez wycięć.
     """
-    img, draw = _create_canvas_black()
+    img, draw = _create_canvas_hi()
     c_emerald = (16, 185, 129, 255)
-    # Czysty, geometryczny checkmark o stałej grubości
-    draw.line([(34, 74), (60, 100)], fill=c_emerald, width=14)
-    draw.line([(60, 100), (110, 44)], fill=c_emerald, width=14)
-    draw.ellipse([27, 67, 41, 81], fill=c_emerald)
-    draw.ellipse([53, 93, 67, 107], fill=c_emerald)
-    draw.ellipse([103, 37, 117, 51], fill=c_emerald)
-    return img
+
+    p1 = (144, 304)
+    p2 = (240, 400)
+    p3 = (436, 164)
+    w = 56
+    r = w // 2
+
+    draw.line([p1, p2], fill=c_emerald, width=w)
+    draw.line([p2, p3], fill=c_emerald, width=w)
+    # Końcówki
+    draw.ellipse([p1[0]-r, p1[1]-r, p1[0]+r, p1[1]+r], fill=c_emerald)
+    draw.ellipse([p3[0]-r, p3[1]-r, p3[0]+r, p3[1]+r], fill=c_emerald)
+    # Wierzchołek z pełnym promieniem miter (zerowe wycięcia czy braki px)
+    draw.ellipse([p2[0]-38, p2[1]-38, p2[0]+38, p2[1]+38], fill=c_emerald)
+
+    return _downsample(img)
 
 def generate_play_icon() -> Image.Image:
     """Czysty, geometryczny zielony trójkąt Play ▶ na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    img, draw = _create_canvas_hi()
     c_green = (34, 197, 94, 255)
-    pts = [(48, 38), (108, 72), (48, 106)]
+    pts = [(192, 150), (432, 288), (192, 426)]
     draw.polygon(pts, fill=c_green)
-    return img
+    return _downsample(img)
 
 def generate_kill_icon() -> Image.Image:
     """Czysty, geometryczny czerwony kwadrat Stop ⏹ na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    img, draw = _create_canvas_hi()
     c_red = (239, 68, 68, 255)
-    draw.rounded_rectangle((40, 40, 104, 104), radius=8, fill=c_red)
-    return img
+    draw.rounded_rectangle((160, 160, 416, 416), radius=32, fill=c_red)
+    return _downsample(img)
 
 def generate_menu_icon() -> Image.Image:
     """Czyste, geometryczne 4 kwadraciki ⊞ (Zadania/Galeria) na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    img, draw = _create_canvas_hi()
     c_indigo = (129, 140, 248, 255)
-    r = 5
-    draw.rounded_rectangle((38, 38, 68, 68), radius=r, fill=c_indigo)
-    draw.rounded_rectangle((76, 38, 106, 68), radius=r, fill=c_indigo)
-    draw.rounded_rectangle((38, 76, 68, 106), radius=r, fill=c_indigo)
-    draw.rounded_rectangle((76, 76, 106, 106), radius=r, fill=c_indigo)
-    return img
+    draw.rounded_rectangle((152, 152, 272, 272), radius=24, fill=c_indigo)
+    draw.rounded_rectangle((304, 152, 424, 272), radius=24, fill=c_indigo)
+    draw.rounded_rectangle((152, 304, 272, 424), radius=24, fill=c_indigo)
+    draw.rounded_rectangle((304, 304, 424, 424), radius=24, fill=c_indigo)
+    return _downsample(img)
 
 def generate_arrow_left_icon() -> Image.Image:
-    """Minimalistyczny szewron w lewo ‹ na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    """Minimalistyczny szewron w lewo ‹ z idealnym, pełnym wierzchołkiem bez braków px."""
+    img, draw = _create_canvas_hi()
     c_slate = (203, 213, 225, 255)
-    draw.line([(88, 44), (56, 72)], fill=c_slate, width=9)
-    draw.line([(56, 72), (88, 100)], fill=c_slate, width=9)
-    draw.ellipse([51, 67, 61, 77], fill=c_slate)
-    return img
+    draw.line([(352, 160), (224, 288)], fill=c_slate, width=38)
+    draw.line([(224, 288), (352, 416)], fill=c_slate, width=38)
+    draw.ellipse([224-27, 288-27, 224+27, 288+27], fill=c_slate)
+    draw.ellipse([352-19, 160-19, 352+19, 160+19], fill=c_slate)
+    draw.ellipse([352-19, 416-19, 352+19, 416+19], fill=c_slate)
+    return _downsample(img)
 
 def generate_arrow_right_icon() -> Image.Image:
-    """Minimalistyczny szewron w prawo › na czysto czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    """Minimalistyczny szewron w prawo › z idealnym, pełnym wierzchołkiem bez braków px."""
+    img, draw = _create_canvas_hi()
     c_slate = (203, 213, 225, 255)
-    draw.line([(56, 44), (88, 72)], fill=c_slate, width=9)
-    draw.line([(88, 72), (56, 100)], fill=c_slate, width=9)
-    draw.ellipse([83, 67, 93, 77], fill=c_slate)
-    return img
+    draw.line([(224, 160), (352, 288)], fill=c_slate, width=38)
+    draw.line([(352, 288), (224, 416)], fill=c_slate, width=38)
+    draw.ellipse([352-27, 288-27, 352+27, 288+27], fill=c_slate)
+    draw.ellipse([224-19, 160-19, 224+19, 160+19], fill=c_slate)
+    draw.ellipse([224-19, 416-19, 224+19, 416+19], fill=c_slate)
+    return _downsample(img)
 
 def generate_arrow_back_icon() -> Image.Image:
-    """Minimalistyczna geometryczna strzałka powrotu ← na całkowicie czarnym tle (#000000)."""
-    img, draw = _create_canvas_black()
+    """Minimalistyczna geometryczna strzałka powrotu ← z idealnym grotem bez braków px."""
+    img, draw = _create_canvas_hi()
     c_slate = (203, 213, 225, 255)
-    draw.line([(42, 72), (104, 72)], fill=c_slate, width=9)
-    draw.line([(42, 72), (68, 46)], fill=c_slate, width=9)
-    draw.line([(42, 72), (68, 98)], fill=c_slate, width=9)
-    draw.ellipse([37, 67, 47, 77], fill=c_slate)
-    draw.ellipse([99, 67, 109, 77], fill=c_slate)
-    draw.ellipse([63, 41, 73, 51], fill=c_slate)
-    draw.ellipse([63, 93, 73, 103], fill=c_slate)
-    return img
+    # Trzon
+    draw.line([(168, 288), (416, 288)], fill=c_slate, width=38)
+    # Skrzydła
+    draw.line([(168, 288), (276, 180)], fill=c_slate, width=38)
+    draw.line([(168, 288), (276, 396)], fill=c_slate, width=38)
+    # Zaokrąglenia i pełny grot
+    draw.ellipse([168-27, 288-27, 168+27, 288+27], fill=c_slate)
+    draw.ellipse([416-19, 288-19, 416+19, 288+19], fill=c_slate)
+    draw.ellipse([276-19, 180-19, 276+19, 180+19], fill=c_slate)
+    draw.ellipse([276-19, 396-19, 276+19, 396+19], fill=c_slate)
+    return _downsample(img)
 
 # ----------------- KAFLE ZADAŃ W GALERII (ALGO_MENU) -----------------
 def generate_task_button_icon(problem_id: str, title: str, is_active: bool = False) -> Path:
@@ -193,7 +236,7 @@ def generate_task_button_icon(problem_id: str, title: str, is_active: bool = Fal
     return png_target1
 
 def generate_all_base_icons():
-    """Generuje komplet czystych geometrycznych ikon akcji na czarnym tle."""
+    """Generuje komplet czystych geometrycznych ikon akcji na czarnym tle w 4x SSAA."""
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
 
@@ -206,7 +249,14 @@ def generate_all_base_icons():
         "icon_arrow_left.png": generate_arrow_left_icon(),
         "icon_arrow_right.png": generate_arrow_right_icon(),
         "icon_arrow_back.png": generate_arrow_back_icon(),
+        "icon_equals.png": generate_equals_icon(),
     }
+
+    for name, img in icons_map.items():
+        dst1 = ICONS_DIR / name
+        dst2 = WORKSPACE_FRONTEND / name
+        img.save(dst1, format="PNG")
+        img.save(dst2, format="PNG")
 
     for name, img in icons_map.items():
         dst1 = ICONS_DIR / name

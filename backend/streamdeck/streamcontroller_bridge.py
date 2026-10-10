@@ -92,6 +92,7 @@ class StreamControllerBridge:
         icon_task = STREAMCONTROLLER_ICONS / "icon_task_sec.png"
         icon_arrow_left = STREAMCONTROLLER_ICONS / "icon_arrow_left.png"
         icon_arrow_right = STREAMCONTROLLER_ICONS / "icon_arrow_right.png"
+        icon_equals = STREAMCONTROLLER_ICONS / "icon_equals.png"
 
         # Komendy
         vscode_cmd = f'$HOME/.local/bin/sd_algo_code.sh "{pdir}" "{pdir}/{problem_id}.cpp"'
@@ -134,7 +135,7 @@ class StreamControllerBridge:
                 }
             }
 
-        # 1. RZĄD 0: Środkowe 3 klawisze to pojedyncze litery kodu zadania (np. C H W)
+        # 1. RZĄD 0: Przycisk 1 i 5 to '=', a środkowe 3 klawisze to litery zadania
         letters = list(prob_id[:3].ljust(3))
         icon_l1 = generate_letter_icon(letters[0])
         icon_l2 = generate_letter_icon(letters[1])
@@ -145,10 +146,12 @@ class StreamControllerBridge:
         page_data = {
             "screensaver": {},
             "keys": {
-                # RZĄD 0 (GÓRA): Pojedyncze 3 litery na środkowych klawiszach (1x0, 2x0, 3x0)
+                # RZĄD 0 (GÓRA): [ = ] [ L1 ] [ L2 ] [ L3 ] [ = ]
+                "0x0": make_key(info_cmd, icon_equals),
                 "1x0": make_key(info_cmd, icon_l1),
                 "2x0": make_key(info_cmd, icon_l2),
                 "3x0": make_key(info_cmd, icon_l3),
+                "4x0": make_key(info_cmd, icon_equals),
 
                 # RZĄD 1 (ŚRODEK): Główne przyciski akcji
                 "0x1": make_key(vscode_cmd, icon_vscode),

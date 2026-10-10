@@ -338,7 +338,7 @@ function setupActionButtons() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast(`🎉 Utworzono '${data.problem_id}'! Otwarto VS Code`, "success");
+        showToast(`Utworzono '${data.problem_id}'! Otwarto VS Code`, "success");
         activeProblemId = data.problem_id;
         activeTaskBar.classList.remove("hidden");
         activeTaskName.textContent = `[${data.problem_id.toUpperCase()}]`;
@@ -385,7 +385,7 @@ function setupActionButtons() {
     }
 
     btnCreateManual.disabled = true;
-    btnCreateManual.innerHTML = "<span>⏳ Tworzenie workspace...</span>";
+    btnCreateManual.innerHTML = "<span>Tworzenie workspace...</span>";
 
     try {
       const res = await fetch(`${API_BASE}/api/create-manual`, {
@@ -396,7 +396,7 @@ function setupActionButtons() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast(`✨ Workspace '${data.problem_id}' gotowy! Otwarto VS Code`, "success");
+        showToast(`Workspace '${data.problem_id}' gotowy! Otwarto VS Code`, "success");
         activeProblemId = data.problem_id;
         activeTaskBar.classList.remove("hidden");
         activeTaskName.textContent = `[${data.problem_id.toUpperCase()}]`;
@@ -412,7 +412,7 @@ function setupActionButtons() {
       showToast("Błąd połączenia z serwerem!", "error");
     } finally {
       btnCreateManual.disabled = false;
-      btnCreateManual.innerHTML = "<span>✨ Utwórz Workspace i Otwórz VS Code</span>";
+      btnCreateManual.innerHTML = "<span>Utwórz Workspace i Otwórz VS Code</span>";
     }
   });
 
@@ -486,10 +486,10 @@ function renderGallery(problems) {
         <span class="problem-tests-count">${testsCount} testów</span>
       </div>
       <div class="problem-actions">
-        <button class="btn-secondary btn-act-activate" title="Aktywuj i przełącz Stream Deck">🎮 Aktywuj</button>
-        <button class="btn-secondary btn-act-code" title="Otwórz w edytorze">💻 VS Code</button>
-        <button class="btn-secondary btn-act-test" title="Uruchom testy">⚗ Testy</button>
-        <button class="btn-act-delete" title="Usuń to zadanie">🗑</button>
+        <button class="btn-secondary btn-act-activate" title="Aktywuj i przełącz Stream Deck">Aktywuj</button>
+        <button class="btn-secondary btn-act-code" title="Otwórz w edytorze">VS Code</button>
+        <button class="btn-secondary btn-act-test" title="Uruchom testy">Testy</button>
+        <button class="btn-act-delete" title="Usuń to zadanie">Usuń</button>
       </div>
     `;
 
@@ -498,7 +498,7 @@ function renderGallery(problems) {
       activeProblemId = pid;
       activeTaskBar.classList.remove("hidden");
       activeTaskName.textContent = `[${pid.toUpperCase()}]`;
-      showToast(`Przełączono profil Stream Decka na '${pid.toUpperCase()}'`, "info");
+      showToast(`Przełączono na '${pid.toUpperCase()}'`, "info");
       loadProblems();
     });
 
@@ -512,9 +512,9 @@ function renderGallery(problems) {
       const res = await fetch(`${API_BASE}/api/run-all/${pid}`, { method: "POST" });
       const data = await res.json();
       if (data.all_passed) {
-        showToast(`🎉 Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, "success");
+        showToast(`Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, "success");
       } else {
-        showToast(`❌ Wykryto błędy w testach (${data.summary || "WA"})`, "error");
+        showToast(`Wykryto błędy w testach (${data.summary || "WA"})`, "error");
       }
     });
 

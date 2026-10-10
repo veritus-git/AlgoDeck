@@ -32,23 +32,20 @@
         <span class="active-label">Aktywne:</span>
         <strong id="active-task-name">---</strong>
       </div>
-      <button id="btn-quick-vscode" class="btn-icon" title="Otwórz w VS Code">
-        <span>💻</span>
+      <button id="btn-quick-vscode" class="btn-quick-vscode" title="Otwórz w VS Code">
+        VS Code
       </button>
     </div>
 
-    <!-- Zakładki Nawigacji -->
+    <!-- Zakładki Nawigacji (Bez zbędnych emotek) -->
     <nav class="nav-tabs">
       <button class="tab-btn active" data-tab="tab-import">
-        <span class="tab-icon">📥</span>
         <span>Import (PDF + ZIP)</span>
       </button>
       <button class="tab-btn" data-tab="tab-manual">
-        <span class="tab-icon">✍️</span>
         <span>Ręczny Workspace</span>
       </button>
       <button class="tab-btn" data-tab="tab-gallery">
-        <span class="tab-icon">🗂</span>
         <span>Zadania</span>
       </button>
     </nav>
@@ -137,7 +134,7 @@
           </div>
 
           <div id="tests-summary-badge" class="tests-summary-badge">
-            <span class="badge-icon">🧪</span>
+            <span class="badge-dot">●</span>
             <span id="tests-count-text">0 testów wykrytych</span>
           </div>
         </div>
@@ -188,7 +185,7 @@
           </div>
 
           <button type="button" id="btn-create-manual" class="btn-primary w-full">
-            <span>✨ Utwórz Workspace i Otwórz VS Code</span>
+            <span>Utwórz Workspace i Otwórz VS Code</span>
           </button>
         </div>
       </section>
@@ -197,7 +194,7 @@
       <section id="tab-gallery" class="tab-pane">
         <div class="gallery-controls">
           <input type="text" id="gallery-search" placeholder="Filtruj zadania..." spellcheck="false">
-          <button id="btn-refresh-gallery" class="btn-secondary btn-icon" title="Odśwież">🔄</button>
+          <button id="btn-refresh-gallery" class="btn-secondary" title="Odśwież listę">Odśwież</button>
         </div>
 
         <div id="gallery-list" class="gallery-list">

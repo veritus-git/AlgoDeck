@@ -221,15 +221,16 @@ echo -e "\\e[1;32m✓ Skompilowano pomyślnie!\\e[0m"
 echo -e "\\e[1;33m▶ Program uruchomiony (wprowadź dane cin):\\e[0m"
 echo -e "\\e[0;90m---------------------------------------------------------\\e[0m"
 
+RET=0
 ./.algo/{problem_id}
 RET=$?
 
 echo ""
 echo -e "\\e[0;90m---------------------------------------------------------\\e[0m"
-if [ $RET -eq 0 ]; then
+if [ "${{RET:-0}}" -eq 0 ]; then
     echo -e "\\e[1;32m✓ Program zakończony pomyślnie (kod: 0).\\e[0m"
 else
-    echo -e "\\e[1;31m❌ Program zakończony błędem (kod: $RET).\\e[0m"
+    echo -e "\\e[1;31m❌ Program zakończony błędem (kod: ${{RET}}).\\e[0m"
 fi
 """, encoding="utf-8")
         run_sh.chmod(0o755)
