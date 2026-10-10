@@ -100,14 +100,14 @@ async function checkAutoPdfParam() {
     const code = (data.problem_id || "zad").toUpperCase();
     banner.innerHTML = `
       <div class="auto-pdf-header">
-        <span class="auto-pdf-title">⚡ Wykryto pobrany PDF z zadaniem</span>
-        <button type="button" class="btn-card-remove" id="btn-close-pdf-banner">✕</button>
+        <span class="auto-pdf-title">⚡ Wykryto zadanie PDF — 1 Kliknięcie</span>
+        <button type="button" class="btn-card-remove" id="btn-close-pdf-banner" title="Zamknij">✕</button>
       </div>
       <div class="auto-pdf-desc">
         Plik: <strong>${escapeHtml(filename)}</strong> &bull; Zadanie: <strong>${escapeHtml(code)}</strong>
       </div>
-      <button type="button" id="btn-auto-create-now" class="btn-primary w-full" style="margin-top: 4px;">
-        <span>⚡ Utwórz Workspace i Otwórz VS Code</span>
+      <button type="button" id="btn-auto-create-now" class="btn-primary w-full" style="margin-top: 6px; padding: 10px; font-weight: 700; font-size: 13px;">
+        <span>⚡ Utwórz Workspace i Otwórz VS Code (1 Klik)</span>
       </button>
     `;
 
@@ -117,7 +117,7 @@ async function checkAutoPdfParam() {
     banner.querySelector("#btn-auto-create-now").addEventListener("click", async () => {
       const btn = banner.querySelector("#btn-auto-create-now");
       btn.disabled = true;
-      btn.innerHTML = "<span>Tworzenie workspace...</span>";
+      btn.innerHTML = "<span>Tworzenie workspace i otwieranie VS Code...</span>";
       try {
         const createRes = await fetch(`${API_BASE}/api/auto-import-pdf`, {
           method: "POST",
@@ -128,14 +128,17 @@ async function checkAutoPdfParam() {
         if (createRes.ok && createData.success) {
           showToast(`Utworzono zadanie ${createData.problem_id.toUpperCase()}! Otwarto VS Code`, "success");
           activeProblemId = createData.problem_id;
-          activeTaskBar.classList.remove("hidden");
-          activeTaskName.textContent = `[${createData.problem_id.toUpperCase()}]`;
+          if (activeTaskBar) activeTaskBar.classList.remove("hidden");
+          if (activeTaskName) activeTaskName.textContent = `[${createData.problem_id.toUpperCase()}]`;
           banner.remove();
           renderStagedUI({ has_pdf: false, has_zip: false });
+          setTimeout(() => {
+            window.close();
+          }, 1200);
         } else {
           showToast(createData.detail || "Błąd tworzenia zadania", "error");
           btn.disabled = false;
-          btn.innerHTML = "<span>⚡ Utwórz Workspace i Otwórz VS Code</span>";
+          btn.innerHTML = "<span>⚡ Utwórz Workspace i Otwórz VS Code (1 Klik)</span>";
         }
       } catch (err) {
         showToast("Błąd połączenia z serwerem!", "error");

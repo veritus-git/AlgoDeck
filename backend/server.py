@@ -108,6 +108,10 @@ def get_status():
 
 # ----------------- Poczekalnia i Trwałość (Staging PDF + ZIP) -----------------
 
+def sanitize_problem_id(raw_id: str) -> str:
+    """Oczyszcza kod zadania, zachowując litery (w tym polskie ąćęłńóśźż), cyfry oraz myślniki/podkreślenia."""
+    return re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ_-]', '', (raw_id or "").strip()).lower()
+
 STAGING_DIR = Path("/tmp/algodeck_staging")
 
 def _compute_staged_state() -> Dict[str, Any]:
@@ -154,13 +158,12 @@ def _compute_staged_state() -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Błąd parsowania staged ZIP: {e}")
 
-    final_id = (
+    final_id = sanitize_problem_id(
         meta.get("problem_id") or
         zip_info.get("detected_problem_id") or
         pdf_info.get("problem_id") or
         "zad"
-    ).lower().strip()
-    final_id = re.sub(r'[^a-zA-Z0-9_-]', '', final_id) or "zad"
+    ) or "zad"
 
     final_title = (meta.get("title") or pdf_info.get("title") or final_id.upper()).strip()
     final_time = meta.get("time_limit_sec") or pdf_info.get("time_limit_sec", 1.0)
@@ -264,8 +267,7 @@ async def start_staged(payload: Dict[str, Any] = Body(default={})):
     if not state.get("has_pdf") and not state.get("has_zip"):
         raise HTTPException(status_code=400, detail="Brak wgranych plików (PDF lub ZIP) w poczekalni.")
 
-    pid = (payload.get("problem_id") or state.get("problem_id") or "zad").lower().strip()
-    pid = re.sub(r'[^a-zA-Z0-9_-]', '', pid) or "zad"
+    pid = sanitize_problem_id(payload.get("problem_id") or state.get("problem_id") or "zad") or "zad"
 
     title = (payload.get("title") or state.get("title") or pid.upper()).strip()
     time_limit = float(payload.get("time_limit") or state.get("time_limit_sec") or 1.0)
@@ -402,13 +404,12 @@ async def import_task(
         zip_info = ZipParser.parse_directory(Path(folder_path), pdf_tests=pdf_info.get("tests", []))
 
     # 3. Scalanie parametrów
-    final_id = (
+    final_id = sanitize_problem_id(
         problem_id or
         zip_info.get("detected_problem_id") or
         pdf_info.get("problem_id") or
         "zad"
-    ).lower().strip()
-    final_id = re.sub(r'[^a-zA-Z0-9_-]', '', final_id) or "zad"
+    ) or "zad"
 
     final_title = (title or pdf_info.get("title") or final_id.upper()).strip()
     final_time = time_limit or pdf_info.get("time_limit_sec", 1.0)
@@ -476,9 +477,9 @@ async def create_manual(payload: Dict[str, Any] = Body(...)):
     if not raw_id:
         raise HTTPException(status_code=400, detail="Pole 'problem_id' (nazwa/kod zadania) jest wymagane.")
 
-    problem_id = re.sub(r'[^a-zA-Z0-9_-]', '', raw_id.lower())
+    problem_id = sanitize_problem_id(raw_id)
     if not problem_id:
-        raise HTTPException(status_code=400, detail="Nieprawidłowa nazwa zadania (dozwolone litery, cyfry, myślnik, podkreślenie).")
+        raise HTTPException(status_code=400, detail="Nieprawidłowa nazwa zadania (podaj litery lub cyfry).")
 
     title = payload.get("title", "").strip() or problem_id.capitalize()
     time_limit = float(payload.get("time_limit", 1.0))
@@ -721,8 +722,7 @@ async def auto_import_pdf(payload: Dict[str, Any] = Body(...)):
     shutil.copy2(pdf_path, staged_pdf)
 
     # Przygotuj metadane
-    pid = payload.get("problem_id") or pdf_info.get("problem_id") or pdf_path.stem.lower()
-    pid = re.sub(r'[^a-zA-Z0-9_-]', '', pid.lower()) or "zad"
+    pid = sanitize_problem_id(payload.get("problem_id") or pdf_info.get("problem_id") or pdf_path.stem) or "zad"
     title = payload.get("title") or pdf_info.get("title") or pid.capitalize()
     time_limit = float(payload.get("time_limit") or pdf_info.get("time_limit_sec") or 1.0)
     memory_limit = int(payload.get("memory_limit") or pdf_info.get("memory_limit_mb") or 128)
@@ -781,6 +781,7 @@ async def auto_import_pdf(payload: Dict[str, Any] = Body(...)):
 def set_active_problem(problem_id: str):
     pid = problem_id.lower()
     streamdeck_controller.set_active_problem(pid)
+    streamcontroller_bridge.switch_to_page(pid)
     pdir = executor.get_problem_dir(pid)
     main_cpp = pdir / f"{pid}.cpp"
     workspace_builder.open_in_vscode(pdir, main_cpp)

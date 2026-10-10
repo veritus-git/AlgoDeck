@@ -68,6 +68,33 @@ body::-webkit-scrollbar-thumb:hover {
 }
 
 /* ---------------- Header ---------------- */
+.app-header-compact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.brand-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logo-badge-mini {
+  font-size: 14px;
+  color: var(--accent-cyan);
+}
+
+.brand-title-mini {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: 0.3px;
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;

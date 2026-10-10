@@ -215,32 +215,99 @@ def generate_arrow_back_icon() -> Path:
     return _save_cairo_surf(surf, "icon_arrow_back.png")
 
 def generate_settings_icon() -> Path:
-    """Czysty geometryczny trybik / ustawienia ⚙ na czarnym tle."""
+    """
+    Dyskretny, pomniejszony trybik / ustawienia ⚙ na czarnym tle.
+    Kolor stonowany szary (#475569 - slate-600), nie rzuca się w oczy.
+    """
     import math
     surf, cr = _new_cairo_surface()
     cx, cy = 72, 72
-    cr.set_source_rgb(203/255, 213/255, 225/255)  # Slate-300
+    cr.set_source_rgb(71/255, 85/255, 105/255)  # Slate-600 #475569
 
-    # 6 zębów na zewnątrz
-    cr.set_line_width(9.0)
+    # 6 mniejszych zębów
+    cr.set_line_width(5.5)
     cr.set_line_cap(cairo.LINE_CAP_SQUARE)
     for i in range(6):
         a = i * (2 * math.pi / 6)
-        cr.move_to(cx + 20 * math.cos(a), cy + 20 * math.sin(a))
-        cr.line_to(cx + 33 * math.cos(a), cy + 33 * math.sin(a))
+        cr.move_to(cx + 12 * math.cos(a), cy + 12 * math.sin(a))
+        cr.line_to(cx + 22 * math.cos(a), cy + 22 * math.sin(a))
         cr.stroke()
 
     # Korpus pierścienia
-    cr.set_line_width(12.0)
-    cr.arc(cx, cy, 20, 0, 2 * math.pi)
+    cr.set_line_width(7.0)
+    cr.arc(cx, cy, 13, 0, 2 * math.pi)
     cr.stroke()
 
     # Wewnętrzny otwór
     cr.set_source_rgb(0, 0, 0)
-    cr.arc(cx, cy, 9, 0, 2 * math.pi)
+    cr.arc(cx, cy, 6, 0, 2 * math.pi)
     cr.fill()
 
     return _save_cairo_surf(surf, "icon_settings.png")
+
+def generate_idle_logo_icons():
+    """
+    Generuje 3-przyciskowe logo ALGODECK na ekran zachęty (ALGO_IDLE):
+    - [ ALGO ] (lewy kafel)
+    - [  ⚡  ] (środkowy kafel z geometrycznym piorunem)
+    - [ DECK ] (prawy kafel)
+    """
+    # 1. ALGO
+    surf1, cr1 = _new_cairo_surface()
+    cr1.select_font_face("DejaVu Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    cr1.set_font_size(32.0)
+    cr1.set_source_rgb(56/255, 189/255, 248/255)  # Cyan-400 #38bdf8
+    ext1 = cr1.text_extents("ALGO")
+    cr1.move_to(72 - ext1.width / 2 - ext1.x_bearing, 72 - ext1.height / 2 - ext1.y_bearing)
+    cr1.show_text("ALGO")
+    _save_cairo_surf(surf1, "idle_logo_algo.png")
+
+    # 2. Piorun ⚡ (geometryczny wektor)
+    surf2, cr2 = _new_cairo_surface()
+    cr2.set_source_rgb(56/255, 189/255, 248/255)
+    cr2.move_to(76, 28)
+    cr2.line_to(48, 72)
+    cr2.line_to(70, 72)
+    cr2.line_to(64, 116)
+    cr2.line_to(96, 64)
+    cr2.line_to(74, 64)
+    cr2.close_path()
+    cr2.fill()
+    _save_cairo_surf(surf2, "idle_logo_bolt.png")
+
+    # 3. DECK
+    surf3, cr3 = _new_cairo_surface()
+    cr3.select_font_face("DejaVu Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    cr3.set_font_size(32.0)
+    cr3.set_source_rgb(56/255, 189/255, 248/255)
+    ext3 = cr3.text_extents("DECK")
+    cr3.move_to(72 - ext3.width / 2 - ext3.x_bearing, 72 - ext3.height / 2 - ext3.y_bearing)
+    cr3.show_text("DECK")
+    _save_cairo_surf(surf3, "idle_logo_deck.png")
+
+def generate_idle_start_icon() -> Path:
+    """
+    Przycisk 'ZACZNIJ' w stylu menu głównego gry:
+    Szmaragdowy akcent (#10b981), ikona ▶ oraz czytelny napis ZACZNIJ.
+    """
+    img = Image.new("RGBA", (144, 144), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(img)
+
+    # Zaokrąglony kafel
+    draw.rounded_rectangle((10, 16, 134, 128), radius=16, fill=(6, 78, 59, 255), outline=(16, 185, 129, 255), width=3)
+
+    # Trójkąt ▶
+    draw.polygon([(62, 42), (62, 70), (88, 56)], fill=(16, 185, 129, 255))
+
+    # Napis ZACZNIJ
+    font = _get_font(20)
+    draw.text((72, 98), "ZACZNIJ", fill=(255, 255, 255, 255), font=font, anchor="mm")
+
+    p1 = ICONS_DIR / "idle_btn_start.png"
+    p2 = WORKSPACE_FRONTEND / "idle_btn_start.png"
+    img.save(p1, format="PNG")
+    img.save(p2, format="PNG")
+    return p1
 
 def generate_task_number_icon(index: int, total: int) -> Path:
     """Generuje minimalistyczny numer zadania w formacie '1/3'."""
@@ -333,6 +400,8 @@ def generate_all_base_icons():
     generate_equals_icon()
     generate_plus_icon()
     generate_settings_icon()
+    generate_idle_logo_icons()
+    generate_idle_start_icon()
     generate_arrow_left_icon(disabled=False)
     generate_arrow_left_icon(disabled=True)
     generate_arrow_right_icon(disabled=False)

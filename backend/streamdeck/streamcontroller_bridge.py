@@ -41,30 +41,22 @@ class StreamControllerBridge:
 
     def generate_idle_page(self):
         """
-        Generuje 'Ekran zachęty' (ALGO_IDLE) gdy w workspace nie ma żadnego zadania:
-        - Rząd 0: [ = ] [ M ] [ A ] [ P ] [ = ] (Koło MAP)
-        - Rząd 1: [ + ] [   ] [ ⚙ ] [   ] [ ⊞ ] (Nowe zadanie, Panel, Menu)
-        - Rząd 2: [ ⚙ ] [   ] [ ‹ ] [0/0] [ › ]
+        Generuje 'Ekran zachęty' (ALGO_IDLE) w stylu minimalistycznego menu głównego:
+        - Rząd 0: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ] (Logo jak w instalatorze)
+        - Rząd 1: [   ] [      ] [ ▶ ZACZNIJ ] [      ] [ ⊞ ] (Przycisk Start + powrót do zadań)
+        - Rząd 2: [ ⚙ ] [      ] [     ] [      ] [   ] (Dyskretne Ustawienia)
         """
-        from backend.streamdeck.icons_generator import (
-            generate_letter_icon, generate_settings_icon, generate_task_number_icon
-        )
         self.ensure_vector_icons()
 
-        icon_plus = STREAMCONTROLLER_ICONS / "icon_plus.png"
+        icon_algo = STREAMCONTROLLER_ICONS / "idle_logo_algo.png"
+        icon_bolt = STREAMCONTROLLER_ICONS / "idle_logo_bolt.png"
+        icon_deck = STREAMCONTROLLER_ICONS / "idle_logo_deck.png"
+        icon_start = STREAMCONTROLLER_ICONS / "idle_btn_start.png"
+        icon_settings = STREAMCONTROLLER_ICONS / "icon_settings.png"
         icon_task = STREAMCONTROLLER_ICONS / "icon_task_sec.png"
-        icon_equals = STREAMCONTROLLER_ICONS / "icon_equals.png"
-        icon_settings = generate_settings_icon()
-        icon_num_zero = generate_task_number_icon(0, 0)
-        icon_left_dis = STREAMCONTROLLER_ICONS / "icon_arrow_left_disabled.png"
-        icon_right_dis = STREAMCONTROLLER_ICONS / "icon_arrow_right_disabled.png"
 
-        icon_m = generate_letter_icon("M")
-        icon_a = generate_letter_icon("A")
-        icon_p = generate_letter_icon("P")
-
-        new_task_cmd = '$HOME/.local/bin/sd_algo_new_task.sh'
-        panel_cmd = '$HOME/.local/bin/sd_algo_panel.sh'
+        start_cmd = '$HOME/.local/bin/sd_algo_panel.sh --tab=new'
+        settings_cmd = '$HOME/.local/bin/sd_algo_panel.sh --tab=settings'
         menu_cmd = '$HOME/.local/bin/sd_algo_switch.sh menu'
 
         def make_key(cmd: str, icon_path: Optional[Path] = None):
@@ -86,29 +78,37 @@ class StreamControllerBridge:
                                  "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0}}
             }
 
+        # Sprawdź czy są jakiekolwiek zadania w workspace
+        has_any_tasks = False
+        if self.workspace_dir.exists():
+            for p in self.workspace_dir.iterdir():
+                if p.is_dir() and not p.name.startswith(".") and p.name.lower() != "tests":
+                    has_any_tasks = True
+                    break
+
         page_data = {
             "screensaver": {},
             "keys": {
-                # RZĄD 0: [ = ] [ M ] [ A ] [ P ] [ = ]
-                "0x0": make_key(panel_cmd, icon_equals),
-                "1x0": make_key(panel_cmd, icon_m),
-                "2x0": make_key(panel_cmd, icon_a),
-                "3x0": make_key(panel_cmd, icon_p),
-                "4x0": make_key(panel_cmd, icon_equals),
+                # RZĄD 0: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ]
+                "0x0": make_empty_key(),
+                "1x0": make_key(start_cmd, icon_algo),
+                "2x0": make_key(start_cmd, icon_bolt),
+                "3x0": make_key(start_cmd, icon_deck),
+                "4x0": make_empty_key(),
 
-                # RZĄD 1: [ + ] [   ] [ ⚙ ] [   ] [ ⊞ ]
-                "0x1": make_key(new_task_cmd, icon_plus),
+                # RZĄD 1: [   ] [   ] [ ▶ ZACZNIJ ] [   ] [ ⊞ ]
+                "0x1": make_empty_key(),
                 "1x1": make_empty_key(),
-                "2x1": make_key(panel_cmd, icon_settings),
+                "2x1": make_key(start_cmd, icon_start),
                 "3x1": make_empty_key(),
-                "4x1": make_key(menu_cmd, icon_task),
+                "4x1": make_key(menu_cmd, icon_task) if has_any_tasks else make_empty_key(),
 
-                # RZĄD 2: [ ⚙ ] [   ] [ ‹ ] [0/0] [ › ]
-                "0x2": make_key(panel_cmd, icon_settings),
+                # RZĄD 2: [ ⚙ ] [   ] [   ] [   ] [   ]
+                "0x2": make_key(settings_cmd, icon_settings),
                 "1x2": make_empty_key(),
-                "2x2": make_key("true", icon_left_dis),
-                "3x2": make_key("true", icon_num_zero),
-                "4x2": make_key("true", icon_right_dis),
+                "2x2": make_empty_key(),
+                "3x2": make_empty_key(),
+                "4x2": make_empty_key(),
             }
         }
         self.sync_page_to_streamcontroller("ALGO_IDLE", page_data)

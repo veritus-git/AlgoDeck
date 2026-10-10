@@ -257,13 +257,13 @@ fi
 
 if [ -n "$WID" ]; then
     DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-    sleep 0.1
-    DISPLAY=:0 xdotool key --window "$WID" --clearmodifiers ctrl+shift+b 2>/dev/null || true
+    sleep 0.15
+    DISPLAY=:0 xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null || true
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_run_vscode.sh"
 
-# 7d. Skrypt sd_algo_test_vscode.sh (Wbudowany terminal VS Code: Ctrl+Alt+E)
+# 7d. Skrypt sd_algo_test_vscode.sh (Wbudowany terminal VS Code: F6 / workbench.action.tasks.test)
 cat > "$HOME/.local/bin/sd_algo_test_vscode.sh" << 'EOF'
 #!/usr/bin/env bash
 PDIR="$1"
@@ -282,8 +282,8 @@ fi
 
 if [ -n "$WID" ]; then
     DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-    sleep 0.1
-    DISPLAY=:0 xdotool key --window "$WID" --clearmodifiers ctrl+alt+e 2>/dev/null || true
+    sleep 0.15
+    DISPLAY=:0 xdotool key --clearmodifiers F6 2>/dev/null || true
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_test_vscode.sh"
@@ -291,15 +291,29 @@ chmod +x "$HOME/.local/bin/sd_algo_test_vscode.sh"
 # 7e. Skrypt sd_algo_panel.sh (Panel kontrolny AlgoDeck / Ustawienia)
 cat > "$HOME/.local/bin/sd_algo_panel.sh" << 'EOF'
 #!/usr/bin/env bash
-WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck" | awk '{print $1}' | head -n 1)
+TAB="${1:---tab=settings}"
+WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck ⚡ Centrum Kontroli" | awk '{print $1}' | head -n 1)
 
 if [ -n "$WID" ]; then
     DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
 else
-    google-chrome --app="http://127.0.0.1:8080" --window-size=460,680 >/dev/null 2>&1 &
+    python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_panel.sh"
+
+# 7e2. Skrypt sd_algo_new_task.sh (Dodawanie nowego zadania)
+cat > "$HOME/.local/bin/sd_algo_new_task.sh" << 'EOF'
+#!/usr/bin/env bash
+WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck ⚡ Centrum Kontroli" | awk '{print $1}' | head -n 1)
+
+if [ -n "$WID" ]; then
+    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+else
+    python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" --tab=new >/dev/null 2>&1 &
+fi
+EOF
+chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
 
 # 7f. Skrypt sd_algo_switch.sh (Przełączanie zadań i galerii)
 cat > "$HOME/.local/bin/sd_algo_switch.sh" << 'EOF'
@@ -334,18 +348,18 @@ unset IFS
 
 if [ "$ACTION" = "menu" ]; then
     if [ -n "$CURRENT" ]; then
-        echo "$CURRENT" | tr '[:lower:]' '[:upper:]' > /tmp/algodeck_active_task.txt
+        echo "${CURRENT^^}" > /tmp/algodeck_active_task.txt
     fi
     gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_MENU" >/dev/null 2>&1 || true
     exit 0
 fi
 
 if [ "$ACTION" = "to" ]; then
-    TARGET="$(echo "$CURRENT" | tr '[:upper:]' '[:lower:]')"
+    TARGET="${CURRENT,,}"
 else
     INDEX=0
     if [ -n "$CURRENT" ]; then
-        CURRENT=$(echo "$CURRENT" | tr '[:upper:]' '[:lower:]')
+        CURRENT="${CURRENT,,}"
         for i in "${!PROJECTS[@]}"; do
             if [ "${PROJECTS[$i]}" = "$CURRENT" ]; then
                 INDEX=$i
@@ -365,7 +379,7 @@ else
     TARGET="${PROJECTS[$NEW_INDEX]}"
 fi
 
-TARGET_UPPER=$(echo "$TARGET" | tr '[:lower:]' '[:upper:]')
+TARGET_UPPER="${TARGET^^}"
 echo "$TARGET_UPPER" > /tmp/algodeck_active_task.txt
 
 gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "$TARGET_UPPER" >/dev/null 2>&1 || true
@@ -395,7 +409,7 @@ if [ -z "$TARGET" ]; then
         bname=$(basename "$dir")
         [ "$bname" = "tests" ] && continue
         if [ -f "$dir/$bname.cpp" ] || [ -d "$dir/.algo" ]; then
-            TARGET=$(echo "$bname" | tr '[:lower:]' '[:upper:]')
+            TARGET="${bname^^}"
             break
         fi
     done
