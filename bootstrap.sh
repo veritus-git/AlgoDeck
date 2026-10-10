@@ -205,29 +205,57 @@ exec python3 -m uvicorn backend.server:app --host 127.0.0.1 --port 8080 "\$@"
 EOF
 chmod +x "$HOME/.local/bin/algodeck"
 
-# 7b. Skrypt sd_algo_code.sh (Otwieranie / maksymalizacja okna VS Code)
+# 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code)
 cat > "$HOME/.local/bin/sd_algo_code.sh" << 'EOF'
 #!/usr/bin/env bash
 TARGET_DIR="${1:-$HOME/algodeck-workspace}"
 TARGET_FILE="${2:-}"
 PROB_NAME=$(basename "$TARGET_DIR")
 
-WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB_NAME" | awk '{print $1}' | head -n 1)
+CONFIG_FILE="$HOME/.config/algodeck/settings.json"
+VSCODE_MODE="single_window"
+WORKSPACE_DIR="$HOME/algodeck-workspace"
 
-if [ -n "$WID" ]; then
-    DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-    exit 0
+if [ -f "$CONFIG_FILE" ]; then
+    MODE_FROM_CFG=$(grep -o '"vscode_mode": *"[^"]*"' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4)
+    [ -n "$MODE_FROM_CFG" ] && VSCODE_MODE="$MODE_FROM_CFG"
+    DIR_FROM_CFG=$(grep -o '"workspace_dir": *"[^"]*"' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4)
+    [ -n "$DIR_FROM_CFG" ] && WORKSPACE_DIR="$DIR_FROM_CFG"
 fi
 
-if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-    nohup /usr/bin/code "$TARGET_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+if [ "$VSCODE_MODE" = "single_window" ]; then
+    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+    if [ -n "$WID" ]; then
+        if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
+            /usr/bin/code --reuse-window "$TARGET_FILE" >/dev/null 2>&1 &
+        fi
+        DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+        DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+        exit 0
+    fi
+
+    if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
+        nohup /usr/bin/code "$WORKSPACE_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+    else
+        nohup /usr/bin/code "$WORKSPACE_DIR" >/dev/null 2>&1 &
+    fi
 else
-    nohup /usr/bin/code "$TARGET_DIR" >/dev/null 2>&1 &
+    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB_NAME" | awk '{print $1}' | head -n 1)
+    if [ -n "$WID" ]; then
+        DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+        DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+        exit 0
+    fi
+
+    if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
+        nohup /usr/bin/code "$TARGET_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+    else
+        nohup /usr/bin/code "$TARGET_DIR" >/dev/null 2>&1 &
+    fi
 fi
 
 for i in {1..20}; do
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB_NAME" | awk '{print $1}' | head -n 1)
+    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
     if [ -n "$WID" ]; then
         DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
         DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true

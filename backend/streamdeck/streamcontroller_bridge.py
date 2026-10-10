@@ -36,6 +36,21 @@ class StreamControllerBridge:
         try:
             target_page_path.write_text(json_str, encoding="utf-8")
             logger.info(f"Pomyślnie zsynchronizowano stronę {prob_id} ze StreamControllerem.")
+            # Odśwież stronę w pamięci działającego StreamControllera przez D-Bus
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "com.core447.StreamController.RemovePage",
+                prob_id
+            ], timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "com.core447.StreamController.AddPage",
+                prob_id, json_str
+            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             logger.error(f"Nie udało się zapisać pliku {target_page_path}: {e}")
 

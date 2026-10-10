@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 AlgoDeck ⚡ Koło MAP - Główny Panel Kontrolny i Ustawienia
-Natywna aplikacja desktopowa Tkinter z ciemnym motywem:
-1. Zakładka 'Nowe Zadanie' (import z PDF lub ręczne wprowadzanie)
-2. Zakładka 'Zadania' (zarządzanie, aktywacja, dodawanie testów ZIP, usuwanie)
-3. Zakładka 'Ustawienia' (katalog roboczy, tryb VS Code, powiadomienia, synchronizacja)
+Natywna aplikacja desktopowa w czystym, głębokim motywie Cyberpunk/Dark:
+- ZERO białych ramek, ZERO brzydkich systemowych kontrolek X11
+- Własne segmentowane przyciski (Radio/Toggle buttons bez kółek i ramek)
+- 3 Zakładki: '➕ Nowe Zadanie', '📋 Zadania', '⚙️ Ustawienia'
+- Automatyczne wczytywanie pliku PDF podanego jako argument --pdf
 """
 
 import argparse
-import io
 import json
 import os
 import re
@@ -21,13 +21,13 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox, filedialog
 
 API_BASE = "http://127.0.0.1:8080"
 CONFIG_FILE = Path.home() / ".config/algodeck/settings.json"
 
 def get_primary_monitor_geometry():
-    """Wykrywa geometrię głównego monitora z xrandr do idealnego wyśrodkowania."""
+    """Wykrywa geometrię głównego monitora z xrandr."""
     try:
         res = subprocess.run(["xrandr", "--current"], capture_output=True, text=True, timeout=2)
         if res.returncode == 0:
@@ -44,7 +44,7 @@ def get_primary_monitor_geometry():
 def load_user_settings() -> Dict[str, Any]:
     defaults = {
         "workspace_dir": str(Path.home() / "algodeck-workspace"),
-        "vscode_mode": "separate_windows",
+        "vscode_mode": "single_window",
         "notifications": True
     }
     if CONFIG_FILE.exists():
@@ -60,10 +60,10 @@ def save_user_settings(settings: Dict[str, Any]):
     CONFIG_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
 
 class AlgoDeckPanel:
-    def __init__(self, root: tk.Tk, initial_tab: str = "new"):
+    def __init__(self, root: tk.Tk, initial_tab: str = "new", initial_pdf: str = ""):
         self.root = root
-        self.root.title("AlgoDeck ⚡ Centrum Kontroli & Ustawienia")
-        self.root.configure(bg="#0b0e14")
+        self.root.title("AlgoDeck ⚡ Centrum Kontroli")
+        self.root.configure(bg="#080b11")
         self.root.resizable(False, False)
 
         self.settings = load_user_settings()
@@ -71,7 +71,7 @@ class AlgoDeckPanel:
         self.active_problem_id = ""
 
         # Wymiary okna
-        w = 580
+        w = 600
         h = 660
 
         geom = get_primary_monitor_geometry()
@@ -95,23 +95,26 @@ class AlgoDeckPanel:
 
         self.switch_tab(initial_tab)
 
-    # ----------------- Stylizowany Nagłówek -----------------
+        if initial_pdf and os.path.exists(initial_pdf):
+            self.set_pdf_file(initial_pdf)
+
+    # ----------------- Nagłówek -----------------
     def _build_header(self):
-        header = tk.Frame(self.root, bg="#0b0e14", padx=20, pady=12)
+        header = tk.Frame(self.root, bg="#080b11", padx=22, pady=12, highlightthickness=0)
         header.pack(fill="x")
 
-        lbl_logo = tk.Label(header, text="⚡", font=("Segoe UI", 18), bg="#0b0e14", fg="#38bdf8")
+        lbl_logo = tk.Label(header, text="⚡", font=("Segoe UI", 18), bg="#080b11", fg="#38bdf8", highlightthickness=0)
         lbl_logo.pack(side="left", padx=(0, 8))
 
-        lbl_title = tk.Label(header, text="ALGODECK", font=("Segoe UI", 15, "bold"), bg="#0b0e14", fg="#f8fafc")
+        lbl_title = tk.Label(header, text="ALGODECK", font=("Segoe UI", 16, "bold"), bg="#080b11", fg="#f8fafc", highlightthickness=0)
         lbl_title.pack(side="left")
 
-        lbl_sub = tk.Label(header, text="KOŁO MAP • OIJ • OI", font=("Segoe UI", 9, "bold"), bg="#0b0e14", fg="#38bdf8")
+        lbl_sub = tk.Label(header, text="KOŁO MAP • OIJ • OI", font=("Segoe UI", 9, "bold"), bg="#080b11", fg="#38bdf8", highlightthickness=0)
         lbl_sub.pack(side="right")
 
-    # ----------------- Pasek Zakładek -----------------
+    # ----------------- Nawigacja Zakładek -----------------
     def _build_tabs(self):
-        tab_bar = tk.Frame(self.root, bg="#121722", padx=20, pady=4)
+        tab_bar = tk.Frame(self.root, bg="#0f1420", padx=16, pady=4, highlightthickness=0)
         tab_bar.pack(fill="x")
 
         self.tab_buttons = {}
@@ -124,22 +127,22 @@ class AlgoDeckPanel:
         for tab_id, text in tabs:
             btn = tk.Button(
                 tab_bar, text=text, font=("Segoe UI", 10, "bold"),
-                bg="#121722", fg="#94a3b8", activebackground="#1e293b", activeforeground="#f8fafc",
-                relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=14, pady=6,
+                bg="#0f1420", fg="#94a3b8", activebackground="#1e293b", activeforeground="#f8fafc",
+                relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=16, pady=8,
                 command=lambda t=tab_id: self.switch_tab(t)
             )
-            btn.pack(side="left", padx=(0, 8))
+            btn.pack(side="left", padx=(0, 6))
             self.tab_buttons[tab_id] = btn
 
     # ----------------- Kontenery Treści Zakładek -----------------
     def _build_panes(self):
-        self.pane_container = tk.Frame(self.root, bg="#0b0e14", padx=20, pady=14)
+        self.pane_container = tk.Frame(self.root, bg="#080b11", padx=20, pady=12, highlightthickness=0)
         self.pane_container.pack(fill="both", expand=True)
 
         self.panes = {
-            "new": tk.Frame(self.pane_container, bg="#0b0e14"),
-            "tasks": tk.Frame(self.pane_container, bg="#0b0e14"),
-            "settings": tk.Frame(self.pane_container, bg="#0b0e14")
+            "new": tk.Frame(self.pane_container, bg="#080b11", highlightthickness=0),
+            "tasks": tk.Frame(self.pane_container, bg="#080b11", highlightthickness=0),
+            "settings": tk.Frame(self.pane_container, bg="#080b11", highlightthickness=0)
         }
 
         self._build_tab_new(self.panes["new"])
@@ -151,7 +154,7 @@ class AlgoDeckPanel:
             if tid == tab_id:
                 btn.config(bg="#1e293b", fg="#38bdf8")
             else:
-                btn.config(bg="#121722", fg="#94a3b8")
+                btn.config(bg="#0f1420", fg="#94a3b8")
 
         for tid, pane in self.panes.items():
             if tid == tab_id:
@@ -164,126 +167,130 @@ class AlgoDeckPanel:
 
     # ----------------- Zakładka 1: Nowe Zadanie -----------------
     def _build_tab_new(self, parent):
-        mode_frame = tk.Frame(parent, bg="#0b0e14")
-        mode_frame.pack(fill="x", pady=(0, 10))
+        # Segmentowy przełącznik trybu (CAŁKOWICIE BEZ BIAŁYCH RAMEK I KÓŁEK)
+        seg_frame = tk.Frame(parent, bg="#080b11", highlightthickness=0)
+        seg_frame.pack(fill="x", pady=(0, 10))
 
-        self.new_mode_var = tk.StringVar(value="pdf")
+        self.current_new_mode = "pdf"
 
-        btn_pdf_mode = tk.Radiobutton(
-            mode_frame, text="📄 Z pliku PDF (Olimpijskie zadanie)", variable=self.new_mode_var, value="pdf",
-            bg="#0b0e14", fg="#f8fafc", selectcolor="#1e293b", activebackground="#0b0e14", activeforeground="#38bdf8",
-            font=("Segoe UI", 10, "bold"), command=self._toggle_new_mode
+        self.btn_mode_pdf = tk.Button(
+            seg_frame, text="📄 Z pliku PDF (Olimpijskie)", font=("Segoe UI", 9, "bold"),
+            bg="#0284c7", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff",
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=14, pady=6,
+            command=lambda: self._set_new_mode("pdf")
         )
-        btn_pdf_mode.pack(side="left", padx=(0, 16))
+        self.btn_mode_pdf.pack(side="left", padx=(0, 8))
 
-        btn_manual_mode = tk.Radiobutton(
-            mode_frame, text="✏️ Ręczne wpisanie / Własne", variable=self.new_mode_var, value="manual",
-            bg="#0b0e14", fg="#f8fafc", selectcolor="#1e293b", activebackground="#0b0e14", activeforeground="#38bdf8",
-            font=("Segoe UI", 10, "bold"), command=self._toggle_new_mode
+        self.btn_mode_manual = tk.Button(
+            seg_frame, text="✏️ Ręczne wpisanie", font=("Segoe UI", 9, "bold"),
+            bg="#131b2c", fg="#94a3b8", activebackground="#1e293b", activeforeground="#f8fafc",
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=14, pady=6,
+            command=lambda: self._set_new_mode("manual")
         )
-        btn_manual_mode.pack(side="left")
+        self.btn_mode_manual.pack(side="left")
 
         # Karta formularza
-        self.card_new = tk.Frame(parent, bg="#121722", highlightbackground="#222b3d", highlightthickness=1, padx=14, pady=12)
+        self.card_new = tk.Frame(parent, bg="#111726", padx=14, pady=12, highlightthickness=0)
         self.card_new.pack(fill="both", expand=True, pady=(0, 12))
 
-        # Sekcja PDF (widoczna w trybie pdf)
-        self.frame_pdf_inputs = tk.Frame(self.card_new, bg="#121722")
-        self.frame_pdf_inputs.pack(fill="x", pady=(0, 8))
+        # Sekcja PDF
+        self.frame_pdf_inputs = tk.Frame(self.card_new, bg="#111726", highlightthickness=0)
+        self.frame_pdf_inputs.pack(fill="x", pady=(0, 6))
 
-        lbl_pdf = tk.Label(self.frame_pdf_inputs, text="Plik PDF z treścią zadania:", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8")
-        lbl_pdf.pack(anchor="w")
+        tk.Label(self.frame_pdf_inputs, text="Plik PDF z treścią zadania:", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
 
-        row_pdf = tk.Frame(self.frame_pdf_inputs, bg="#121722")
+        row_pdf = tk.Frame(self.frame_pdf_inputs, bg="#111726", highlightthickness=0)
         row_pdf.pack(fill="x", pady=(2, 6))
 
-        self.entry_pdf_path = tk.Entry(row_pdf, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 10))
-        self.entry_pdf_path.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.entry_pdf_path = tk.Entry(row_pdf, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 10))
+        self.entry_pdf_path.pack(side="left", fill="x", expand=True, padx=(0, 6), ipady=5)
 
         btn_browse_pdf = tk.Button(
-            row_pdf, text="Przeglądaj...", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, command=self._browse_pdf
+            row_pdf, text="Przeglądaj...", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=4, command=self._browse_pdf
         )
         btn_browse_pdf.pack(side="left")
 
-        # Opcjonalny plik ZIP z testami
-        lbl_zip = tk.Label(self.frame_pdf_inputs, text="Archiwum ZIP z testami (opcjonalne):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8")
-        lbl_zip.pack(anchor="w")
+        # Opcjonalny plik ZIP
+        tk.Label(self.frame_pdf_inputs, text="Paczka testów ZIP (opcjonalna):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
 
-        row_zip = tk.Frame(self.frame_pdf_inputs, bg="#121722")
-        row_zip.pack(fill="x", pady=(2, 8))
+        row_zip = tk.Frame(self.frame_pdf_inputs, bg="#111726", highlightthickness=0)
+        row_zip.pack(fill="x", pady=(2, 6))
 
-        self.entry_zip_path = tk.Entry(row_zip, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 10))
-        self.entry_zip_path.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.entry_zip_path = tk.Entry(row_zip, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 10))
+        self.entry_zip_path.pack(side="left", fill="x", expand=True, padx=(0, 6), ipady=5)
 
         btn_browse_zip = tk.Button(
-            row_zip, text="Przeglądaj...", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, command=self._browse_zip
+            row_zip, text="Przeglądaj...", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=4, command=self._browse_zip
         )
         btn_browse_zip.pack(side="left")
 
         # Wspólne pola zadania
-        lbl_code = tk.Label(self.card_new, text="Nazwa / Kod zadania * (np. chw, kol, świ):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8")
-        lbl_code.pack(anchor="w")
+        tk.Label(self.card_new, text="Nazwa / Kod zadania * (np. chw, kol, świ):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.entry_new_code = tk.Entry(self.card_new, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 11))
+        self.entry_new_code.pack(fill="x", pady=(2, 6), ipady=4)
 
-        self.entry_new_code = tk.Entry(self.card_new, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 11))
-        self.entry_new_code.pack(fill="x", pady=(2, 6))
-
-        lbl_title = tk.Label(self.card_new, text="Pełny tytuł (opcjonalny):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8")
-        lbl_title.pack(anchor="w")
-
-        self.entry_new_title = tk.Entry(self.card_new, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 11))
-        self.entry_new_title.pack(fill="x", pady=(2, 6))
+        tk.Label(self.card_new, text="Pełny tytuł (opcjonalny):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.entry_new_title = tk.Entry(self.card_new, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 11))
+        self.entry_new_title.pack(fill="x", pady=(2, 6), ipady=4)
 
         # Wiersz z limitami
-        row_lim = tk.Frame(self.card_new, bg="#121722")
+        row_lim = tk.Frame(self.card_new, bg="#111726", highlightthickness=0)
         row_lim.pack(fill="x", pady=(0, 6))
         row_lim.columnconfigure(0, weight=1, uniform="lim")
         row_lim.columnconfigure(1, weight=1, uniform="lim")
 
-        col_t = tk.Frame(row_lim, bg="#121722")
+        col_t = tk.Frame(row_lim, bg="#111726", highlightthickness=0)
         col_t.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        tk.Label(col_t, text="Czas (s):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8").pack(anchor="w")
-        self.entry_new_time = tk.Entry(col_t, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 10))
+        tk.Label(col_t, text="Czas (s):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.entry_new_time = tk.Entry(col_t, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 10))
         self.entry_new_time.insert(0, "1.0")
-        self.entry_new_time.pack(fill="x", pady=(2, 0))
+        self.entry_new_time.pack(fill="x", pady=(2, 0), ipady=4)
 
-        col_m = tk.Frame(row_lim, bg="#121722")
+        col_m = tk.Frame(row_lim, bg="#111726", highlightthickness=0)
         col_m.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        tk.Label(col_m, text="RAM (MB):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8").pack(anchor="w")
-        self.entry_new_mem = tk.Entry(col_m, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 10))
+        tk.Label(col_m, text="RAM (MB):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.entry_new_mem = tk.Entry(col_m, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 10))
         self.entry_new_mem.insert(0, "128")
-        self.entry_new_mem.pack(fill="x", pady=(2, 0))
+        self.entry_new_mem.pack(fill="x", pady=(2, 0), ipady=4)
 
-        # Sekcja testów ręcznych (widoczna w trybie manual)
-        self.frame_manual_tests = tk.Frame(self.card_new, bg="#121722")
-
-        lbl_tin = tk.Label(self.frame_manual_tests, text="Przykładowe wejście cin (opcjonalne):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8")
-        lbl_tin.pack(anchor="w")
-        self.text_manual_in = tk.Text(self.frame_manual_tests, height=2, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 9))
+        # Sekcja testów ręcznych
+        self.frame_manual_tests = tk.Frame(self.card_new, bg="#111726", highlightthickness=0)
+        tk.Label(self.frame_manual_tests, text="Przykładowe wejście cin (opcjonalne):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.text_manual_in = tk.Text(self.frame_manual_tests, height=2, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 9))
         self.text_manual_in.pack(fill="x", pady=(2, 4))
 
-        lbl_tout = tk.Label(self.frame_manual_tests, text="Oczekiwane wyjście cout (opcjonalne):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8")
-        lbl_tout.pack(anchor="w")
-        self.text_manual_out = tk.Text(self.frame_manual_tests, height=2, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 9))
+        tk.Label(self.frame_manual_tests, text="Oczekiwane wyjście cout (opcjonalne):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.text_manual_out = tk.Text(self.frame_manual_tests, height=2, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 9))
         self.text_manual_out.pack(fill="x", pady=(2, 4))
 
-        # Przycisk tworzenia
+        # Przycisk główny (Zero białych ramek)
         self.btn_submit_create = tk.Button(
             parent, text="⚡ Utwórz Workspace i Otwórz VS Code", font=("Segoe UI", 11, "bold"),
             bg="#0284c7", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", pady=8, command=self._submit_create_task
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2", pady=10, command=self._submit_create_task
         )
         self.btn_submit_create.pack(fill="x")
 
-    def _toggle_new_mode(self):
-        mode = self.new_mode_var.get()
+    def _set_new_mode(self, mode: str):
+        self.current_new_mode = mode
         if mode == "pdf":
+            self.btn_mode_pdf.config(bg="#0284c7", fg="#ffffff")
+            self.btn_mode_manual.config(bg="#131b2c", fg="#94a3b8")
             self.frame_manual_tests.pack_forget()
-            self.frame_pdf_inputs.pack(fill="x", pady=(0, 8))
+            self.frame_pdf_inputs.pack(fill="x", pady=(0, 6))
         else:
+            self.btn_mode_manual.config(bg="#0284c7", fg="#ffffff")
+            self.btn_mode_pdf.config(bg="#131b2c", fg="#94a3b8")
             self.frame_pdf_inputs.pack_forget()
             self.frame_manual_tests.pack(fill="x", pady=(4, 0))
+
+    def set_pdf_file(self, file_path: str):
+        self._set_new_mode("pdf")
+        self.entry_pdf_path.delete(0, "end")
+        self.entry_pdf_path.insert(0, file_path)
+        self._auto_parse_pdf(file_path)
 
     def _browse_pdf(self):
         f = filedialog.askopenfilename(
@@ -291,10 +298,7 @@ class AlgoDeckPanel:
             filetypes=[("Dokumenty PDF", "*.pdf"), ("Wszystkie pliki", "*.*")]
         )
         if f:
-            self.entry_pdf_path.delete(0, "end")
-            self.entry_pdf_path.insert(0, f)
-            # Automatyczne parsowanie wstępne przez backend
-            self._auto_parse_pdf(f)
+            self.set_pdf_file(f)
 
     def _browse_zip(self):
         f = filedialog.askopenfilename(
@@ -325,14 +329,12 @@ class AlgoDeckPanel:
                         self.entry_new_mem.delete(0, "end")
                         self.entry_new_mem.insert(0, str(data["memory_limit_mb"]))
         except Exception:
-            # Uzupełnij przynajmniej z nazwy pliku
             stem = Path(pdf_path).stem.lower()
             if not self.entry_new_code.get().strip():
                 self.entry_new_code.delete(0, "end")
                 self.entry_new_code.insert(0, stem[:5])
 
     def _submit_create_task(self):
-        mode = self.new_mode_var.get()
         code = self.entry_new_code.get().strip().lower()
         if not code:
             messagebox.showwarning("AlgoDeck", "Podaj kod/nazwę zadania!")
@@ -354,7 +356,7 @@ class AlgoDeckPanel:
         self.root.update()
 
         try:
-            if mode == "pdf":
+            if self.current_new_mode == "pdf":
                 pdf_p = self.entry_pdf_path.get().strip()
                 zip_p = self.entry_zip_path.get().strip()
                 if pdf_p and os.path.exists(pdf_p):
@@ -370,11 +372,9 @@ class AlgoDeckPanel:
                     req = urllib.request.Request(f"{API_BASE}/api/auto-import-pdf", data=data, headers={"Content-Type": "application/json"})
                     urllib.request.urlopen(req, timeout=8)
 
-                    # Jeśli wybrano ZIP, dołącz testy
                     if zip_p and os.path.exists(zip_p):
                         self._upload_zip_tests(code, zip_p)
                 else:
-                    # Brak PDF, stwórz manualnie
                     self._send_create_manual(code, title, t_lim, m_lim, [])
             else:
                 tin = self.text_manual_in.get("1.0", "end-1c").strip()
@@ -403,7 +403,7 @@ class AlgoDeckPanel:
         urllib.request.urlopen(req, timeout=5)
 
     def _upload_zip_tests(self, problem_id: str, zip_path: str):
-        boundary = "----AlgoDeckFormBoundary7MA4YWxkTrZu0gW"
+        boundary = "----AlgoDeckBoundaryZip998877"
         with open(zip_path, "rb") as zf:
             zip_bytes = zf.read()
 
@@ -422,25 +422,23 @@ class AlgoDeckPanel:
 
     # ----------------- Zakładka 2: Zarządzanie Zadaniami -----------------
     def _build_tab_tasks(self, parent):
-        top_bar = tk.Frame(parent, bg="#0b0e14")
+        top_bar = tk.Frame(parent, bg="#080b11", highlightthickness=0)
         top_bar.pack(fill="x", pady=(0, 8))
 
-        lbl_info = tk.Label(top_bar, text="Zapisane zadania w Twoim środowisku:", font=("Segoe UI", 10, "bold"), bg="#0b0e14", fg="#f8fafc")
-        lbl_info.pack(side="left")
+        tk.Label(top_bar, text="Zapisane zadania w Twoim środowisku:", font=("Segoe UI", 10, "bold"), bg="#080b11", fg="#f8fafc", highlightthickness=0).pack(side="left")
 
         btn_refresh = tk.Button(
-            top_bar, text="🔄 Odśwież", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=8, pady=3, command=self.refresh_tasks_list
+            top_bar, text="🔄 Odśwież", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, pady=3, command=self.refresh_tasks_list
         )
         btn_refresh.pack(side="right")
 
-        # Lista zadań (Listbox ze scrollem)
-        list_frame = tk.Frame(parent, bg="#121722", highlightbackground="#222b3d", highlightthickness=1)
+        list_frame = tk.Frame(parent, bg="#111726", highlightthickness=0)
         list_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        scrollbar = tk.Scrollbar(list_frame, orient="vertical")
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical", relief="flat", bd=0, highlightthickness=0)
         self.tasks_listbox = tk.Listbox(
-            list_frame, bg="#121722", fg="#f8fafc", selectbackground="#0284c7", selectforeground="#ffffff",
+            list_frame, bg="#111726", fg="#f8fafc", selectbackground="#0284c7", selectforeground="#ffffff",
             relief="flat", bd=0, highlightthickness=0, font=("Consolas", 11), yscrollcommand=scrollbar.set, activestyle="none"
         )
         scrollbar.config(command=self.tasks_listbox.yview)
@@ -448,38 +446,37 @@ class AlgoDeckPanel:
         self.tasks_listbox.pack(side="left", fill="both", expand=True, padx=8, pady=8)
         self.tasks_listbox.bind("<<ListboxSelect>>", self._on_task_selected)
 
-        # Panel szczegółów i akcji dla wybranego zadania
-        self.actions_card = tk.Frame(parent, bg="#121722", highlightbackground="#222b3d", highlightthickness=1, padx=12, pady=10)
+        # Panel akcji dla zadania
+        self.actions_card = tk.Frame(parent, bg="#111726", padx=12, pady=10, highlightthickness=0)
         self.actions_card.pack(fill="x")
 
-        self.lbl_selected_title = tk.Label(self.actions_card, text="Wybierz zadanie z listy powyżej", font=("Segoe UI", 10, "bold"), bg="#121722", fg="#38bdf8")
+        self.lbl_selected_title = tk.Label(self.actions_card, text="Wybierz zadanie z listy powyżej", font=("Segoe UI", 10, "bold"), bg="#111726", fg="#38bdf8", highlightthickness=0)
         self.lbl_selected_title.pack(anchor="w", pady=(0, 8))
 
-        btn_row = tk.Frame(self.actions_card, bg="#121722")
+        btn_row = tk.Frame(self.actions_card, bg="#111726", highlightthickness=0)
         btn_row.pack(fill="x")
 
         self.btn_act_activate = tk.Button(
             btn_row, text="▶ Aktywuj na SD", font=("Segoe UI", 9, "bold"), bg="#0284c7", fg="#ffffff",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, pady=6, command=self._act_activate
+            activebackground="#0369a1", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=6, command=self._act_activate
         )
         self.btn_act_activate.pack(side="left", padx=(0, 6))
 
         self.btn_act_vscode = tk.Button(
-            btn_row, text="💻 VS Code", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, pady=6, command=self._act_vscode
+            btn_row, text="💻 VS Code", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=6, command=self._act_vscode
         )
         self.btn_act_vscode.pack(side="left", padx=(0, 6))
 
         self.btn_act_add_zip = tk.Button(
-            btn_row, text="📦 + Testy (ZIP)", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, pady=6, command=self._act_add_tests_zip
+            btn_row, text="📦 + Testy (ZIP)", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=6, command=self._act_add_tests_zip
         )
         self.btn_act_add_zip.pack(side="left", padx=(0, 6))
 
         self.btn_act_delete = tk.Button(
-            btn_row, text="🗑️ Usuń", font=("Segoe UI", 9), bg="#7f1d1d", fg="#fca5a5",
-            activebackground="#991b1b", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0,
-            cursor="hand2", padx=10, pady=6, command=self._act_delete
+            btn_row, text="🗑️ Usuń", font=("Segoe UI", 9, "bold"), bg="#7f1d1d", fg="#fca5a5",
+            activebackground="#991b1b", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=6, command=self._act_delete
         )
         self.btn_act_delete.pack(side="right")
 
@@ -493,7 +490,6 @@ class AlgoDeckPanel:
                 self.problems_cache = data.get("problems", [])
                 self.active_problem_id = (data.get("active") or "").lower()
         except Exception:
-            # Fallback: bezpośredni odczyt z katalogu workspace
             wdir = Path(self.settings.get("workspace_dir", Path.home() / "algodeck-workspace"))
             if wdir.exists():
                 for p in sorted(wdir.iterdir()):
@@ -528,14 +524,12 @@ class AlgoDeckPanel:
             line = f"{prefix}{title} [{pid.upper()}]  •  {t_cnt} testów"
             self.tasks_listbox.insert("end", line)
 
-        # Zaznacz pierwsze zadanie
         self.tasks_listbox.selection_set(0)
         self._on_task_selected()
 
     def _get_selected_problem(self) -> Optional[Dict[str, Any]]:
         sel = self.tasks_listbox.curselection()
-        if not sel:
-            return None
+        if not sel: return None
         idx = sel[0]
         if idx < len(self.problems_cache):
             return self.problems_cache[idx]
@@ -558,8 +552,7 @@ class AlgoDeckPanel:
             urllib.request.urlopen(req, timeout=3)
             os.system(f'notify-send "AlgoDeck" "Aktywowano zadanie: {pid.upper()}" 2>/dev/null || true')
             self.refresh_tasks_list()
-        except Exception as e:
-            # Fallback na lokalny skrypt przełączania
+        except Exception:
             subprocess.run(["bash", "-c", f"$HOME/.local/bin/sd_algo_switch.sh to '{pid}'"])
             self.refresh_tasks_list()
 
@@ -591,7 +584,7 @@ class AlgoDeckPanel:
         prob = self._get_selected_problem()
         if not prob: return
         pid = prob.get("problem_id", "").lower()
-        if messagebox.askyesno("AlgoDeck", f"Czy na pewno chcesz bezpowrotnie usunąć zadanie {pid.upper()} wraz z całym kodem i testami?"):
+        if messagebox.askyesno("AlgoDeck", f"Czy na pewno chcesz bezpowrotnie usunąć zadanie {pid.upper()}?"):
             try:
                 req = urllib.request.Request(f"{API_BASE}/api/problem/{pid}", method="DELETE")
                 urllib.request.urlopen(req, timeout=3)
@@ -602,62 +595,77 @@ class AlgoDeckPanel:
 
     # ----------------- Zakładka 3: Ustawienia Ogólne -----------------
     def _build_tab_settings(self, parent):
-        card = tk.Frame(parent, bg="#121722", highlightbackground="#222b3d", highlightthickness=1, padx=14, pady=14)
+        card = tk.Frame(parent, bg="#111726", padx=16, pady=16, highlightthickness=0)
         card.pack(fill="both", expand=True, pady=(0, 12))
 
         # Katalog roboczy
-        tk.Label(card, text="Główny katalog roboczy zadań (Workspace):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8").pack(anchor="w")
-        row_dir = tk.Frame(card, bg="#121722")
-        row_dir.pack(fill="x", pady=(2, 12))
+        tk.Label(card, text="Główny katalog roboczy zadań (Workspace):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        row_dir = tk.Frame(card, bg="#111726", highlightthickness=0)
+        row_dir.pack(fill="x", pady=(2, 16))
 
-        self.entry_sett_dir = tk.Entry(row_dir, bg="#181f2f", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", highlightbackground="#222b3d", highlightthickness=1, font=("Consolas", 10))
+        self.entry_sett_dir = tk.Entry(row_dir, bg="#182238", fg="#f8fafc", insertbackground="#38bdf8", relief="flat", bd=0, highlightthickness=0, font=("Consolas", 10))
         self.entry_sett_dir.insert(0, self.settings.get("workspace_dir", str(Path.home() / "algodeck-workspace")))
-        self.entry_sett_dir.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.entry_sett_dir.pack(side="left", fill="x", expand=True, padx=(0, 6), ipady=5)
 
         btn_browse_dir = tk.Button(
-            row_dir, text="Przeglądaj...", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, command=self._browse_workspace_dir
+            row_dir, text="Przeglądaj...", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=4, command=self._browse_workspace_dir
         )
         btn_browse_dir.pack(side="left")
 
-        # Tryb Visual Studio Code
-        tk.Label(card, text="Zachowanie Visual Studio Code:", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8").pack(anchor="w")
-        self.vscode_mode_var = tk.StringVar(value=self.settings.get("vscode_mode", "separate_windows"))
+        # Tryb Visual Studio Code (Segmentowy przełącznik BEZ BIAŁYCH KÓŁEK)
+        tk.Label(card, text="Zachowanie Visual Studio Code:", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.current_vscode_mode = self.settings.get("vscode_mode", "single_window")
 
-        rb_sep = tk.Radiobutton(
-            card, text="Osobne, niezależne okno dla każdego zadania (Zalecane)", variable=self.vscode_mode_var, value="separate_windows",
-            bg="#121722", fg="#f8fafc", selectcolor="#1e293b", activebackground="#121722", activeforeground="#38bdf8", font=("Segoe UI", 9)
-        )
-        rb_sep.pack(anchor="w", pady=(2, 0))
+        seg_vsc = tk.Frame(card, bg="#111726", highlightthickness=0)
+        seg_vsc.pack(fill="x", pady=(4, 16))
 
-        rb_single = tk.Radiobutton(
-            card, text="Pojedyncze okno z podfolderami workspace", variable=self.vscode_mode_var, value="single_window",
-            bg="#121722", fg="#f8fafc", selectcolor="#1e293b", activebackground="#121722", activeforeground="#38bdf8", font=("Segoe UI", 9)
+        self.btn_vsc_single = tk.Button(
+            seg_vsc, text="📁 Pojedyncze okno (podfoldery w 1 workspace)", font=("Segoe UI", 9, "bold"),
+            bg="#0284c7" if self.current_vscode_mode == "single_window" else "#182238",
+            fg="#ffffff" if self.current_vscode_mode == "single_window" else "#94a3b8",
+            activebackground="#0369a1", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0,
+            cursor="hand2", padx=12, pady=6, command=lambda: self._set_vsc_mode("single_window")
         )
-        rb_single.pack(anchor="w", pady=(0, 12))
+        self.btn_vsc_single.pack(side="left", padx=(0, 6))
 
-        # Powiadomienia
-        self.notif_var = tk.BooleanVar(value=self.settings.get("notifications", True))
-        cb_notif = tk.Checkbutton(
-            card, text="Włącz powiadomienia systemowe (notify-send)", variable=self.notif_var,
-            bg="#121722", fg="#f8fafc", selectcolor="#1e293b", activebackground="#121722", activeforeground="#38bdf8", font=("Segoe UI", 9)
+        self.btn_vsc_sep = tk.Button(
+            seg_vsc, text="🪟 Osobne okna dla każdego zadania", font=("Segoe UI", 9, "bold"),
+            bg="#0284c7" if self.current_vscode_mode == "separate_windows" else "#182238",
+            fg="#ffffff" if self.current_vscode_mode == "separate_windows" else "#94a3b8",
+            activebackground="#0369a1", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0,
+            cursor="hand2", padx=12, pady=6, command=lambda: self._set_vsc_mode("separate_windows")
         )
-        cb_notif.pack(anchor="w", pady=(0, 16))
+        self.btn_vsc_sep.pack(side="left")
+
+        # Powiadomienia (Własny przełącznik BEZ BIAŁYCH CHECKBOXÓW)
+        tk.Label(card, text="Powiadomienia systemowe (notify-send):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        self.current_notifications = bool(self.settings.get("notifications", True))
+
+        self.btn_notif_toggle = tk.Button(
+            card, text="✔ Powiadomienia włączone" if self.current_notifications else "✖ Powiadomienia wyłączone",
+            font=("Segoe UI", 9, "bold"),
+            bg="#065f46" if self.current_notifications else "#334155",
+            fg="#a7f3d0" if self.current_notifications else "#94a3b8",
+            activebackground="#047857", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0,
+            cursor="hand2", padx=12, pady=6, command=self._toggle_notifications
+        )
+        self.btn_notif_toggle.pack(anchor="w", pady=(4, 16))
 
         # Sekcja Stream Deck
-        tk.Label(card, text="Stream Deck (StreamController Flatpak):", font=("Segoe UI", 9, "bold"), bg="#121722", fg="#94a3b8").pack(anchor="w")
-        row_sd = tk.Frame(card, bg="#121722")
+        tk.Label(card, text="Stream Deck (StreamController Flatpak):", font=("Segoe UI", 9, "bold"), bg="#111726", fg="#94a3b8", highlightthickness=0).pack(anchor="w")
+        row_sd = tk.Frame(card, bg="#111726", highlightthickness=0)
         row_sd.pack(fill="x", pady=(4, 8))
 
         btn_sync_sd = tk.Button(
-            row_sd, text="🔄 Synchronizuj profile Stream Decka", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, pady=6, command=self._sync_streamdeck
+            row_sd, text="🔄 Synchronizuj profile SD", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=6, command=self._sync_streamdeck
         )
         btn_sync_sd.pack(side="left", padx=(0, 8))
 
         btn_idle_sd = tk.Button(
-            row_sd, text="🏠 Pokaż Ekran Zachęty (ALGO_IDLE)", font=("Segoe UI", 9), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=10, pady=6, command=self._show_idle_screen
+            row_sd, text="🏠 Pokaż Ekran Główny (ALGO_IDLE)", font=("Segoe UI", 9), bg="#1e2d4a", fg="#e2e8f0",
+            activebackground="#2b3e66", activeforeground="#ffffff", relief="flat", bd=0, highlightthickness=0, cursor="hand2", padx=12, pady=6, command=self._show_idle_screen
         )
         btn_idle_sd.pack(side="left")
 
@@ -665,9 +673,25 @@ class AlgoDeckPanel:
         btn_save = tk.Button(
             parent, text="💾 Zapisz Ustawienia", font=("Segoe UI", 11, "bold"),
             bg="#0284c7", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff",
-            relief="flat", bd=0, highlightthickness=0, cursor="hand2", pady=8, command=self._save_settings
+            relief="flat", bd=0, highlightthickness=0, cursor="hand2", pady=10, command=self._save_settings
         )
         btn_save.pack(fill="x")
+
+    def _set_vsc_mode(self, mode: str):
+        self.current_vscode_mode = mode
+        if mode == "single_window":
+            self.btn_vsc_single.config(bg="#0284c7", fg="#ffffff")
+            self.btn_vsc_sep.config(bg="#182238", fg="#94a3b8")
+        else:
+            self.btn_vsc_sep.config(bg="#0284c7", fg="#ffffff")
+            self.btn_vsc_single.config(bg="#182238", fg="#94a3b8")
+
+    def _toggle_notifications(self):
+        self.current_notifications = not self.current_notifications
+        if self.current_notifications:
+            self.btn_notif_toggle.config(text="✔ Powiadomienia włączone", bg="#065f46", fg="#a7f3d0")
+        else:
+            self.btn_notif_toggle.config(text="✖ Powiadomienia wyłączone", bg="#334155", fg="#94a3b8")
 
     def _browse_workspace_dir(self):
         d = filedialog.askdirectory(title="Wybierz katalog roboczy dla zadań")
@@ -680,7 +704,7 @@ class AlgoDeckPanel:
             from backend.streamdeck.streamcontroller_bridge import StreamControllerBridge
             bridge = StreamControllerBridge(Path(self.entry_sett_dir.get().strip()))
             bridge.sync_all_problems()
-            messagebox.showinfo("AlgoDeck", "Profile Stream Decka zostały pomyślnie wygenerowane i zsynchronizowane!")
+            messagebox.showinfo("AlgoDeck", "Profile Stream Decka zostały pomyślnie wygenerowane i odświeżone!")
         except Exception as e:
             messagebox.showerror("Błąd", f"Błąd synchronizacji Stream Decka:\n{e}")
 
@@ -690,8 +714,8 @@ class AlgoDeckPanel:
     def _save_settings(self):
         new_settings = {
             "workspace_dir": self.entry_sett_dir.get().strip(),
-            "vscode_mode": self.vscode_mode_var.get(),
-            "notifications": self.notif_var.get()
+            "vscode_mode": self.current_vscode_mode,
+            "notifications": self.current_notifications
         }
         save_user_settings(new_settings)
         self.settings = new_settings
@@ -700,10 +724,11 @@ class AlgoDeckPanel:
 def main():
     parser = argparse.ArgumentParser(description="AlgoDeck - Panel Kontrolny")
     parser.add_argument("--tab", choices=["new", "tasks", "settings"], default="new", help="Początkowa zakładka")
+    parser.add_argument("--pdf", default="", help="Ścieżka do pobranego pliku PDF do automatycznego wczytania")
     args = parser.parse_args()
 
     root = tk.Tk()
-    app = AlgoDeckPanel(root, initial_tab=args.tab)
+    app = AlgoDeckPanel(root, initial_tab=args.tab, initial_pdf=args.pdf)
     root.mainloop()
 
 if __name__ == "__main__":
