@@ -1,169 +1,113 @@
-# AlgoDeck ⚡
-### Zautomatyzowane środowisko do algorytmiki (Szkopuł / MAP / OI) ze wsparciem Stream Decka
+# AlgoDeck ⚡ (Koło MAP)
+### Zautomatyzowane środowisko do algorytmiki i programowania ze wsparciem Stream Decka i rozszerzenia w przeglądarce
 
-> **Cel:** Maksymalne skrócenie czasu od pobrania zadania do rozpoczęcia pisania kodu. Zero ręcznego tworzenia plików, kopiowania testów czy ręcznego konfigurowania skrótów.
-
----
-
-## 🚀 Główny Workflow (User Experience)
-
-1. **Lokalny interfejs webowy (`http://localhost:8080`)**:
-   - Metodą drag-and-drop wrzucasz plik PDF z treścią zadania (np. ze Szkopuła, MAP czy Olimpiady Informatycznej).
-2. **Praca Agenta AI w tle**:
-   - **Analiza treści:** Ekstrakcja limitu czasu, limitu pamięci, formatu wejścia/wyjścia oraz krótkiego identyfikatora zadania (np. `kol` dla *Koleje*).
-   - **Tworzenie katalogu i kodu:** Generowanie dedykowanego katalogu roboczego (`~/algodeck-workspace/<zadanie>/`) z kompletnym olimpijskim szablonem C++20 (szybkie I/O, makra debugujące, typy `ll`, `pii`, `vi`).
-   - **Ekstrakcja i generowanie testów:** Pobranie oficjalnych przykładów z treści oraz automatyczne wygenerowanie **złośliwych testów brzegowych (corner cases)**:
-     - Minimalne dane wejściowe ($N=1$, puste sekwencje, zera).
-     - Wartości skrajne i pułapki na 32-bitowy integer overflow (wymóg `long long`).
-     - Przypadki zdegenerowane (np. grafy niespójne, gwiazdy, cykle).
-   - **Automatyczny start edytora:** Błyskawiczne uruchomienie Visual Studio Code z otwartym plikiem źródłowym i skonfigurowanymi zadaniami kompilacji oraz debugera GDB.
-3. **Dynamiczna integracja ze Stream Deckiem (15 przycisków)**:
-   - Automatyczne wygenerowanie dedykowanego panelu / strony w oprogramowaniu **StreamController** oraz wbudowanym bezpośrednim sterowniku sprzętowym USB.
-   - Odpalanie pojedynczych testów, zbiorczego testu, AddressSanitizera, kopiowanie wejść do schowka (`wl-copy`), pomiar czasu i natychmiastowe ubicie procesu (Kill).
-   - Jeśli nie masz podłączonego fizycznego urządzenia, na stronie działa **wirtualny Stream Deck 3×5** z identycznym zachowaniem i podświetleniem LCD!
-
-```mermaid
-flowchart TD
-    A[📄 Plik PDF z zadaniem] -->|Drag & Drop| B[🌐 Lokalny Web UI :8080]
-    B --> C[🧠 Agent Gemini / Parser Heurystyczny]
-    C --> D[📁 Katalog roboczy & Szablon C++20]
-    C --> E[🧪 Oficjalne testy & Złośliwe Corner Cases]
-    D --> F[💻 Start VS Code & Konfiguracja GDB]
-    E --> G[🎮 Konfiguracja 15 Klawiszy Stream Decka]
-    G --> H[Elgato Stream Deck USB / StreamController]
-    G --> I[Wirtualny Panel Stream Deck w Przeglądarce]
-```
+> **Cel:** Zminimalizowanie progu wejścia i maksymalne skrócenie czasu od pobrania zadania do pisania kodu w Visual Studio Code. Zero żmudnego kopiowania testów, zero ręcznego tworzenia plików `.cpp` czy ręcznej konfiguracji skrótów.
 
 ---
 
-## 🎮 Układ 15 Przycisków Stream Decka (3 wiersze × 5 kolumn)
+## 🚀 Kluczowe Nowości & Architektura v2.0
 
-Dla każdego załadowanego zadania przyciski są konfigurowane automatycznie:
+1. **W 100% Lokalny Parser Olimpijski (Zero AI):**
+   - Całkowicie usunięto zależność od modeli AI i kluczy API.
+   - Błyskawiczny, deterministyczny parser dostosowany do arkuszy zadań z **Koła MAP**, **OIJ**, **OI** oraz **Szkopuła**.
+   - Obsługa plików **PDF** oraz archiwów **ZIP** / folderów z testami:
+     - Struktura z podfolderami `in/` i `out/` (np. `chw0a.in`, `chw0a.out` jak w zadaniu *Chwasty*).
+     - Struktura płaska z samymi plikami wejściowymi `.in` (np. `akc0a.in` .. `akc3f.in` jak w zadaniu *Akcje*). Wzorzec dla testów przykładowych jest automatycznie wyciągany z treści PDF!
 
-| Wiersz | Klawisz 1 | Klawisz 2 | Klawisz 3 | Klawisz 4 | Klawisz 5 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Wiersz 1**<br>*(Kompilacja i Zarządzanie)* | 🔨 **BUILD**<br>`g++ -O3` | 🐞 **DEBUG**<br>`AddressSanitizer` | 🚀 **ALL TESTS**<br>Zbiorcze uruchomienie | ⏱️ **BENCH**<br>Pomiar czasu (ms) | 🛑 **KILL**<br>Natychmiastowy SIGKILL |
-| **Wiersz 2**<br>*(Oficjalne Testy i Schowek)* | 🧪 **TEST 1**<br>Przykład 1 + diff | 🧪 **TEST 2**<br>Przykład 2 + diff | 🧪 **TEST 3**<br>Przykład 3 + diff | 📋 **COPY 1**<br>Kopiuj wejście 1 (`wl-copy`) | 📋 **COPY 2**<br>Kopiuj wejście 2 |
-| **Wiersz 3**<br>*(Corner Cases i Nawigacja)* | ⚠️ **EDGE 1**<br>Corner case $N=1$ | ⚠️ **EDGE 2**<br>Corner case Overflow | ⚔️ **STRESS**<br>Test z brute force | 💻 **VSCODE**<br>Otwórz projekt | 🔄 **ZADANIE**<br>Przełącz następne zadanie |
+2. **Dedykowane Rozszerzenie w Przeglądarce (Chrome / Brave / Firefox):**
+   - Koniec z koniecznością wchodzenia na osobną stronę www!
+   - Rozszerzenie otwiera się bezpośrednio z paska przeglądarki jako okienko popup:
+     - **Import (PDF + ZIP):** Przeciągnij plik PDF zadania i/lub paczkę testów ZIP. System w ułamku sekundy ekstrahuje limity, tworzy workspace olimpijski C++20, ładuje testy, profil Stream Decka i odpala VS Code.
+     - **Ręczny Workspace:** Szybkie tworzenie zadania w 2 sekundy (wymagana tylko nazwa, np. `drzewo`, z opcjonalnym wklejeniem własnego testu wejścia/wyjścia).
+     - **Galeria / Zadania:** Błyskawiczny podgląd wszystkich zadań, 1-click przełączenie aktywnego zadania na Stream Decku oraz otwarcie w VS Code.
+     - **Wbudowany wirtualny Stream Deck:** Przyciski akcji na dole okienka z informacją zwrotną w czasie rzeczywistym.
 
-### Informacja zwrotna na wyświetlaczach LCD przycisków:
-- 🟢 **Szmaragdowy / Zielony:** Test zaliczony (`OK 12ms`), brak wycieków pamięci.
-- 🔴 **Karmazynowy / Czerwony:** Błąd odpowiedzi (`WA`), błąd kompilacji (`CE`) lub błąd wykonania (`RTE / Segfault`).
-- 🟠 **Pomarańczowy:** Przekroczenie limitu czasu (`TLE >1.0s`).
-- 🟡 **Pulsowanie bursztynowe:** Trwa wykonywanie testu (`RUN...`).
-- 🔵 **Niebieski:** Skopiowano wejście do schowka systemowego (`COPIED!`).
+3. **Minimalistyczny Profil Stream Decka (15 Klawiszy):**
+   - Przejście na czyste, nowoczesne symbole bez zbędnych nakładek tekstowych:
+     - `[ 2x0 ]` **BADGE ZADANIA:** Czysty wyświetlacz OLED z kodem zadania (np. `● AKC`).
+     - `[ 0x1 ]` **VS CODE (`< / >`):** Natychmiastowe otwarcie/maksymalizacja okna VS Code z kodem zadania.
+     - `[ 1x1 ]` **TESTUJ (`⚗`):** Uruchomienie kolorowego okna `test.sh` z porównaniem diff i pomiarami czasu.
+     - `[ 2x1 ]` **ODPAL (`▶`):** Kompilacja i uruchomienie w zintegrowanym terminalu VS Code (skrót Ctrl+Shift+B).
+     - `[ 3x1 ]` **KILL (`⏹`):** Natychmiastowe zatrzymanie wiszących procesów i pętli nieskończonych.
+     - `[ 4x1 ]` **GALERIA (`⊞`):** Otwarcie podmenu ze wszystkimi zapisanymi zadaniami.
+     - `[ 0x2 / 4x2 ]` **NAWIGACJA (`‹` i `›`):** Szybkie przełączanie między zadaniami.
+
+4. **Kompletny Instalator One-Liner (100% One-Click):**
+   - Wklejasz jedno polecenie do terminala — wszystko, czego brakowało w systemie, instaluje się automatycznie.
 
 ---
 
-## 💻 Instalacja One-Click (Bootstrap dla Fedora KDE Plasma)
+## 💻 Instalacja One-Click (Bootstrap)
 
-Repozytorium zawiera w pełni zautomatyzowany skrypt instalacyjny `bootstrap.sh`, który przygotowuje całą stację roboczą od zera:
+Wystarczy wkleić jedno polecenie w terminalu:
 
-```bash
-# Sklonuj repozytorium i uruchom instalator:
-git clone https://github.com/veritus-git/AlgoDeck.git
-cd AlgoDeck
-chmod +x bootstrap.sh
-./bootstrap.sh
-```
-
-Lub jedno polecenie bezpośrednio z terminala:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/bootstrap.sh | bash
 ```
 
-### Co automatycznie wykonuje skrypt bootstrap:
-1. **Narzędzia C++:**
-   - Instaluje `gcc`, `gcc-c++`, `gdb`, `clang`, `make`, `cmake`, `ninja-build`, `valgrind`, `glibc-devel`, `libstdc++-devel`.
-2. **Narzędzia Wayland & KDE Plasma:**
-   - Instaluje `wl-clipboard` (natywny schowek dla sesji Wayland w KDE Plasma) oraz `xclip`.
-3. **Reguły udev dla Elgato Stream Deck:**
-   - Konfiguruje `/etc/udev/rules.d/60-streamdeck.rules` z prawami dostępu do urządzeń USB bez konieczności roota (`TAG+="uaccess"`, `MODE="0666"`).
-   - Automatycznie przeładowuje podsystem udev (`udevadm control --reload-rules && udevadm trigger`).
-4. **Visual Studio Code:**
-   - Dodaje oficjalne repozytorium Microsoft RPM (`/etc/yum.repos.d/vscode.repo`) i klucz GPG.
-   - Instaluje pakiet `code` oraz oficjalne rozszerzenia: `ms-vscode.cpptools` i `ms-vscode.cpptools-extension-pack`.
-5. **StreamController (Flatpak):**
-   - Dodaje repozytorium Flathub i instaluje `com.core447.StreamController` – natywne linuksowe oprogramowanie do zarządzania Stream Deckiem.
-6. **Backend AlgoDeck:**
-   - Tworzy dedykowany wirtualny folder Pythona w `~/.local/share/algodeck/venv`.
-   - Instaluje zależności: `FastAPI`, `Uvicorn`, `google-genai`, `streamdeck`, `pypdf`, `Pillow`, `websockets`, `psutil`.
-7. **Integracja z systemem:**
-   - Tworzy polecenie `algodeck` w `~/.local/bin/algodeck`.
-   - Tworzy aktywator na pulpicie i w menu programów KDE Plasma (`~/.local/share/applications/algodeck.desktop`).
-   - Konfiguruje opcjonalną usługę użytkownika systemd (`systemctl --user start algodeck`).
+Lub jeśli masz sklonowane repozytorium:
+```bash
+./bootstrap.sh
+```
+
+### Co automatycznie wykonuje skrypt instalacyjny:
+1. **Instaluje kompilatory C++ i narzędzia:** `gcc`, `g++`, `gdb`, `clang`, `make`, `cmake`, `valgrind`, `wl-clipboard`, `xclip`, `wmctrl`, `xdotool`, `gnome-terminal`, `unzip`.
+2. **Konfiguruje uprawnienia Elgato Stream Deck:** Reguły udev USB (`/etc/udev/rules.d/60-streamdeck.rules`).
+3. **Instaluje Visual Studio Code:** Oficjalne repozytorium Microsoftu + rozszerzenie C/C++ (`ms-vscode.cpptools`).
+4. **Instaluje StreamController:** Oprogramowanie do obsługi Stream Decka pod Linuksem z Flathuba.
+5. **Konfiguruje środowisko Pythona i ikony:** Czyste środowisko w `~/.local/share/algodeck/venv` i generowanie minimalistycznych symboli 144×144.
+6. **Rejestruje usługę w systemd:** AlgoDeck uruchamia się jako cichy daemon użytkownika (`systemctl --user enable --now algodeck.service`).
+7. **Przygotowuje rozszerzenie przeglądarki:** Gotowe do załadowania w Chrome/Brave lub uruchomienia poleceniem `algodeck-browser`.
 
 ---
 
-## 🧠 Konfiguracja Agenta Gemini (Konto / CLI / API)
+## 🧩 Korzystanie z Rozszerzenia w Przeglądarce
 
-AlgoDeck wspiera elastyczne metody uwierzytelniania w Google Gemini:
-
-1. **Standardowe logowanie przez konto (Gemini CLI / gcloud ADC):**
-   - Jeśli korzystasz z konta Google zalogowanego w CLI (`gcloud auth application-default login`), pakiet `google-genai` automatycznie wykorzystuje Twoje standardowe limity konta.
-2. **Klucz Gemini API (`GEMINI_API_KEY`):**
-   ```bash
-   export GEMINI_API_KEY="twój-klucz-api"
+### Jak załadować rozszerzenie do Google Chrome / Brave:
+1. Otwórz w przeglądarce adres: `chrome://extensions` (lub `brave://extensions`).
+2. Włącz suwak **Tryb programisty** (Developer mode) w prawym górnym rogu.
+3. Kliknij przycisk **Załaduj rozpakowane** (Load unpacked) w lewym górnym rogu.
+4. Wskaż katalog:
    ```
-   Możesz także wpisać klucz bezpośrednio w oknie ustawień (ikona ⚙️) w przeglądarce.
-3. **Wbudowany parser heurystyczny (100% Offline):**
-   - W przypadku braku połączenia internetowego lub braku klucza API, AlgoDeck automatycznie uruchamia wbudowany algorytm ekstrakcji treści i tabel ze Szkopuła. Nigdy nie zostaniesz zablokowany podczas zawodów!
+   ~/.local/share/algodeck/extension
+   ```
+   *(lub podfolder `extension/` w sklonowanym repozytorium)*.
+5. Przypnij ikonę AlgoDeck ⚡ do paska narzędzi. Gotowe!
+
+*Wskazówka:* Możesz także w każdej chwili wpisać w terminalu `algodeck-browser`, aby otworzyć przeglądarkę z wczytanym rozszerzeniem.
 
 ---
 
-## 📁 Struktura Wygenerowanego Katalogu Zadania
+## 📁 Struktura Wygenerowanego Workspace Zadania
 
-Po upuszczeniu pliku PDF (np. `koleje.pdf`), w `~/algodeck-workspace/kol/` pojawia się:
+Po zaimportowaniu zadania (np. `akcje`), w `~/algodeck-workspace/akc/` tworzy się czysta struktura:
 
 ```
-~/algodeck-workspace/kol/
-├── kol.cpp                     # Główny plik rozwiązania z szablonem olimpijskim
-├── brute.cpp                   # Szablon wzorca naiwnego (do stress-testingu)
-├── gen.py                      # Generator losowych testów (do stress-testingu)
-├── Makefile                    # make (O3), make debug (ASan), make clean
-├── statement.pdf               # Kopia oryginalnej treści zadania
-├── problem.json                # Metadane, limity i rejestr testów
-├── tests/
-│   ├── test_1.in / test_1.out  # Oficjalne testy z treści
-│   ├── test_2.in / test_2.out
-│   ├── edge_1.in / edge_1.out  # Złośliwy test: N=1 / min
-│   └── edge_2.in / edge_2.out  # Złośliwy test: Overflow / max bounds
-├── streamdeck_scripts/         # Skrypty akcji podpinane pod przyciski
-│   ├── 0_build_fast.sh
-│   ├── 1_build_debug.sh
-│   ├── 2_run_all.sh
-│   └── ...
-├── kol_streamcontroller.json   # Wygenerowany profil dla StreamControllera
-└── .vscode/
-    ├── tasks.json              # Zadania kompilacji O3 oraz ASan w VS Code
-    └── launch.json             # Gotowy profil debugera GDB (F5 w VS Code)
+~/algodeck-workspace/akc/
+├── akc.cpp               # JEDYNY WIDOCZNY PLIK dla użytkownika (szablon olimpijski C++20)
+└── .algo/                # Ukryty katalog techniczny
+    ├── statement.pdf     # Oryginalna treść zadania
+    ├── problem.json      # Metadane i spis testów
+    ├── test.sh           # Kolorowy test runner z pomiarami ms i diffem
+    ├── run.sh            # Skrypt odpalania w terminalu VS Code (Ctrl+Shift+B)
+    ├── kill.sh           # Bezpieczny SIGKILL zatrzymujący tylko to zadanie
+    ├── accept.sh         # Skrypt zatwierdzania własnego wyniku jako wzorca
+    └── tests/
+        ├── akc0a.in / akc0a.out   # Oficjalny przykład z treści
+        ├── akc1a.in               # Testy wydajnościowe z paczki ZIP / folderu
+        └── ...
 ```
 
 ---
 
-## 🛠️ Uruchomienie lokalne (Tryb Deweloperski)
+## 🎮 Klawisze Stream Decka
 
-Jeśli chcesz uruchomić serwer ręcznie:
-
-```bash
-# 1. Wejdź do katalogu projektu
-cd algodeck
-
-# 2. Aktywuj środowisko i wystartuj serwer
-./scripts/dev.sh
-```
-
-Serwer uruchomi się pod adresem: **`http://127.0.0.1:8080`**  
-Dokumentacja interaktywna Swagger API dostępna pod: **`http://127.0.0.1:8080/docs`**
-
----
-
-## 🧪 Weryfikacja Działania (Test Jednostkowy)
-
-Możesz w każdej chwili przetestować cały potok (od ekstrakcji PDF po kompilację i diff):
-
-```bash
-./scripts/test_pipeline.py
-```
-
-Skrypt przeprowadza automatyczny test na przykładowym zadaniu olimpijskim *Koleje (IX OI)*.
+| Pozycja | Symbol | Działanie |
+| :--- | :---: | :--- |
+| **Góra (Środek)** | `● AKC` | Dynamiczny badge aktywnego zadania |
+| **Środek 1** | `< / >` | Otwiera i maksymalizuje projekt w VS Code |
+| **Środek 2** | `⚗` | Uruchamia okno testów ze wszystkimi przypadkami |
+| **Środek 3** | `▶` | Odpala program w terminalu VS Code (oczekuje na cin) |
+| **Środek 4** | `⏹` | Natychmiast ubija wiszący proces programu / testów |
+| **Środek 5** | `⊞` | Otwiera galerię zadań na Stream Decku |
+| **Dół Lewo / Prawo** | `‹` oraz `›` | Przełącza na poprzednie / następne zadanie |

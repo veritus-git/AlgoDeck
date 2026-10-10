@@ -19,16 +19,10 @@ class StreamControllerBridge:
         self.workspace_dir = workspace_dir
 
     def ensure_vector_icons(self):
-        """Upewnia się, że ikony w stylu Dev & Secrets istnieją."""
+        """Upewnia się, że geometryczne ikony na czarnym tle istnieją."""
         STREAMCONTROLLER_ICONS.mkdir(parents=True, exist_ok=True)
-        test_icon = STREAMCONTROLLER_ICONS / "icon_test_sec.png"
-        arrow_left = STREAMCONTROLLER_ICONS / "icon_arrow_left.png"
-        if not test_icon.exists() or not arrow_left.exists():
-            try:
-                from backend.streamdeck.icons_generator import generate_icons
-                generate_icons()
-            except Exception as e:
-                logger.warning(f"Nie udało się wygenerować ikon bazowych: {e}")
+        from backend.streamdeck.icons_generator import generate_all_base_icons
+        generate_all_base_icons()
 
     def sync_page_to_streamcontroller(self, page_name: str, page_data: Dict[str, Any]):
         """
@@ -39,7 +33,6 @@ class StreamControllerBridge:
         json_str = json.dumps(page_data, indent=4)
         target_page_path = STREAMCONTROLLER_PAGES / f"{prob_id}.json"
 
-        # 1. Usuń istniejącą wersję strony z pamięci podręcznej StreamControllera
         try:
             subprocess.run([
                 "gdbus", "call", "--session",
@@ -48,11 +41,10 @@ class StreamControllerBridge:
                 "--method", "com.core447.StreamController.RemovePage",
                 prob_id
             ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(0.05)
+            time.sleep(0.04)
         except Exception:
             pass
 
-        # 2. Załaduj zaktualizowany JSON do StreamControllera przez AddPage (co zapisze stronę i zaktualizuje UI)
         gvariant_str = json.dumps(json_str)
         added_ok = False
         try:
@@ -66,31 +58,33 @@ class StreamControllerBridge:
             if res.returncode == 0:
                 added_ok = True
                 logger.info(f"Pomyślnie załadowano stronę {prob_id} do StreamControllera.")
-            else:
-                logger.warning(f"Błąd AddPage DBus: {res.stderr}")
         except Exception as e:
-            logger.warning(f"Wyjątek AddPage DBus: {e}")
+            logger.warning(f"Błąd DBus AddPage: {e}")
 
-        # Jeśli DBus AddPage nie zapisał pliku, zapisujemy bezpośrednio na dysku jako gwarancję
         if not target_page_path.exists() or not added_ok:
             try:
                 target_page_path.write_text(json_str, encoding="utf-8")
             except Exception as e:
                 logger.error(f"Nie udało się zapisać pliku {target_page_path}: {e}")
 
-    def generate_page_for_problem(self, problem_id: str, analysis: Dict[str, Any]) -> bool:
+    def generate_page_for_problem(self, problem_id: str, analysis: Optional[Dict[str, Any]] = None, switch_now: bool = True) -> bool:
         """
-        Zapisuje stronę do StreamControllera z układem:
-        - Rząd 1 (ŚRODEK): [VS CODE] [TESTUJ] [ODPAL] [KILL] [ZADANIA]
-        - Rząd 2 (DÓŁ): [< (POPRZ)]                      [> (NAST)]
+        Zapisuje stronę zadania w StreamControllerze:
+        - Rząd 0 (GÓRA): Środkowe 3 klawisze (1x0, 2x0, 3x0) to DUŻE POJEDYNCZE LITERY zadania (np. [C] [H] [W]).
+        - Rząd 1 (ŚRODEK): [</> VS CODE] [✓ TESTUJ] [▶ ODPAL] [⏹ KILL] [⊞ GALERIA]
+        - Rząd 2 (DÓŁ): [‹ POPRZEDNIE]                        [› NASTĘPNE]
+        Wszystkie klawisze mają czyste czarne tło i brak nakładanych napisów (labels: {}).
         """
         prob_id = problem_id.upper()
         pdir = (self.workspace_dir / problem_id.lower()).resolve()
+        analysis = analysis or {}
 
         STREAMCONTROLLER_PAGES.mkdir(parents=True, exist_ok=True)
         self.ensure_vector_icons()
 
-        # Ikony
+        from backend.streamdeck.icons_generator import generate_letter_icon
+
+        # Ikony akcji na czarnym tle
         icon_vscode = STREAMCONTROLLER_ICONS / "icon_vscode_sec.png"
         icon_test = STREAMCONTROLLER_ICONS / "icon_test_sec.png"
         icon_play = STREAMCONTROLLER_ICONS / "icon_play_sec.png"
@@ -101,18 +95,14 @@ class StreamControllerBridge:
 
         # Komendy
         vscode_cmd = f'$HOME/.local/bin/sd_algo_code.sh "{pdir}" "{pdir}/{problem_id}.cpp"'
-        # TESTUJ: systemowy gnome-terminal z pełnym podglądem wejścia/wyjścia/diffów
         test_cmd = f'gnome-terminal --title="AlgoDeck Testy - {prob_id}" -- bash "{pdir}/.algo/test.sh" 2>/dev/null || x-terminal-emulator -e bash "{pdir}/.algo/test.sh"'
-        # ODPAL: wbudowany terminal VS Code
         run_cmd = f'$HOME/.local/bin/sd_algo_run_vscode.sh "{pdir}" "{problem_id}"'
         kill_cmd = f'bash "{pdir}/.algo/kill.sh"'
-        # ZADANIA: otwiera SUBMENU z listą zadań
         menu_cmd = f'$HOME/.local/bin/sd_algo_switch.sh menu "{problem_id}"'
-        # Nawigacja na dole: < i >
         prev_cmd = f'$HOME/.local/bin/sd_algo_switch.sh prev "{problem_id}"'
         next_cmd = f'$HOME/.local/bin/sd_algo_switch.sh next "{problem_id}"'
 
-        def make_key(cmd: str, icon_path: Optional[Path] = None, labels: Optional[Dict[str, Any]] = None):
+        def make_key(cmd: str, icon_path: Optional[Path] = None):
             state_data: Dict[str, Any] = {
                 "actions": [
                     {
@@ -122,9 +112,9 @@ class StreamControllerBridge:
                         }
                     }
                 ],
-                "labels": labels or {},
+                "labels": {},  # Puste labels - zero nakładających się napisów!
                 "background": {
-                    "color": [16, 18, 27, 255]
+                    "color": [0, 0, 0, 255]
                 },
                 "image-control-action": 0,
                 "label-control-actions": [0, 0, 0],
@@ -144,168 +134,182 @@ class StreamControllerBridge:
                 }
             }
 
-        # RZĄD 0 (GÓRA): Dynamiczny wskaźnik nazwy aktywnego zadania z automatu
-        title = (analysis.get("title") or prob_id).strip()
-        from backend.streamdeck.icons_generator import generate_active_task_badge
-        icon_badge = generate_active_task_badge(problem_id, title)
-        badge_cmd = f'notify-send "AlgoDeck" "Zadanie: {title} ({prob_id})" 2>/dev/null || true'
+        # 1. RZĄD 0: Środkowe 3 klawisze to pojedyncze litery kodu zadania (np. C H W)
+        letters = list(prob_id[:3].ljust(3))
+        icon_l1 = generate_letter_icon(letters[0])
+        icon_l2 = generate_letter_icon(letters[1])
+        icon_l3 = generate_letter_icon(letters[2])
 
-        # Etykiety natywne StreamControllera jako gwarancja natychmiastowego wyświetlania
-        badge_labels = {
-            "top": {
-                "text": "● ZADANIE",
-                "font_size": 10,
-                "color": [56, 189, 248, 255],
-                "alignment": "center"
-            },
-            "center": {
-                "text": title.upper()[:12],
-                "font_size": 16 if len(title) <= 6 else 13,
-                "color": [255, 255, 255, 255],
-                "alignment": "center"
-            },
-            "bottom": {
-                "text": f"[{prob_id}]",
-                "font_size": 11,
-                "color": [148, 163, 184, 255],
-                "alignment": "center"
-            }
-        }
+        info_cmd = f'notify-send "AlgoDeck" "Zadanie: {analysis.get("title", prob_id)} [{prob_id}]" 2>/dev/null || true'
 
         page_data = {
             "screensaver": {},
             "keys": {
-                # RZĄD 0 (GÓRA):
-                # 2x0: Dynamiczna nazwa aktualnego zadania wygenerowana z automatu dla każdego PDF
-                "2x0": make_key(badge_cmd, icon_badge, labels=badge_labels),
+                # RZĄD 0 (GÓRA): Pojedyncze 3 litery na środkowych klawiszach (1x0, 2x0, 3x0)
+                "1x0": make_key(info_cmd, icon_l1),
+                "2x0": make_key(info_cmd, icon_l2),
+                "3x0": make_key(info_cmd, icon_l3),
 
-                # RZĄD 1 (ŚRODEK):
-                # 0x1: VS CODE (na maksa z lewej)
-                # 1x1: TESTUJ (po lewej od środka)
-                # 2x1: ODPAL (NA ŚRODKU)
-                # 3x1: KILL (po prawej od środka)
-                # 4x1: ZADANIA (na maksa z prawej - otwiera submenu)
+                # RZĄD 1 (ŚRODEK): Główne przyciski akcji
                 "0x1": make_key(vscode_cmd, icon_vscode),
                 "1x1": make_key(test_cmd, icon_test),
                 "2x1": make_key(run_cmd, icon_play),
                 "3x1": make_key(kill_cmd, icon_kill),
                 "4x1": make_key(menu_cmd, icon_task),
 
-                # RZĄD 2 (DÓŁ): Nawigacja estetycznymi strzałkami bez tekstu
-                # 0x2: < (Poprzednie zadanie)
-                # 4x2: > (Następne zadanie)
+                # RZĄD 2 (DÓŁ): Nawigacja szewronami
                 "0x2": make_key(prev_cmd, icon_arrow_left),
                 "4x2": make_key(next_cmd, icon_arrow_right),
             }
         }
 
-        # Zsynchronizuj stronę z bazą i pamięcią StreamControllera
         self.sync_page_to_streamcontroller(prob_id, page_data)
-
-        # Zaktualizuj także stronę submenu z wszystkimi zadaniami
-        self.generate_menu_page()
-
-        # Natychmiast przełącz na tę stronę
-        self.switch_to_page(prob_id)
+        self.generate_menu_page(active_id=problem_id.lower())
+        if switch_now:
+            self.switch_to_page(prob_id)
         return True
 
-    def generate_menu_page(self):
+    def remove_problem(self, problem_id: str):
+        """Usuwa stronę zadania ze StreamControllera i odświeża menu."""
+        prob_id = problem_id.upper()
+        target_page_path = STREAMCONTROLLER_PAGES / f"{prob_id}.json"
+        try:
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "com.core447.StreamController.RemovePage",
+                prob_id
+            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        target_page_path.unlink(missing_ok=True)
+        (STREAMCONTROLLER_ICONS / f"task_{problem_id.lower()}.png").unlink(missing_ok=True)
+        self.generate_menu_page()
+
+    def sync_all_problems(self):
+        """Automatycznie generuje i synchronizuje czyste profile dla wszystkich zadań w workspace."""
+        self.ensure_vector_icons()
+        if not self.workspace_dir.exists():
+            return
+        
+        for p in sorted(self.workspace_dir.iterdir()):
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            pid = p.name.lower()
+            if pid in ("tests",):
+                continue
+            
+            mfile = p / ".algo" / "problem.json"
+            if not mfile.exists():
+                mfile = p / "problem.json"
+            
+            analysis = {"problem_id": pid, "title": pid.upper()}
+            if mfile.exists():
+                try:
+                    analysis = json.loads(mfile.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            
+            self.generate_page_for_problem(pid, analysis, switch_now=False)
+        
+        self.generate_menu_page()
+
+    def generate_menu_page(self, active_id: str = ""):
         """
-        Generuje stronę ALGO_MENU (Submenu ze wszystkimi zadaniami).
-        Każde zadanie ma pełną nazwę i skalowaną czcionkę.
-        Zawiera także strzałkę powrotu ← do aktywnego zadania.
+        Generuje galerię zadań (ALGO_MENU):
+        - Zadania zajmują górne 10 przycisków (Rząd 0: 5 zadań, Rząd 1: 5 zadań).
+        - Dolny lewy przycisk (0x2) to powrót ← do aktywnego zadania.
+        - Jeśli zadań jest > 10, w prawym dolnym rogu (4x2) pojawia się strzałka › do kolejnej strony.
+        - Grafiki samych zadań zachowane w oryginalnym, dopracowanym stylu.
         """
         from backend.streamdeck.icons_generator import generate_task_button_icon
 
-        keys: Dict[str, Any] = {}
         icon_back = STREAMCONTROLLER_ICONS / "icon_arrow_back.png"
+        icon_next = STREAMCONTROLLER_ICONS / "icon_arrow_right.png"
+        icon_prev = STREAMCONTROLLER_ICONS / "icon_arrow_left.png"
 
-        # 1. Przycisk powrotu do aktywnego zadania (Rząd 2, Lewy dół: 0x2)
-        keys["0x2"] = {
-            "states": {
-                "0": {
-                    "actions": [
-                        {
-                            "id": "com_core447_OSPlugin::EasyCommand",
-                            "settings": {
-                                "command": "$HOME/.local/bin/sd_algo_menu_back.sh"
-                            }
-                        }
-                    ],
-                    "labels": {},
-                    "background": {"color": [16, 18, 27, 255]},
-                    "media": {
-                        "path": str(icon_back.resolve()),
-                        "size": 1.0, "valign": 0.0, "halign": 0.0, "fill-mode": "cover"
-                    },
-                    "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0
-                }
-            }
-        }
-
-        # 2. Zbierz wszystkie zapisane zadania
+        # Zbierz wszystkie zadania
         projects: List[Dict[str, str]] = []
         if self.workspace_dir.exists():
             for p in sorted(self.workspace_dir.iterdir()):
-                if not p.is_dir():
+                if not p.is_dir() or p.name.startswith("."):
                     continue
                 pid = p.name.lower()
-                if pid == "tests":
+                if pid in ("tests",):
                     continue
                 
-                # Odczytaj tytuł z manifestu
                 title = pid.upper()
                 mfile = p / ".algo" / "problem.json"
                 if not mfile.exists():
                     mfile = p / "problem.json"
                 if mfile.exists():
                     try:
-                        mdata = json.loads(mfile.read_text(encoding="utf-8"))
-                        title = mdata.get("title") or pid.upper()
+                        m = json.loads(mfile.read_text(encoding="utf-8"))
+                        title = m.get("title", title)
                     except Exception:
                         pass
-                
                 projects.append({"id": pid, "title": title})
 
-        # 3. Rozmieść zadania na siatce (wiersz 0 i 1)
-        grid_positions = [
+        # Pozycje dla 10 zadań (2 górne rzędy)
+        slot_positions = [
             "0x0", "1x0", "2x0", "3x0", "4x0",
             "0x1", "1x1", "2x1", "3x1", "4x1"
         ]
 
-        for i, proj in enumerate(projects[:len(grid_positions)]):
-            pos = grid_positions[i]
-            pid = proj["id"]
-            title = proj["title"]
+        # Podział na strony (po 10 zadań)
+        chunk_size = 10
+        total_pages = max(1, (len(projects) + chunk_size - 1) // chunk_size)
 
-            # Wygeneruj ikonę z pełną nazwą
-            task_icon_path = generate_task_button_icon(pid, title)
-            switch_cmd = f'$HOME/.local/bin/sd_algo_switch.sh to "{pid}"'
+        for page_idx in range(total_pages):
+            page_name = "ALGO_MENU" if page_idx == 0 else f"ALGO_MENU_{page_idx + 1}"
+            start_i = page_idx * chunk_size
+            page_projects = projects[start_i : start_i + chunk_size]
 
-            task_labels = {
-                "center": {
-                    "text": title.upper()[:12],
-                    "font_size": 16 if len(title) <= 6 else 12,
-                    "color": [255, 255, 255, 255],
-                    "alignment": "center"
+            keys: Dict[str, Any] = {}
+
+            # 1. Dodaj zadania w 2 górnych rzędach
+            for idx, proj in enumerate(page_projects):
+                pos = slot_positions[idx]
+                pid = proj["id"]
+                title = proj["title"]
+                is_active = (pid == active_id.lower())
+
+                icon_path = generate_task_button_icon(pid, title, is_active=is_active)
+                cmd = f'$HOME/.local/bin/sd_algo_switch.sh to "{pid}"'
+
+                keys[pos] = {
+                    "states": {
+                        "0": {
+                            "actions": [{"id": "com_core447_OSPlugin::EasyCommand", "settings": {"command": cmd}}],
+                            "labels": {},
+                            "background": {"color": [0, 0, 0, 255]},
+                            "media": {
+                                "path": str(icon_path.resolve()),
+                                "size": 1.0, "valign": 0.0, "halign": 0.0, "fill-mode": "cover"
+                            },
+                            "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0
+                        }
+                    }
                 }
-            }
 
-            keys[pos] = {
+            # 2. Przycisk powrotu w lewym dolnym rogu (0x2)
+            if page_idx == 0:
+                back_cmd = "$HOME/.local/bin/sd_algo_menu_back.sh"
+                back_icon = icon_back
+            else:
+                prev_target = "ALGO_MENU" if page_idx == 1 else f"ALGO_MENU_{page_idx}"
+                back_cmd = f'gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "{SERIAL}" "{prev_target}" >/dev/null 2>&1 || true'
+                back_icon = icon_prev
+
+            keys["0x2"] = {
                 "states": {
                     "0": {
-                        "actions": [
-                            {
-                                "id": "com_core447_OSPlugin::EasyCommand",
-                                "settings": {
-                                    "command": switch_cmd
-                                }
-                            }
-                        ],
-                        "labels": task_labels,
-                        "background": {"color": [16, 18, 27, 255]},
+                        "actions": [{"id": "com_core447_OSPlugin::EasyCommand", "settings": {"command": back_cmd}}],
+                        "labels": {},
+                        "background": {"color": [0, 0, 0, 255]},
                         "media": {
-                            "path": str(task_icon_path.resolve()),
+                            "path": str(back_icon.resolve()),
                             "size": 1.0, "valign": 0.0, "halign": 0.0, "fill-mode": "cover"
                         },
                         "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0
@@ -313,45 +317,38 @@ class StreamControllerBridge:
                 }
             }
 
-        menu_page_data = {
-            "screensaver": {},
-            "keys": keys
-        }
+            # 3. Jeśli są kolejne zadania, w prawym dolnym rogu (4x2) pojawia się strzałka w prawo ›
+            if page_idx < total_pages - 1:
+                next_target = f"ALGO_MENU_{page_idx + 2}"
+                next_cmd = f'gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "{SERIAL}" "{next_target}" >/dev/null 2>&1 || true'
+                keys["4x2"] = {
+                    "states": {
+                        "0": {
+                            "actions": [{"id": "com_core447_OSPlugin::EasyCommand", "settings": {"command": next_cmd}}],
+                            "labels": {},
+                            "background": {"color": [0, 0, 0, 255]},
+                            "media": {
+                                "path": str(icon_next.resolve()),
+                                "size": 1.0, "valign": 0.0, "halign": 0.0, "fill-mode": "cover"
+                            },
+                            "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0
+                        }
+                    }
+                }
 
-        self.sync_page_to_streamcontroller("ALGO_MENU", menu_page_data)
+            self.sync_page_to_streamcontroller(page_name, {"screensaver": {}, "keys": keys})
 
-    def switch_to_page(self, page_name: str):
-        """Przełącza aktywną stronę na Stream Decku."""
-        page_upper = page_name.upper()
-
-        # Zapisz w pliku pomocniczym
+    def switch_to_page(self, page_name: str) -> bool:
+        """Wysyła sygnał DBus do StreamControllera, by natychmiast wyświetlić stronę na fizycznym Stream Decku."""
+        prob_id = page_name.upper()
         try:
-            Path("/tmp/algodeck_active_task.txt").write_text(page_upper, encoding="utf-8")
-        except Exception:
-            pass
-
-        # 1. Przez ChangePage na głównym obiekcie (najbardziej niezawodne)
-        try:
-            subprocess.run([
+            res = subprocess.run([
                 "gdbus", "call", "--session",
                 "--dest", "com.core447.StreamController",
                 "--object-path", "/com/core447/StreamController",
                 "--method", "com.core447.StreamController.ChangePage",
-                SERIAL, page_upper
-            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logger.info(f"ChangePage na {page_upper} przez DBus.")
+                SERIAL, prob_id
+            ], timeout=2, capture_output=True, text=True)
+            return res.returncode == 0
         except Exception:
-            pass
-
-        # 2. Przez DBus na dedykowanym kontrolerze
-        try:
-            subprocess.run([
-                "gdbus", "call", "--session",
-                "--dest", "com.core447.StreamController",
-                "--object-path", f"/com/core447/StreamController/controllers/{SERIAL}",
-                "--method", "com.core447.StreamController.Controller.SetActivePage",
-                page_upper
-            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logger.info(f"SetActivePage na {page_upper} przez DBus kontrolera.")
-        except Exception:
-            pass
+            return False

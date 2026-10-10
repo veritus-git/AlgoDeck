@@ -41,17 +41,20 @@ class StreamDeckController:
         for i in range(15):
             self._set_key(i, label="", icon="", subtext="", status="IDLE", action="")
 
-        # Rząd 1 (ŚRODEK): 5 głównych przycisków
-        # [VS CODE] [TESTUJ] [ODPAL] [KILL] [ZADANIA]
-        self._set_key(5, label="VSCODE", icon="💻", subtext="OPEN", status="ACTION", action="open_vscode")
-        self._set_key(6, label="TESTUJ", icon="🚀", subtext="ALL", status="OK", action="run_all")
-        self._set_key(7, label="ODPAL", icon="▶️", subtext="RUN", status="DEBUG", action="run_interactive")
-        self._set_key(8, label="KILL", icon="🛑", subtext="STOP", status="DANGER", action="kill_process")
-        self._set_key(9, label="ZADANIA", icon="🔄", subtext="MENU", status="IDLE", action="open_menu")
+        # Rząd 0: Wskaźnik aktywnego zadania (Klawisz 2)
+        self._set_key(2, label=self.active_problem_id.upper(), icon="●", subtext="", status="OK", action="notify_task")
 
-        # Rząd 2 (DÓŁ): Nawigacja estetycznymi strzałkami bez tekstu
-        self._set_key(10, label="<", icon="◀", subtext="", status="IDLE", action="prev_task")
-        self._set_key(14, label=">", icon="▶", subtext="", status="IDLE", action="next_task")
+        # Rząd 1 (ŚRODEK): 5 głównych przycisków akcji (czyste symbole)
+        # [</>] [⚗] [▶] [⏹] [⊞]
+        self._set_key(5, label="CODE", icon="</>", subtext="", status="ACTION", action="open_vscode")
+        self._set_key(6, label="TEST", icon="⚗", subtext="", status="OK", action="run_all")
+        self._set_key(7, label="RUN", icon="▶", subtext="", status="DEBUG", action="run_interactive")
+        self._set_key(8, label="KILL", icon="⏹", subtext="", status="DANGER", action="kill_process")
+        self._set_key(9, label="MENU", icon="⊞", subtext="", status="IDLE", action="open_menu")
+
+        # Rząd 2 (DÓŁ): Nawigacja szewronami ‹ i ›
+        self._set_key(10, label="", icon="‹", subtext="", status="IDLE", action="prev_task")
+        self._set_key(14, label="", icon="›", subtext="", status="IDLE", action="next_task")
 
         self._notify_listeners()
 
