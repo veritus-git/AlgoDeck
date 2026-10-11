@@ -61,8 +61,69 @@ class StreamControllerBridge:
         entries.sort(key=lambda x: (x[0], x[1]))
         return [pid for _, pid in entries]
 
+    def ensure_os_plugin(self) -> bool:
+        """
+        Upewnia się, że oficjalny plugin com_core447_OSPlugin jest zainstalowany w StreamControllerze.
+        Bez niego na przyciskach pojawia się ostrzegawcza kropka, a akcje 'EasyCommand' nie działają.
+        """
+        plugin_dir = Path.home() / ".var/app/com.core447.StreamController/data/plugins/com_core447_OSPlugin"
+        manifest_file = plugin_dir / "manifest.json"
+        if manifest_file.exists():
+            return True
+
+        logger.info("Instalacja brakującego pluginu com_core447_OSPlugin w StreamControllerze...")
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Kopiuj z lokalnych zasobów offline repozytorium
+        local_resource = Path(__file__).resolve().parent / "resources" / "com_core447_OSPlugin"
+        installed = False
+        if local_resource.exists() and (local_resource / "manifest.json").exists():
+            try:
+                for item in local_resource.glob("*"):
+                    dest = plugin_dir / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dest)
+                installed = True
+                logger.info("Skopiowano com_core447_OSPlugin z lokalnych zasobów AlgoDeck.")
+            except Exception as e:
+                logger.warning(f"Błąd kopiowania lokalnego com_core447_OSPlugin: {e}")
+
+        # 2. Pobierz z sieci jeśli lokalna kopia nie była dostępna
+        if not installed or not manifest_file.exists():
+            try:
+                import urllib.request
+                import tarfile
+                import io
+                url = "https://github.com/StreamController/OSPlugin/archive/refs/heads/main.tar.gz"
+                req = urllib.request.Request(url, headers={"User-Agent": "AlgoDeck"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    tar_bytes = resp.read()
+                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
+                    members = []
+                    for m in tar.getmembers():
+                        parts = Path(m.name).parts
+                        if len(parts) > 1:
+                            m.name = str(Path(*parts[1:]))
+                            members.append(m)
+                    tar.extractall(path=plugin_dir, members=members)
+                installed = True
+                logger.info("Pobrano com_core447_OSPlugin z oficjalnego repozytorium GitHub.")
+            except Exception as e:
+                logger.error(f"Nie udało się pobrać com_core447_OSPlugin: {e}")
+
+        if installed and manifest_file.exists():
+            try:
+                subprocess.run(["flatpak", "kill", "com.core447.StreamController"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+            return True
+        return False
+
     def ensure_vector_icons(self):
-        """Upewnia się, że geometryczne ikony na czarnym tle istnieją."""
+        """Upewnia się, że geometryczne ikony na czarnym tle oraz plugin OS istnieją."""
+        self.ensure_os_plugin()
         STREAMCONTROLLER_ICONS.mkdir(parents=True, exist_ok=True)
         try:
             from backend.streamdeck.icons_generator import generate_all_base_icons
@@ -109,7 +170,7 @@ class StreamControllerBridge:
         """
         Generuje 'Ekran zachęty' (ALGO_IDLE) w stylu minimalistycznego menu głównego:
         - Rząd 0: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ] (Logo jak w instalatorze)
-        - Rząd 1: [   ] [      ] [ ▶ ZACZNIJ ] [      ] [ ⊞ ] (Przycisk Start + powrót do zadań)
+        - Rząd 1: [   ] [      ] [ ▶ ZACZNIJ ] [      ] [   ] (Przycisk Start; 4x1 ZAWSZE pusty)
         - Rząd 2: [ ⚙ ] [      ] [     ] [      ] [   ] (Dyskretne Ustawienia)
         """
         self.ensure_vector_icons()
@@ -119,11 +180,9 @@ class StreamControllerBridge:
         icon_deck = STREAMCONTROLLER_ICONS / "idle_logo_deck.png"
         icon_start = STREAMCONTROLLER_ICONS / "idle_btn_start.png"
         icon_settings = STREAMCONTROLLER_ICONS / "icon_settings.png"
-        icon_task = STREAMCONTROLLER_ICONS / "icon_task_sec.png"
 
         start_cmd = '$HOME/.local/bin/sd_algo_panel.sh --tab=new'
         settings_cmd = '$HOME/.local/bin/sd_algo_panel.sh --tab=settings'
-        menu_cmd = '$HOME/.local/bin/sd_algo_switch.sh menu'
 
         def make_key(cmd: str, icon_path: Optional[Path] = None):
             state_data: Dict[str, Any] = {
@@ -144,9 +203,6 @@ class StreamControllerBridge:
                                  "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0}}
             }
 
-        # Sprawdź czy są jakiekolwiek zadania w workspace
-        has_any_tasks = len(self.get_ordered_problem_ids()) > 0
-
         page_data = {
             "screensaver": {},
             "keys": {
@@ -157,12 +213,12 @@ class StreamControllerBridge:
                 "3x0": make_key(start_cmd, icon_deck),
                 "4x0": make_empty_key(),
 
-                # RZĄD 1: [   ] [   ] [ ▶ ZACZNIJ ] [   ] [ ⊞ ]
+                # RZĄD 1: [   ] [   ] [ ▶ ZACZNIJ ] [   ] [   ]
                 "0x1": make_empty_key(),
                 "1x1": make_empty_key(),
                 "2x1": make_key(start_cmd, icon_start),
                 "3x1": make_empty_key(),
-                "4x1": make_key(menu_cmd, icon_task) if has_any_tasks else make_empty_key(),
+                "4x1": make_empty_key(),
 
                 # RZĄD 2: [ ⚙ ] [   ] [   ] [   ] [   ]
                 "0x2": make_key(settings_cmd, icon_settings),

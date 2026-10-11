@@ -150,12 +150,31 @@ if command -v code &> /dev/null; then
     echo -e "${GREEN}✓ VS Code i rozszerzenia C++ gotowe.${NC}"
 fi
 
-# 5. StreamController (Flatpak)
+# 5. StreamController (Flatpak) oraz oficjalny plugin OS
 echo -e "\n${CYAN}[5/8] Konfiguracja StreamControllera (zarządzanie Stream Deck pod Linuksem)...${NC}"
 if command -v flatpak &> /dev/null; then
     flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
     flatpak install --user -y flathub com.core447.StreamController || true
     echo -e "${GREEN}✓ StreamController zainstalowany.${NC}"
+
+    # Instalacja oficjalnego pluginu OS (com_core447_OSPlugin) dla StreamControllera
+    PLUGIN_DIR="$HOME/.var/app/com.core447.StreamController/data/plugins/com_core447_OSPlugin"
+    if [ ! -f "$PLUGIN_DIR/manifest.json" ]; then
+        echo "Instalacja wymaganego pluginu OS (com_core447_OSPlugin) dla StreamControllera..."
+        mkdir -p "$HOME/.var/app/com.core447.StreamController/data/plugins"
+        rm -rf "$PLUGIN_DIR"
+        mkdir -p "$PLUGIN_DIR"
+
+        # 1. Sprawdź lokalną kopię offline w repozytorium
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [ -d "$SCRIPT_DIR/backend/streamdeck/resources/com_core447_OSPlugin" ]; then
+            cp -r "$SCRIPT_DIR/backend/streamdeck/resources/com_core447_OSPlugin/"* "$PLUGIN_DIR/"
+        else
+            # 2. Pobierz z GitHub
+            curl -fsSL https://github.com/StreamController/OSPlugin/archive/refs/heads/main.tar.gz | tar -xz -C "$PLUGIN_DIR" --strip-components=1 2>/dev/null || true
+        fi
+        echo -e "${GREEN}✓ Plugin com_core447_OSPlugin zainstalowany.${NC}"
+    fi
 fi
 
 # 6. Przygotowanie katalogów i środowiska Python dla AlgoDeck
