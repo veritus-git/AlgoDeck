@@ -29,8 +29,8 @@ jobs:
             binary_name: algodeck-gui
             artifact_name: algodeck-gui-macos-arm64
 
-          # macOS Intel (x86_64)
-          - os: macos-13
+          # macOS Intel (x86_64) - cross-compiled on macos-14 Apple Silicon
+          - os: macos-14
             target: x86_64-apple-darwin
             binary_name: algodeck-gui
             artifact_name: algodeck-gui-macos-x86_64
@@ -89,13 +89,11 @@ jobs:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release_artifacts
+          path: dist
+          merge-multiple: true
 
-      - name: Collect and flatten artifacts
-        run: |
-          mkdir -p dist
-          find release_artifacts -type f -exec cp {} dist/ \;
-          ls -la dist/
+      - name: Verify artifacts
+        run: ls -la dist/
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
