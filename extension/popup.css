@@ -321,7 +321,7 @@ body.detected-mode {
   background-color: rgba(18, 24, 38, 0.7);
   border: 1.5px dashed rgba(56, 189, 248, 0.45);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
   transition: all 0.2s ease;
@@ -336,16 +336,30 @@ body.detected-mode {
 
 .drop-card-body {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 6px;
-  padding: 4px 0;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+  text-align: left;
+}
+
+.drop-card-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.drop-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .card-icon {
-  font-size: 18px;
+  font-size: 20px;
+  flex-shrink: 0;
 }
 
 .card-title {
@@ -365,10 +379,11 @@ body.detected-mode {
   color: #38bdf8;
   font-size: 11.5px;
   font-weight: 600;
-  padding: 5px 14px;
+  padding: 6px 14px;
   border-radius: 6px;
   cursor: pointer;
-  margin-top: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.15s ease;
 }
 

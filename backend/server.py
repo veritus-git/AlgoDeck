@@ -92,7 +92,7 @@ async def startup_event():
     hardware_driver.start(loop)
     try:
         streamcontroller_bridge.ensure_vector_icons()
-        streamcontroller_bridge.sync_all_problems()
+        streamcontroller_bridge.sync_all_problems(default_to_idle=True)
     except Exception as e:
         logger.warning(f"Ostrzeżenie startowe Stream Deck: {e}")
 
@@ -108,7 +108,8 @@ def get_app_settings():
         "workspace_dir": str(settings.workspace_dir),
         "vscode_mode": settings.vscode_mode,
         "notifications": settings.notifications,
-        "auto_detect_downloads": settings.auto_detect_downloads
+        "auto_detect_downloads": settings.auto_detect_downloads,
+        "open_pdf_in_vscode": getattr(settings, "open_pdf_in_vscode", False)
     }
 
 @app.post("/api/settings")
@@ -118,6 +119,7 @@ def update_app_settings(payload: Dict[str, Any] = Body(...)):
     new_mode = payload.get("vscode_mode")
     new_notif = payload.get("notifications")
     new_auto_det = payload.get("auto_detect_downloads")
+    new_pdf_split = payload.get("open_pdf_in_vscode")
 
     saved_data = {}
     if CONFIG_FILE.exists():
@@ -130,6 +132,7 @@ def update_app_settings(payload: Dict[str, Any] = Body(...)):
     if new_mode: saved_data["vscode_mode"] = str(new_mode)
     if new_notif is not None: saved_data["notifications"] = bool(new_notif)
     if new_auto_det is not None: saved_data["auto_detect_downloads"] = bool(new_auto_det)
+    if new_pdf_split is not None: saved_data["open_pdf_in_vscode"] = bool(new_pdf_split)
 
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(saved_data, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -45,6 +45,7 @@ class Settings(BaseModel):
     
     # Automation flags
     auto_launch_vscode: bool = True
+    open_pdf_in_vscode: bool = _cfg.get("open_pdf_in_vscode", False)
     enable_streamdeck_hardware: bool = True
     enable_streamcontroller_bridge: bool = True
 
@@ -54,5 +55,6 @@ class Settings(BaseModel):
         self.vscode_mode = new_cfg.get("vscode_mode", "single_window")
         self.notifications = new_cfg.get("notifications", True)
         self.auto_detect_downloads = new_cfg.get("auto_detect_downloads", True)
+        self.open_pdf_in_vscode = bool(new_cfg.get("open_pdf_in_vscode", False))
 
 settings = Settings()

@@ -1,11 +1,15 @@
 const vscode = require('vscode');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 let server = null;
+let sockServer = null;
+let sockPath = null;
 const PORT = 49152;
 
-function activate(context) {
-    server = http.createServer(async (req, res) => {
+function getRequestHandler() {
+    return async (req, res) => {
         try {
             const parsed = new URL(req.url, `http://127.0.0.1:${PORT}`);
             res.setHeader('Content-Type', 'application/json');
@@ -31,7 +35,6 @@ function activate(context) {
                     }
 
                     if (!executed) {
-                        // Bezpośrednie uruchomienie przez wbudowany terminal VS Code
                         const pdir = parsed.searchParams.get('pdir');
                         const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck') || vscode.window.createTerminal('AlgoDeck');
                         term.show(true);
@@ -66,7 +69,6 @@ function activate(context) {
                     }
 
                     if (!executed) {
-                        // Bezpośrednie uruchomienie przez wbudowany terminal VS Code
                         const pdir = parsed.searchParams.get('pdir');
                         const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck') || vscode.window.createTerminal('AlgoDeck');
                         term.show(true);
@@ -94,21 +96,53 @@ function activate(context) {
                 res.end(JSON.stringify({ status: 'exception', error: String(globalErr) }));
             } catch (_) {}
         }
-    });
+    };
+}
 
+function activate(context) {
+    const handler = getRequestHandler();
+
+    // 1. Serwer HTTP na stałym porcie (wsteczna kompatybilność)
+    server = http.createServer(handler);
     server.on('error', (err) => {
-        // Ignoruj błąd jeśli port jest już zajęty przez inne okno VS Code
-        console.log('[AlgoDeck Bridge] HTTP Server error:', err.message);
+        console.log('[AlgoDeck Bridge] HTTP port zajęty (okno w tle):', err.message);
     });
-
     server.listen(PORT, '127.0.0.1', () => {
         console.log(`[AlgoDeck Bridge] Nasłuchiwanie na 127.0.0.1:${PORT}`);
     });
+
+    // 2. Dedykowany UNIX domain socket dla każdego okna/workspace (niezawodna obsługa wielu okien VS Code)
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+        const wsName = folders[0].name.toLowerCase();
+        sockPath = `/tmp/algodeck_vscode_${wsName}.sock`;
+    } else {
+        sockPath = `/tmp/algodeck_vscode_default.sock`;
+    }
+
+    if (sockPath) {
+        if (fs.existsSync(sockPath)) {
+            try { fs.unlinkSync(sockPath); } catch (_) {}
+        }
+        sockServer = http.createServer(handler);
+        sockServer.on('error', (err) => {
+            console.log('[AlgoDeck Bridge] UNIX socket error:', err.message);
+        });
+        sockServer.listen(sockPath, () => {
+            console.log(`[AlgoDeck Bridge] Nasłuchiwanie na gnieździe UNIX: ${sockPath}`);
+        });
+    }
 
     context.subscriptions.push({
         dispose: () => {
             if (server) {
                 try { server.close(); } catch (_) {}
+            }
+            if (sockServer) {
+                try { sockServer.close(); } catch (_) {}
+            }
+            if (sockPath && fs.existsSync(sockPath)) {
+                try { fs.unlinkSync(sockPath); } catch (_) {}
             }
         }
     });
@@ -117,6 +151,12 @@ function activate(context) {
 function deactivate() {
     if (server) {
         try { server.close(); } catch (_) {}
+    }
+    if (sockServer) {
+        try { sockServer.close(); } catch (_) {}
+    }
+    if (sockPath && fs.existsSync(sockPath)) {
+        try { fs.unlinkSync(sockPath); } catch (_) {}
     }
 }
 

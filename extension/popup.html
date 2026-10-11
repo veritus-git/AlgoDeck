@@ -69,9 +69,13 @@
             <!-- Dropzone PDF -->
             <div class="drop-card" id="drop-pdf">
               <div class="drop-card-body" id="drop-pdf-body">
-                <span class="card-icon">📄</span>
-                <span class="card-title">Treść zadania (.pdf)</span>
-                <p class="drop-hint">Przeciągnij plik PDF tutaj</p>
+                <div class="drop-card-left">
+                  <span class="card-icon">📄</span>
+                  <div class="drop-card-meta">
+                    <span class="card-title">Treść zadania (.pdf)</span>
+                    <p class="drop-hint">Przeciągnij plik PDF tutaj</p>
+                  </div>
+                </div>
                 <button type="button" class="btn-file-select" id="btn-browse-pdf">Wybierz PDF</button>
                 <input type="file" id="file-input-pdf" accept=".pdf" class="hidden">
               </div>
@@ -89,9 +93,13 @@
             <!-- Dropzone ZIP z testami -->
             <div class="drop-card" id="drop-zip">
               <div class="drop-card-body" id="drop-zip-body">
-                <span class="card-icon">📦</span>
-                <span class="card-title">Testy w archiwum (.zip)</span>
-                <p class="drop-hint">Przeciągnij archiwum ZIP tutaj</p>
+                <div class="drop-card-left">
+                  <span class="card-icon">📦</span>
+                  <div class="drop-card-meta">
+                    <span class="card-title">Testy w archiwum (.zip)</span>
+                    <p class="drop-hint">Przeciągnij archiwum ZIP tutaj</p>
+                  </div>
+                </div>
                 <button type="button" class="btn-file-select" id="btn-browse-zip">Wybierz ZIP</button>
                 <input type="file" id="file-input-zip" accept=".zip" class="hidden">
               </div>

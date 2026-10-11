@@ -166,7 +166,7 @@ class StreamControllerBridge:
     def sync_page_to_streamcontroller(self, page_name: str, page_data: Dict[str, Any]):
         """
         Zapisuje stronę na dysk w katalogu stron StreamControllera.
-        StreamController automatycznie monitoruje ten katalog i ładuje definicję w locie bez migania.
+        Wymusza natychmiastowe przeładowanie w pamięci działającego StreamControllera przez DBus (RemovePage + AddPage).
         """
         prob_id = page_name.upper()
         json_str = json.dumps(page_data, indent=4)
@@ -177,29 +177,41 @@ class StreamControllerBridge:
             if target_page_path.exists():
                 try:
                     if target_page_path.read_text(encoding="utf-8") == json_str:
-                        return  # Nic się nie zmieniło, nie dotykaj pliku i nie spamuj D-Bus!
+                        return  # Nic się nie zmieniło
                 except Exception:
                     pass
 
             is_new = not target_page_path.exists()
 
-            # 2. Zapisz zaktualizowany plik na dysku
-            target_page_path.write_text(json_str, encoding="utf-8")
-            logger.info(f"Pomyślnie zapisano stronę {prob_id} dla StreamControllera.")
-
-            # 3. Jeśli to zupełnie nowa strona, zarejestruj ją przez AddPage
-            if is_new:
+            # 2. Jeśli strona już istniała w StreamControllerze, usuń ją z pamięci procesu
+            if not is_new:
                 try:
-                    gvariant_str = json.dumps(json_str)
                     subprocess.run([
                         "gdbus", "call", "--session",
                         "--dest", "com.core447.StreamController",
                         "--object-path", "/com/core447/StreamController",
-                        "--method", "com.core447.StreamController.AddPage",
-                        prob_id, gvariant_str
+                        "--method", "com.core447.StreamController.RemovePage",
+                        prob_id
                     ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:
                     pass
+
+            # 3. Zapisz zaktualizowany plik na dysku
+            target_page_path.write_text(json_str, encoding="utf-8")
+            logger.info(f"Pomyślnie zapisano stronę {prob_id} dla StreamControllera.")
+
+            # 4. Załaduj definicję do pamięci StreamControllera przez AddPage
+            try:
+                gvariant_str = json.dumps(json_str)
+                subprocess.run([
+                    "gdbus", "call", "--session",
+                    "--dest", "com.core447.StreamController",
+                    "--object-path", "/com/core447/StreamController",
+                    "--method", "com.core447.StreamController.AddPage",
+                    prob_id, gvariant_str
+                ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"Nie udało się zapisać pliku {target_page_path}: {e}")
 
@@ -448,7 +460,7 @@ class StreamControllerBridge:
             pass
         return ""
 
-    def sync_all_problems(self):
+    def sync_all_problems(self, default_to_idle: bool = True):
         """Automatycznie generuje i synchronizuje czyste profile dla wszystkich zadań w workspace."""
         self.ensure_vector_icons()
         if not self.workspace_dir.exists():
@@ -484,13 +496,13 @@ class StreamControllerBridge:
             self.generate_page_for_problem(pid, analysis, switch_now=False)
         
         self.generate_menu_page()
-        self.generate_idle_page(switch_now=(count == 0))
+        self.generate_idle_page(switch_now=False)
 
-        if count > 0:
-            target = saved_page if (saved_page and saved_page not in ("Main", "ALGO_IDLE")) else first_prob_id
-            current_active = self.get_active_page_name()
-            if target and target.upper() != current_active.upper():
-                self.switch_to_page(target)
+        valid_pids_upper = [p.upper() for p in ordered_pids]
+        if saved_page and saved_page.upper() in valid_pids_upper:
+            self.switch_to_page(saved_page)
+        elif not default_to_idle and first_prob_id:
+            self.switch_to_page(first_prob_id)
         else:
             self.switch_to_page("ALGO_IDLE")
 

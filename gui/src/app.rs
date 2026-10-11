@@ -707,7 +707,7 @@ impl AlgoDeckApp {
                         }
                     });
 
-                    ui.checkbox(&mut self.settings.open_pdf_in_vscode, "Automatycznie otwieraj treść PDF w VS Code obok kodu");
+                    ui.checkbox(&mut self.settings.open_pdf_in_vscode, "Dziel ekran 50/50: Kod po lewej, treść PDF po prawej");
 
                     ui.add_space(8.0);
 

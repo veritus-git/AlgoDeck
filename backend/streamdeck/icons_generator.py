@@ -76,10 +76,11 @@ def _create_canvas_hi():
 def _downsample(img: Image.Image) -> Image.Image:
     return img.resize(SIZE_FINAL, resample=Image.Resampling.LANCZOS)
 
-def generate_letter_icon(char: str) -> Path:
+def generate_letter_icon(char: str, force: bool = True) -> Path:
     """
     Pojedyncza duża, geometryczna litera (np. 'C', 'H', 'W')
     w CZYSTEJ BIELI (255, 255, 255) na całkowicie czarnym tle (#000000).
+    Zawsze nadpisuje ikony, aby wykluczyć przestarzałe niebieskie znaki.
     """
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
@@ -89,7 +90,7 @@ def generate_letter_icon(char: str) -> Path:
     p1 = ICONS_DIR / filename
     p2 = WORKSPACE_FRONTEND / filename
 
-    if p1.exists():
+    if not force and p1.exists():
         return p1
 
     img, draw = _create_canvas_hi()
@@ -386,12 +387,12 @@ def generate_idle_start_icon() -> Path:
     img.save(p2, format="PNG")
     return p1
 
-def generate_task_number_icon(index: int, total: int) -> Path:
+def generate_task_number_icon(index: int, total: int, force: bool = True) -> Path:
     """Generuje minimalistyczny numer zadania w formacie '1/3'."""
     filename = f"task_num_{index}_{total}.png"
     p1 = ICONS_DIR / filename
     p2 = WORKSPACE_FRONTEND / filename
-    if p1.exists():
+    if not force and p1.exists():
         return p1
 
     img, draw = _create_canvas_hi()

@@ -270,7 +270,7 @@ else
     fi
 fi
 
-# 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code z otwartym folderem)
+# 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code z opcjonalnym 50/50 split PDF)
 cat > "$HOME/.local/bin/sd_algo_code.sh" << 'EOF'
 #!/usr/bin/env bash
 TARGET_DIR="${1:-$HOME/algodeck-workspace}"
@@ -280,43 +280,90 @@ PROB_NAME=$(basename "$TARGET_DIR")
 CONFIG_FILE="$HOME/.config/algodeck/settings.json"
 VSCODE_MODE="single_window"
 WORKSPACE_DIR="$HOME/algodeck-workspace"
+OPEN_PDF_SPLIT="false"
 
 if [ -f "$CONFIG_FILE" ]; then
     MODE_FROM_CFG=$(grep -o '"vscode_mode": *"[^"]*"' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4)
     [ -n "$MODE_FROM_CFG" ] && VSCODE_MODE="$MODE_FROM_CFG"
     DIR_FROM_CFG=$(grep -o '"workspace_dir": *"[^"]*"' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4)
     [ -n "$DIR_FROM_CFG" ] && WORKSPACE_DIR="$DIR_FROM_CFG"
+    PDF_SPLIT_CFG=$(grep -o '"open_pdf_in_vscode": *[^,}]*' "$CONFIG_FILE" 2>/dev/null | awk '{print $2}')
+    [ -n "$PDF_SPLIT_CFG" ] && OPEN_PDF_SPLIT="$PDF_SPLIT_CFG"
 fi
 
 DISP="${DISPLAY:-:0}"
 CODE_BIN=$(command -v code || echo "/usr/bin/code")
 
-# W trybie single_window zawsze otwieramy główny folder algodeck-workspace.
-# W trybie separate_windows otwieramy dedykowany podfolder zadania.
 if [ "$VSCODE_MODE" = "single_window" ]; then
     OPEN_DIR="$WORKSPACE_DIR"
 else
     OPEN_DIR="$TARGET_DIR"
 fi
 
-# Zawsze podajemy katalog roboczy i plik zrodlowy, aby VS Code otworzyl Explorer i plik jednoczesnie!
 if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
     "$CODE_BIN" --reuse-window "$OPEN_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
 else
     "$CODE_BIN" --reuse-window "$OPEN_DIR" >/dev/null 2>&1 &
 fi
 
-# Asynchroniczna petla aktywacji okna (podnosi VS Code ponad przegladarke)
+# Geometria monitora głównego (Primary Display)
+PRIM_LINE=$(xrandr --current 2>/dev/null | grep " connected primary" || xrandr --current 2>/dev/null | grep " connected" | head -n 1)
+GEOM=$(echo "$PRIM_LINE" | grep -oP '\d+x\d+\+\d+\+\d+')
+MON_W=$(echo "$GEOM" | cut -d'x' -f1)
+MON_H=$(echo "$GEOM" | cut -d'x' -f2 | cut -d'+' -f1)
+MON_X=$(echo "$GEOM" | cut -d'+' -f2)
+MON_Y=$(echo "$GEOM" | cut -d'+' -f3)
+
+PDF_FILE=""
+if [ -f "$TARGET_DIR/$PROB_NAME.pdf" ]; then
+    PDF_FILE="$TARGET_DIR/$PROB_NAME.pdf"
+fi
+if [ -z "$PDF_FILE" ]; then
+    PDF_FILE=$(find "$TARGET_DIR" -maxdepth 2 -name "*.pdf" 2>/dev/null | head -n 1)
+fi
+
 (
     for attempt in {1..8}; do
         sleep 0.25
         WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
         if [ -n "$WID" ]; then
-            DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-            DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-            DISPLAY="$DISP" wmctrl -i -R "$WID" 2>/dev/null || true
-            DISPLAY="$DISP" xdotool windowactivate "$WID" 2>/dev/null || true
-            DISPLAY="$DISP" xdotool windowraise "$WID" 2>/dev/null || true
+            if [ "$OPEN_PDF_SPLIT" = "true" ] && [ -n "$PDF_FILE" ] && [ -n "$MON_W" ]; then
+                # Tryb Split 50/50 na głównym ekranie: Kod po lewej, PDF po prawej
+                HALF_W=$(( MON_W / 2 ))
+                RIGHT_X=$(( MON_X + HALF_W ))
+                DISPLAY="$DISP" wmctrl -i -r "$WID" -b remove,maximized_vert,maximized_horz 2>/dev/null || true
+                DISPLAY="$DISP" wmctrl -i -r "$WID" -e "0,$MON_X,$MON_Y,$HALF_W,$MON_H" 2>/dev/null || true
+                DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+
+                # Uruchom czytnik PDF jeśli jeszcze nie jest otwarty
+                if ! pgrep -f "$PDF_FILE" >/dev/null 2>&1; then
+                    if command -v evince >/dev/null 2>&1; then
+                        evince "$PDF_FILE" >/dev/null 2>&1 &
+                    elif command -v xreader >/dev/null 2>&1; then
+                        xreader "$PDF_FILE" >/dev/null 2>&1 &
+                    else
+                        xdg-open "$PDF_FILE" >/dev/null 2>&1 &
+                    fi
+                fi
+
+                # Dopasuj okno PDF do prawej połowy ekranu
+                sleep 0.4
+                PDF_WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -iE "evince|xreader" | tail -n 1 | awk '{print $1}')
+                if [ -n "$PDF_WID" ]; then
+                    DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -b remove,maximized_vert,maximized_horz 2>/dev/null || true
+                    DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -e "0,$RIGHT_X,$MON_Y,$HALF_W,$MON_H" 2>/dev/null || true
+                fi
+                # Przywróć fokus na kodzie
+                DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+            else
+                # Domyślnie pełny ekran na kod
+                DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+                DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+                DISPLAY="$DISP" wmctrl -i -R "$WID" 2>/dev/null || true
+                DISPLAY="$DISP" xdotool windowactivate "$WID" 2>/dev/null || true
+                DISPLAY="$DISP" xdotool windowraise "$WID" 2>/dev/null || true
+            fi
+            break
         fi
     done
 ) &
@@ -335,59 +382,52 @@ fi
 
 DISP="${DISPLAY:-:0}"
 CODE_BIN=$(command -v code || echo "/usr/bin/code")
+PROB_LOWER=$(echo "$PROB" | tr '[:upper:]' '[:lower:]')
+SOCK="/tmp/algodeck_vscode_${PROB_LOWER}.sock"
 
-# 1. Sprawdź czy wewnętrzny bridge w VS Code odpowiada
-BRIDGE_OK=false
-if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-    BRIDGE_OK=true
-fi
-
-if [ "$BRIDGE_OK" = "false" ]; then
-    if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
-        sleep 0.15
-        "$CODE_BIN" --reuse-window -g "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
-    elif [ -n "$PDIR" ]; then
-        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
-    fi
-
-    for i in {1..15}; do
-        sleep 0.1
-        if curl -s --max-time 0.3 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-            BRIDGE_OK=true
-            break
-        fi
-    done
-fi
-
-# 2. Wywołaj bezpośrednio zadanie w VS Code przez bridge HTTP (niezależnie od Wayland / X11)
-if [ "$BRIDGE_OK" = "true" ]; then
-    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/run?pdir=$PDIR" 2>/dev/null)
+# 1. Sprawdź dedykowane gniazdo UNIX dla tego okna zadania
+if [ -S "$SOCK" ]; then
+    RESP=$(curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/run?pdir=$PDIR" 2>/dev/null)
     if echo "$RESP" | grep -q '"ok"'; then
+        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
         exit 0
     fi
 fi
 
-# 3. Fallback dla X11 przez wmctrl / xdotool
-WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+# 2. Sprawdź ogólny port HTTP bridge (49152)
+if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/run?pdir=$PDIR" 2>/dev/null)
+    if echo "$RESP" | grep -q '"ok"'; then
+        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
+        exit 0
+    fi
+fi
+
+# 3. Jeśli okno nie odpowiada, otwórz plik zadania w VS Code i wywołaj ponownie
+if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
+    "$CODE_BIN" --reuse-window "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+elif [ -n "$PDIR" ]; then
+    "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
+fi
+
+for i in {1..15}; do
+    sleep 0.1
+    if [ -S "$SOCK" ]; then
+        curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/run?pdir=$PDIR" 2>/dev/null && exit 0
+    elif curl -s --max-time 0.2 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+        curl -s --max-time 1.0 "http://127.0.0.1:49152/run?pdir=$PDIR" 2>/dev/null && exit 0
+    fi
+done
+
+# 4. Fallback: aktywuj okno VS Code i wyślij skrót uruchomienia zadania
+WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "$PROB" | grep -i "code" | awk '{print $1}' | head -n 1)
+[ -z "$WID" ] && WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
 if [ -n "$WID" ]; then
-    DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-    xdotool windowactivate "$WID" 2>/dev/null || DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
     sleep 0.1
     DISPLAY="$DISP" xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null
     sleep 0.15
-    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null && exit 0 || true
-fi
-
-# 4. Fallback ostateczny: uruchom skrypt bezpośrednio w terminalu
-if [ -n "$PDIR" ] && [ -f "$PDIR/.algo/run.sh" ]; then
-    if command -v gnome-terminal &>/dev/null; then
-        gnome-terminal --title="AlgoDeck: ODPAL ($PROB)" -- bash -c "cd '$PDIR' && bash .algo/run.sh; exec bash" >/dev/null 2>&1 &
-        exit 0
-    elif command -v xterm &>/dev/null; then
-        xterm -title "AlgoDeck: ODPAL ($PROB)" -e "bash -c 'cd \"$PDIR\" && bash .algo/run.sh; exec bash'" >/dev/null 2>&1 &
-        exit 0
-    fi
+    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null || true
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_run_vscode.sh"
@@ -404,59 +444,52 @@ fi
 
 DISP="${DISPLAY:-:0}"
 CODE_BIN=$(command -v code || echo "/usr/bin/code")
+PROB_LOWER=$(echo "$PROB" | tr '[:upper:]' '[:lower:]')
+SOCK="/tmp/algodeck_vscode_${PROB_LOWER}.sock"
 
-# 1. Sprawdź czy wewnętrzny bridge w VS Code odpowiada
-BRIDGE_OK=false
-if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-    BRIDGE_OK=true
-fi
-
-if [ "$BRIDGE_OK" = "false" ]; then
-    if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
-        sleep 0.15
-        "$CODE_BIN" --reuse-window -g "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
-    elif [ -n "$PDIR" ]; then
-        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
-    fi
-
-    for i in {1..15}; do
-        sleep 0.1
-        if curl -s --max-time 0.3 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-            BRIDGE_OK=true
-            break
-        fi
-    done
-fi
-
-# 2. Wywołaj bezpośrednio test w VS Code przez bridge HTTP (niezależnie od Wayland / X11)
-if [ "$BRIDGE_OK" = "true" ]; then
-    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/test?pdir=$PDIR" 2>/dev/null)
+# 1. Sprawdź dedykowane gniazdo UNIX dla tego okna zadania
+if [ -S "$SOCK" ]; then
+    RESP=$(curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/test?pdir=$PDIR" 2>/dev/null)
     if echo "$RESP" | grep -q '"ok"'; then
+        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
         exit 0
     fi
 fi
 
-# 3. Fallback dla X11 przez wmctrl / xdotool
-WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+# 2. Sprawdź ogólny port HTTP bridge (49152)
+if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/test?pdir=$PDIR" 2>/dev/null)
+    if echo "$RESP" | grep -q '"ok"'; then
+        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
+        exit 0
+    fi
+fi
+
+# 3. Jeśli okno nie odpowiada, otwórz plik zadania w VS Code i wywołaj ponownie
+if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
+    "$CODE_BIN" --reuse-window "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+elif [ -n "$PDIR" ]; then
+    "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
+fi
+
+for i in {1..15}; do
+    sleep 0.1
+    if [ -S "$SOCK" ]; then
+        curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/test?pdir=$PDIR" 2>/dev/null && exit 0
+    elif curl -s --max-time 0.2 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+        curl -s --max-time 1.0 "http://127.0.0.1:49152/test?pdir=$PDIR" 2>/dev/null && exit 0
+    fi
+done
+
+# 4. Fallback: aktywuj okno VS Code i wyślij skrót uruchomienia testów
+WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "$PROB" | grep -i "code" | awk '{print $1}' | head -n 1)
+[ -z "$WID" ] && WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
 if [ -n "$WID" ]; then
-    DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-    xdotool windowactivate "$WID" 2>/dev/null || DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
     sleep 0.1
     DISPLAY="$DISP" xdotool key --clearmodifiers F6 2>/dev/null
     sleep 0.15
-    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null && exit 0 || true
-fi
-
-# 4. Fallback ostateczny: uruchom skrypt testowy bezpośrednio w terminalu
-if [ -n "$PDIR" ] && [ -f "$PDIR/.algo/test.sh" ]; then
-    if command -v gnome-terminal &>/dev/null; then
-        gnome-terminal --title="AlgoDeck: TESTUJ ($PROB)" -- bash -c "cd '$PDIR' && bash .algo/test.sh; exec bash" >/dev/null 2>&1 &
-        exit 0
-    elif command -v xterm &>/dev/null; then
-        xterm -title "AlgoDeck: TESTUJ ($PROB)" -e "bash -c 'cd \"$PDIR\" && bash .algo/test.sh; exec bash'" >/dev/null 2>&1 &
-        exit 0
-    fi
+    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null || true
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_test_vscode.sh"

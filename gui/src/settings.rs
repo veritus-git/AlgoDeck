@@ -31,7 +31,7 @@ impl Default for AppSettings {
             auto_detect_downloads: true,
             cpp_standard: "c++20".to_string(),
             sanitize_enabled: false,
-            open_pdf_in_vscode: true,
+            open_pdf_in_vscode: false,
             streamdeck_platform: if cfg!(target_os = "macos") {
                 "macos_elgato".to_string()
             } else if cfg!(target_os = "windows") {
