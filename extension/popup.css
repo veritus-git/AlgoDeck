@@ -321,9 +321,11 @@ body.detected-mode {
   background-color: rgba(18, 24, 38, 0.7);
   border: 1.5px dashed rgba(56, 189, 248, 0.45);
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 16px 16px;
+  min-height: 58px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   transition: all 0.2s ease;
   cursor: pointer;
 }
@@ -340,7 +342,7 @@ body.detected-mode {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  gap: 12px;
+  gap: 14px;
   text-align: left;
 }
 
@@ -348,28 +350,28 @@ body.detected-mode {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .drop-card-meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .card-icon {
-  font-size: 20px;
+  font-size: 24px;
   flex-shrink: 0;
 }
 
 .card-title {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-main);
 }
 
 .drop-hint {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-dim);
 }
 
@@ -377,9 +379,9 @@ body.detected-mode {
   background-color: rgba(2, 132, 199, 0.15);
   border: 1px solid rgba(56, 189, 248, 0.4);
   color: #38bdf8;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 6px 14px;
+  padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;

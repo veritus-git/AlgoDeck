@@ -314,6 +314,10 @@ MON_H=$(echo "$GEOM" | cut -d'x' -f2 | cut -d'+' -f1)
 MON_X=$(echo "$GEOM" | cut -d'+' -f2)
 MON_Y=$(echo "$GEOM" | cut -d'+' -f3)
 
+# Bezpieczna wysokość robocza (Cinnamon panel zabiera ~28px, więc pełne MON_H wypycha pasek tytułowy w górę poza ekran)
+SAFE_H=$(( MON_H - 35 ))
+[ "$SAFE_H" -lt 400 ] && SAFE_H="$MON_H"
+
 PDF_FILE=""
 if [ -f "$TARGET_DIR/$PROB_NAME.pdf" ]; then
     PDF_FILE="$TARGET_DIR/$PROB_NAME.pdf"
@@ -323,35 +327,39 @@ if [ -z "$PDF_FILE" ]; then
 fi
 
 (
-    for attempt in {1..8}; do
+    for attempt in {1..12}; do
         sleep 0.25
         WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
         if [ -n "$WID" ]; then
             if [ "$OPEN_PDF_SPLIT" = "true" ] && [ -n "$PDF_FILE" ] && [ -n "$MON_W" ]; then
-                # Tryb Split 50/50 na głównym ekranie: Kod po lewej, PDF po prawej
-                HALF_W=$(( MON_W / 2 ))
-                RIGHT_X=$(( MON_X + HALF_W ))
+                # Tryb Split 70/30 na głównym ekranie: Kod 70% po lewej, PDF 30% po prawej
+                VSCODE_W=$(( MON_W * 70 / 100 ))
+                PDF_W=$(( MON_W - VSCODE_W ))
+                RIGHT_X=$(( MON_X + VSCODE_W ))
+
                 DISPLAY="$DISP" wmctrl -i -r "$WID" -b remove,maximized_vert,maximized_horz 2>/dev/null || true
-                DISPLAY="$DISP" wmctrl -i -r "$WID" -e "0,$MON_X,$MON_Y,$HALF_W,$MON_H" 2>/dev/null || true
+                DISPLAY="$DISP" wmctrl -i -r "$WID" -e "0,$MON_X,$MON_Y,$VSCODE_W,$SAFE_H" 2>/dev/null || true
                 DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
 
                 # Uruchom czytnik PDF jeśli jeszcze nie jest otwarty
                 if ! pgrep -f "$PDF_FILE" >/dev/null 2>&1; then
-                    if command -v evince >/dev/null 2>&1; then
-                        evince "$PDF_FILE" >/dev/null 2>&1 &
-                    elif command -v xreader >/dev/null 2>&1; then
+                    if command -v xreader >/dev/null 2>&1; then
                         xreader "$PDF_FILE" >/dev/null 2>&1 &
+                    elif command -v atril >/dev/null 2>&1; then
+                        atril "$PDF_FILE" >/dev/null 2>&1 &
+                    elif command -v evince >/dev/null 2>&1; then
+                        evince "$PDF_FILE" >/dev/null 2>&1 &
                     else
                         xdg-open "$PDF_FILE" >/dev/null 2>&1 &
                     fi
                 fi
 
-                # Dopasuj okno PDF do prawej połowy ekranu
+                # Dopasuj okno PDF do prawej części ekranu (30%)
                 sleep 0.4
-                PDF_WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -iE "evince|xreader" | tail -n 1 | awk '{print $1}')
+                PDF_WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -iE "xreader|atril|evince" | tail -n 1 | awk '{print $1}')
                 if [ -n "$PDF_WID" ]; then
                     DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -b remove,maximized_vert,maximized_horz 2>/dev/null || true
-                    DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -e "0,$RIGHT_X,$MON_Y,$HALF_W,$MON_H" 2>/dev/null || true
+                    DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -e "0,$RIGHT_X,$MON_Y,$PDF_W,$SAFE_H" 2>/dev/null || true
                 fi
                 # Przywróć fokus na kodzie
                 DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
@@ -562,6 +570,7 @@ if [ "$ACTION" = "menu" ]; then
     if [ -n "$CURRENT" ]; then
         echo "${CURRENT^^}" > /tmp/algodeck_active_task.txt
     fi
+    curl -s -X POST "http://127.0.0.1:8080/api/streamdeck/menu" >/dev/null 2>&1 || true
     gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_MENU" >/dev/null 2>&1 || true
     exit 0
 fi
@@ -599,7 +608,7 @@ CURRENT_PID="$CURRENT"
 if [ -z "$CURRENT_PID" ] && [ -f /tmp/algodeck_active_task.txt ]; then
     CURRENT_PID=$(cat /tmp/algodeck_active_task.txt 2>/dev/null || true)
 fi
-CURRENT_PID=$(echo "$CURRENT_PID" | tr '[:upper:]' '[:lower:]')
+CURRENT_PID="${CURRENT_PID,,}"
 
 CURR_IDX=0
 for i in "${!PROJECTS[@]}"; do
@@ -610,7 +619,7 @@ for i in "${!PROJECTS[@]}"; do
 done
 
 if [ "$ACTION" = "to" ]; then
-    TARGET=$(echo "$CURRENT" | tr '[:upper:]' '[:lower:]')
+    TARGET="${CURRENT,,}"
 elif [ "$ACTION" = "prev" ]; then
     TARGET_IDX=$(( (CURR_IDX - 1 + COUNT) % COUNT ))
     TARGET="${PROJECTS[$TARGET_IDX]}"
@@ -620,7 +629,7 @@ else
     TARGET="${PROJECTS[$TARGET_IDX]}"
 fi
 
-TARGET_UPPER=$(echo "$TARGET" | tr '[:lower:]' '[:upper:]')
+TARGET_UPPER="${TARGET^^}"
 echo "$TARGET_UPPER" > /tmp/algodeck_active_task.txt
 
 gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "$TARGET_UPPER" >/dev/null 2>&1 || true

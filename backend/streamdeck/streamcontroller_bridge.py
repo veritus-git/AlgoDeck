@@ -167,40 +167,30 @@ class StreamControllerBridge:
         """
         Zapisuje stronę na dysk w katalogu stron StreamControllera.
         Wymusza natychmiastowe przeładowanie w pamięci działającego StreamControllera przez DBus (RemovePage + AddPage).
+        Nigdy nie pomija DBus, aby zapobiec rozsynchronizowaniu pamięci procesu z plikami na dysku.
         """
         prob_id = page_name.upper()
         json_str = json.dumps(page_data, indent=4)
         target_page_path = STREAMCONTROLLER_PAGES / f"{prob_id}.json"
 
         try:
-            # 1. Sprawdź czy plik już istnieje i ma dokładnie taką samą zawartość
-            if target_page_path.exists():
-                try:
-                    if target_page_path.read_text(encoding="utf-8") == json_str:
-                        return  # Nic się nie zmieniło
-                except Exception:
-                    pass
+            # 1. Zawsze usuń starą stronę z pamięci StreamControllera
+            try:
+                subprocess.run([
+                    "gdbus", "call", "--session",
+                    "--dest", "com.core447.StreamController",
+                    "--object-path", "/com/core447/StreamController",
+                    "--method", "com.core447.StreamController.RemovePage",
+                    prob_id
+                ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
 
-            is_new = not target_page_path.exists()
-
-            # 2. Jeśli strona już istniała w StreamControllerze, usuń ją z pamięci procesu
-            if not is_new:
-                try:
-                    subprocess.run([
-                        "gdbus", "call", "--session",
-                        "--dest", "com.core447.StreamController",
-                        "--object-path", "/com/core447/StreamController",
-                        "--method", "com.core447.StreamController.RemovePage",
-                        prob_id
-                    ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
-
-            # 3. Zapisz zaktualizowany plik na dysku
+            # 2. Zapisz zaktualizowany plik na dysku
             target_page_path.write_text(json_str, encoding="utf-8")
             logger.info(f"Pomyślnie zapisano stronę {prob_id} dla StreamControllera.")
 
-            # 4. Załaduj definicję do pamięci StreamControllera przez AddPage
+            # 3. Załaduj definicję do pamięci StreamControllera przez AddPage
             try:
                 gvariant_str = json.dumps(json_str)
                 subprocess.run([
@@ -217,21 +207,19 @@ class StreamControllerBridge:
 
     def generate_idle_page(self, switch_now: bool = False):
         """
-        Generuje 'Ekran zachęty' (ALGO_IDLE) w stylu minimalistycznego menu głównego:
-        - Rząd 0: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ] (Logo jak w instalatorze)
-        - Rząd 1: [   ] [      ] [ ▶ ZACZNIJ ] [      ] [   ] (Przycisk Start; 4x1 ZAWSZE pusty)
-        - Rząd 2: [ ⚙ ] [      ] [     ] [      ] [   ] (Dyskretne Ustawienia)
+        Generuje 'Ekran zachęty' (ALGO_IDLE) zawierający JEDYNIE logo na środku:
+        - Rząd 0: Wszystkie 5 przycisków całkowicie puste
+        - Rząd 1: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ] (Środkowe 3 przyciski to logo)
+        - Rząd 2: Wszystkie 5 przycisków całkowicie puste
+        Zero strzałek, zero trybików, zero zbędnych ikon.
         """
         self.ensure_vector_icons()
 
         icon_algo = STREAMCONTROLLER_ICONS / "idle_logo_algo.png"
         icon_bolt = STREAMCONTROLLER_ICONS / "idle_logo_bolt.png"
         icon_deck = STREAMCONTROLLER_ICONS / "idle_logo_deck.png"
-        icon_start = STREAMCONTROLLER_ICONS / "idle_btn_start.png"
-        icon_settings = STREAMCONTROLLER_ICONS / "icon_settings.png"
 
         start_cmd = '$HOME/.local/bin/sd_algo_panel.sh --tab=new'
-        settings_cmd = '$HOME/.local/bin/sd_algo_panel.sh --tab=settings'
 
         def make_key(cmd: str, icon_path: Optional[Path] = None):
             state_data: Dict[str, Any] = {
@@ -246,11 +234,10 @@ class StreamControllerBridge:
                 }
             return {"states": {"0": state_data}}
 
-
         page_data = {
             "screensaver": {},
             "keys": {
-                # RZĄD 0 (GÓRA): Pusty
+                # RZĄD 0 (GÓRA): Całkowicie pusty
                 "0x0": make_empty_key(),
                 "1x0": make_empty_key(),
                 "2x0": make_empty_key(),
@@ -552,7 +539,10 @@ class StreamControllerBridge:
             start_i = page_idx * chunk_size
             page_projects = projects[start_i : start_i + chunk_size]
 
-            keys: Dict[str, Any] = {}
+            # Pre-inicjalizacja wszystkich 15 slotów (5x3) jako puste, aby nie zostawały stare/widmowe przyciski
+            keys: Dict[str, Any] = {
+                f"{x}x{y}": make_empty_key() for x in range(5) for y in range(3)
+            }
 
             # 1. Dodaj zadania w 2 górnych rzędach
             for idx, proj in enumerate(page_projects):

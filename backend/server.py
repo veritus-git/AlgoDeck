@@ -945,8 +945,15 @@ def switch_task(direction: str = "next"):
 
 @app.post("/api/streamdeck/menu")
 def open_streamdeck_menu():
-    import subprocess
-    subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_algo_switch.sh menu"], timeout=3)
+    active_pid = ""
+    active_file = Path("/tmp/algodeck_active_task.txt")
+    if active_file.exists():
+        try:
+            active_pid = active_file.read_text(encoding="utf-8").strip().lower()
+        except Exception:
+            pass
+    streamcontroller_bridge.generate_menu_page(active_id=active_pid)
+    streamcontroller_bridge.switch_to_page("ALGO_MENU")
     return {"success": True}
 
 @app.post("/api/streamdeck/idle")
