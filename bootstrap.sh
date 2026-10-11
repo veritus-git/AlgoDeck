@@ -332,8 +332,8 @@ fi
         WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
         if [ -n "$WID" ]; then
             if [ "$OPEN_PDF_SPLIT" = "true" ] && [ -n "$PDF_FILE" ] && [ -n "$MON_W" ]; then
-                # Tryb Split 70/30 na głównym ekranie: Kod 70% po lewej, PDF 30% po prawej
-                VSCODE_W=$(( MON_W * 70 / 100 ))
+                # Tryb Split 60/40 na głównym ekranie: Kod 60% po lewej, PDF 40% po prawej
+                VSCODE_W=$(( MON_W * 60 / 100 ))
                 PDF_W=$(( MON_W - VSCODE_W ))
                 RIGHT_X=$(( MON_X + VSCODE_W ))
 
