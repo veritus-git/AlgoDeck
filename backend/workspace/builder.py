@@ -283,8 +283,81 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
             ]
         }
         tasks_file.write_text(json.dumps(tasks_content, indent=4), encoding="utf-8")
+        self.ensure_vscode_environment()
+
+    @staticmethod
+    def ensure_vscode_environment():
+        """
+        Gwarantuje, że:
+        1. Rozszerzenie algodeck-vscode-bridge jest zainstalowane w ~/.vscode/extensions/
+        2. Klawisze F6 i Ctrl+Shift+B oraz skróty terminalowe są bezpośrednio powiązane z zadaniami AlgoDeck
+        3. Okno VS Code jest skonfigurowane do automatycznego otwierania w trybie zmaksymalizowanym
+        """
+        try:
+            # 1. Wewnętrzne rozszerzenie AlgoDeck VS Code Bridge
+            ext_src = Path(__file__).resolve().parent.parent / "vscode_extension"
+            ext_dst = Path.home() / ".vscode/extensions/algodeck-vscode-bridge"
+            if ext_src.exists():
+                ext_dst.mkdir(parents=True, exist_ok=True)
+                for item in ext_src.glob("*"):
+                    shutil.copy2(item, ext_dst / item.name)
+        except Exception as e:
+            logger.debug(f"Błąd kopiowania rozszerzenia VS Code: {e}")
+
+        try:
+            # 2. Keybindings VS Code
+            kb_path = Path.home() / ".config/Code/User/keybindings.json"
+            kb_path.parent.mkdir(parents=True, exist_ok=True)
+            if kb_path.exists():
+                try:
+                    kb_data = json.loads(kb_path.read_text(encoding="utf-8"))
+                except Exception:
+                    kb_data = []
+            else:
+                kb_data = []
+
+            needed = [
+                {"key": "f6", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: TESTUJ"},
+                {"key": "ctrl+alt+e", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: TESTUJ"},
+                {"key": "ctrl+shift+b", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: ODPAL"},
+                {"key": "ctrl+alt+r", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: ODPAL"},
+            ]
+
+            existing_map = {item.get("key", "").lower(): item for item in kb_data if isinstance(item, dict)}
+            modified = False
+            for n in needed:
+                key_l = n["key"].lower()
+                cur = existing_map.get(key_l)
+                if not cur or cur.get("command") != n["command"] or cur.get("args") != n["args"]:
+                    kb_data = [item for item in kb_data if isinstance(item, dict) and item.get("key", "").lower() != key_l]
+                    kb_data.append(n)
+                    modified = True
+
+            if modified:
+                kb_path.write_text(json.dumps(kb_data, indent=4), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Błąd konfiguracji keybindings VS Code: {e}")
+
+        try:
+            # 3. Settings VS Code (Maksymalizacja okna na pełny ekran)
+            settings_path = Path.home() / ".config/Code/User/settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            if settings_path.exists():
+                try:
+                    s_data = json.loads(settings_path.read_text(encoding="utf-8"))
+                except Exception:
+                    s_data = {}
+            else:
+                s_data = {}
+
+            if s_data.get("window.newWindowDimensions") != "maximized":
+                s_data["window.newWindowDimensions"] = "maximized"
+                settings_path.write_text(json.dumps(s_data, indent=4), encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Błąd konfiguracji settings.json VS Code: {e}")
 
     def open_in_vscode(self, problem_dir: Path, source_file: Path):
+        self.ensure_vscode_environment()
         try:
             sd_code_sh = Path(os.path.expanduser("~/.local/bin/sd_algo_code.sh"))
             if sd_code_sh.exists():
@@ -296,7 +369,7 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
                 )
             elif shutil.which("code"):
                 subprocess.Popen(
-                    ["code", str(problem_dir), str(source_file)],
+                    ["code", "--maximized", str(problem_dir), str(source_file)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True

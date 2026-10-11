@@ -63,67 +63,82 @@ class StreamControllerBridge:
 
     def ensure_os_plugin(self) -> bool:
         """
-        Upewnia się, że oficjalny plugin com_core447_OSPlugin jest zainstalowany w StreamControllerze.
-        Bez niego na przyciskach pojawia się ostrzegawcza kropka, a akcje 'EasyCommand' nie działają.
+        Upewnia się, że oficjalny plugin com_core447_OSPlugin jest zainstalowany w StreamControllerze,
+        ma nadane uprawnienia host spawn w Flatpaku oraz jest aktywowany bez konieczności klikania w GUI.
         """
+        # 1. Nadaj uprawnienia host spawn dla Flatpaka StreamController
+        try:
+            subprocess.run(["flatpak", "override", "--user", "--talk-name=org.freedesktop.Flatpak", "com.core447.StreamController"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["flatpak", "override", "--user", "--filesystem=host", "com.core447.StreamController"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
         plugin_dir = Path.home() / ".var/app/com.core447.StreamController/data/plugins/com_core447_OSPlugin"
         manifest_file = plugin_dir / "manifest.json"
-        if manifest_file.exists():
-            return True
 
-        logger.info("Instalacja brakującego pluginu com_core447_OSPlugin w StreamControllerze...")
-        plugin_dir.mkdir(parents=True, exist_ok=True)
+        if not manifest_file.exists():
+            logger.info("Instalacja brakującego pluginu com_core447_OSPlugin w StreamControllerze...")
+            plugin_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Kopiuj z lokalnych zasobów offline repozytorium
-        local_resource = Path(__file__).resolve().parent / "resources" / "com_core447_OSPlugin"
-        installed = False
-        if local_resource.exists() and (local_resource / "manifest.json").exists():
-            try:
-                for item in local_resource.glob("*"):
-                    dest = plugin_dir / item.name
-                    if item.is_dir():
-                        shutil.copytree(item, dest, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(item, dest)
-                installed = True
-                logger.info("Skopiowano com_core447_OSPlugin z lokalnych zasobów AlgoDeck.")
-            except Exception as e:
-                logger.warning(f"Błąd kopiowania lokalnego com_core447_OSPlugin: {e}")
+            # Kopiuj z lokalnych zasobów offline repozytorium
+            local_resource = Path(__file__).resolve().parent / "resources" / "com_core447_OSPlugin"
+            installed = False
+            if local_resource.exists() and (local_resource / "manifest.json").exists():
+                try:
+                    for item in local_resource.glob("*"):
+                        dest = plugin_dir / item.name
+                        if item.is_dir():
+                            shutil.copytree(item, dest, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(item, dest)
+                    installed = True
+                    logger.info("Skopiowano com_core447_OSPlugin z lokalnych zasobów AlgoDeck.")
+                except Exception as e:
+                    logger.warning(f"Błąd kopiowania lokalnego com_core447_OSPlugin: {e}")
 
-        # 2. Pobierz z sieci jeśli lokalna kopia nie była dostępna
-        if not installed or not manifest_file.exists():
-            try:
-                import urllib.request
-                import tarfile
-                import io
-                url = "https://github.com/StreamController/OSPlugin/archive/refs/heads/main.tar.gz"
-                req = urllib.request.Request(url, headers={"User-Agent": "AlgoDeck"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    tar_bytes = resp.read()
-                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
-                    members = []
-                    for m in tar.getmembers():
-                        parts = Path(m.name).parts
-                        if len(parts) > 1:
-                            m.name = str(Path(*parts[1:]))
-                            members.append(m)
-                    tar.extractall(path=plugin_dir, members=members)
-                installed = True
-                logger.info("Pobrano com_core447_OSPlugin z oficjalnego repozytorium GitHub.")
-            except Exception as e:
-                logger.error(f"Nie udało się pobrać com_core447_OSPlugin: {e}")
+            # Pobierz z sieci jeśli lokalna kopia nie była dostępna
+            if not installed or not manifest_file.exists():
+                try:
+                    import urllib.request
+                    import tarfile
+                    import io
+                    url = "https://github.com/StreamController/OSPlugin/archive/refs/heads/main.tar.gz"
+                    req = urllib.request.Request(url, headers={"User-Agent": "AlgoDeck"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        tar_bytes = resp.read()
+                    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
+                        members = []
+                        for m in tar.getmembers():
+                            parts = Path(m.name).parts
+                            if len(parts) > 1:
+                                m.name = str(Path(*parts[1:]))
+                                members.append(m)
+                        tar.extractall(path=plugin_dir, members=members)
+                    installed = True
+                    logger.info("Pobrano com_core447_OSPlugin z oficjalnego repozytorium GitHub.")
+                except Exception as e:
+                    logger.error(f"Nie udało się pobrać com_core447_OSPlugin: {e}")
 
-        if installed and manifest_file.exists():
-            try:
-                subprocess.run(["flatpak", "kill", "com.core447.StreamController"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-            return True
-        return False
+        # 2. Aktywuj plugin live przez D-Bus jeśli StreamController działa (usuwa żółte kropki natychmiast)
+        try:
+            subprocess.run([
+                "gdbus", "call", "--session", "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "org.gtk.Actions.Activate", "install-plugin", "[<'com_core447_OSPlugin'>]", "{}"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        return manifest_file.exists()
 
     def ensure_vector_icons(self):
-        """Upewnia się, że geometryczne ikony na czarnym tle oraz plugin OS istnieją."""
+        """Upewnia się, że geometryczne ikony na czarnym tle, plugin OS oraz integracja VS Code istnieją."""
         self.ensure_os_plugin()
+        try:
+            from backend.workspace.builder import WorkspaceBuilder
+            WorkspaceBuilder.ensure_vscode_environment()
+        except Exception:
+            pass
         STREAMCONTROLLER_ICONS.mkdir(parents=True, exist_ok=True)
         try:
             from backend.streamdeck.icons_generator import generate_all_base_icons

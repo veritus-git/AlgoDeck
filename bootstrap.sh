@@ -157,11 +157,15 @@ if command -v flatpak &> /dev/null; then
     flatpak install --user -y flathub com.core447.StreamController || true
     echo -e "${GREEN}✓ StreamController zainstalowany.${NC}"
 
+    # Uprawnienia Flatpaka do wywoływania skryptów systemowych (host spawn)
+    flatpak override --user --talk-name=org.freedesktop.Flatpak com.core447.StreamController || true
+    flatpak override --user --filesystem=host com.core447.StreamController || true
+
     # Instalacja oficjalnego pluginu OS (com_core447_OSPlugin) dla StreamControllera
     PLUGIN_DIR="$HOME/.var/app/com.core447.StreamController/data/plugins/com_core447_OSPlugin"
+    mkdir -p "$HOME/.var/app/com.core447.StreamController/data/plugins"
     if [ ! -f "$PLUGIN_DIR/manifest.json" ]; then
         echo "Instalacja wymaganego pluginu OS (com_core447_OSPlugin) dla StreamControllera..."
-        mkdir -p "$HOME/.var/app/com.core447.StreamController/data/plugins"
         rm -rf "$PLUGIN_DIR"
         mkdir -p "$PLUGIN_DIR"
 
@@ -175,6 +179,9 @@ if command -v flatpak &> /dev/null; then
         fi
         echo -e "${GREEN}✓ Plugin com_core447_OSPlugin zainstalowany.${NC}"
     fi
+
+    # Aktywuj plugin live przez D-Bus jeśli aplikacja StreamController jest włączona
+    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method org.gtk.Actions.Activate "install-plugin" "[<'com_core447_OSPlugin'>]" "{}" >/dev/null 2>&1 || true
 fi
 
 # 6. Przygotowanie katalogów i środowiska Python dla AlgoDeck
@@ -254,42 +261,45 @@ if [ -f "$CONFIG_FILE" ]; then
     [ -n "$DIR_FROM_CFG" ] && WORKSPACE_DIR="$DIR_FROM_CFG"
 fi
 
+DISP="${DISPLAY:-:0}"
+CODE_BIN=$(command -v code || echo "/usr/bin/code")
+
 if [ "$VSCODE_MODE" = "single_window" ]; then
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+    WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
     if [ -n "$WID" ]; then
         if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-            /usr/bin/code --reuse-window "$TARGET_FILE" >/dev/null 2>&1 &
+            "$CODE_BIN" --reuse-window --maximized "$TARGET_FILE" >/dev/null 2>&1 &
         fi
-        DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+        DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+        DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
         exit 0
     fi
 
     if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-        nohup /usr/bin/code "$WORKSPACE_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+        nohup "$CODE_BIN" --maximized "$WORKSPACE_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
     else
-        nohup /usr/bin/code "$WORKSPACE_DIR" >/dev/null 2>&1 &
+        nohup "$CODE_BIN" --maximized "$WORKSPACE_DIR" >/dev/null 2>&1 &
     fi
 else
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB_NAME" | awk '{print $1}' | head -n 1)
+    WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB_NAME" | awk '{print $1}' | head -n 1)
     if [ -n "$WID" ]; then
-        DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+        DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+        DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
         exit 0
     fi
 
     if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-        nohup /usr/bin/code "$TARGET_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+        nohup "$CODE_BIN" --maximized "$TARGET_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
     else
-        nohup /usr/bin/code "$TARGET_DIR" >/dev/null 2>&1 &
+        nohup "$CODE_BIN" --maximized "$TARGET_DIR" >/dev/null 2>&1 &
     fi
 fi
 
 for i in {1..20}; do
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+    WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
     if [ -n "$WID" ]; then
-        DISPLAY=:0 wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
+        DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+        DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
         exit 0
     fi
     sleep 0.1
@@ -297,7 +307,7 @@ done
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_code.sh"
 
-# 7c. Skrypt sd_algo_run_vscode.sh (Wbudowany terminal VS Code: Ctrl+Shift+B)
+# 7c. Skrypt sd_algo_run_vscode.sh (Wbudowany terminal VS Code: ODPAL)
 cat > "$HOME/.local/bin/sd_algo_run_vscode.sh" << 'EOF'
 #!/usr/bin/env bash
 PDIR="$1"
@@ -307,30 +317,62 @@ if [ -n "$PROB" ]; then
     echo "${PROB^^}" > /tmp/algodeck_active_task.txt
 fi
 
-if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-    code --reuse-window "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+DISP="${DISPLAY:-:0}"
+CODE_BIN=$(command -v code || echo "/usr/bin/code")
+
+# 1. Sprawdź czy wewnętrzny bridge w VS Code odpowiada
+BRIDGE_OK=false
+if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+    BRIDGE_OK=true
 fi
 
-WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB" | awk '{print $1}' | head -n 1)
-if [ -z "$WID" ]; then
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+if [ "$BRIDGE_OK" = "false" ]; then
+    if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
+        "$CODE_BIN" --reuse-window --maximized "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+    elif [ -n "$PDIR" ]; then
+        "$CODE_BIN" --reuse-window --maximized "$PDIR" >/dev/null 2>&1 &
+    fi
+
+    for i in {1..15}; do
+        sleep 0.1
+        if curl -s --max-time 0.3 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+            BRIDGE_OK=true
+            break
+        fi
+    done
 fi
 
-if [ -z "$WID" ]; then
-    code "$PDIR" "$PDIR/$PROB.cpp" &
-    sleep 0.8
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+# 2. Wywołaj bezpośrednio zadanie w VS Code przez bridge HTTP (niezależnie od Wayland / X11)
+if [ "$BRIDGE_OK" = "true" ]; then
+    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/run" 2>/dev/null)
+    if echo "$RESP" | grep -q '"ok"'; then
+        exit 0
+    fi
 fi
 
+# 3. Fallback dla X11 przez wmctrl / xdotool
+WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
 if [ -n "$WID" ]; then
-    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-    sleep 0.15
-    DISPLAY=:0 xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null || true
+    DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+    sleep 0.1
+    DISPLAY="$DISP" xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null && exit 0 || true
+fi
+
+# 4. Fallback ostateczny: uruchom skrypt bezpośrednio w terminalu
+if [ -n "$PDIR" ] && [ -f "$PDIR/.algo/run.sh" ]; then
+    if command -v gnome-terminal &>/dev/null; then
+        gnome-terminal --title="AlgoDeck: ODPAL ($PROB)" -- bash -c "cd '$PDIR' && bash .algo/run.sh; exec bash" >/dev/null 2>&1 &
+        exit 0
+    elif command -v xterm &>/dev/null; then
+        xterm -title "AlgoDeck: ODPAL ($PROB)" -e "bash -c 'cd \"$PDIR\" && bash .algo/run.sh; exec bash'" >/dev/null 2>&1 &
+        exit 0
+    fi
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_run_vscode.sh"
 
-# 7d. Skrypt sd_algo_test_vscode.sh (Wbudowany terminal VS Code: F6 / workbench.action.tasks.test)
+# 7d. Skrypt sd_algo_test_vscode.sh (Wbudowany terminal VS Code: TESTUJ)
 cat > "$HOME/.local/bin/sd_algo_test_vscode.sh" << 'EOF'
 #!/usr/bin/env bash
 PDIR="$1"
@@ -340,25 +382,57 @@ if [ -n "$PROB" ]; then
     echo "${PROB^^}" > /tmp/algodeck_active_task.txt
 fi
 
-if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-    code --reuse-window "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+DISP="${DISPLAY:-:0}"
+CODE_BIN=$(command -v code || echo "/usr/bin/code")
+
+# 1. Sprawdź czy wewnętrzny bridge w VS Code odpowiada
+BRIDGE_OK=false
+if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+    BRIDGE_OK=true
 fi
 
-WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB" | awk '{print $1}' | head -n 1)
-if [ -z "$WID" ]; then
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+if [ "$BRIDGE_OK" = "false" ]; then
+    if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
+        "$CODE_BIN" --reuse-window --maximized "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+    elif [ -n "$PDIR" ]; then
+        "$CODE_BIN" --reuse-window --maximized "$PDIR" >/dev/null 2>&1 &
+    fi
+
+    for i in {1..15}; do
+        sleep 0.1
+        if curl -s --max-time 0.3 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
+            BRIDGE_OK=true
+            break
+        fi
+    done
 fi
 
-if [ -z "$WID" ]; then
-    code "$PDIR" "$PDIR/$PROB.cpp" &
-    sleep 0.8
-    WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+# 2. Wywołaj bezpośrednio test w VS Code przez bridge HTTP (niezależnie od Wayland / X11)
+if [ "$BRIDGE_OK" = "true" ]; then
+    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/test" 2>/dev/null)
+    if echo "$RESP" | grep -q '"ok"'; then
+        exit 0
+    fi
 fi
 
+# 3. Fallback dla X11 przez wmctrl / xdotool
+WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
 if [ -n "$WID" ]; then
-    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-    sleep 0.15
-    DISPLAY=:0 xdotool key --clearmodifiers F6 2>/dev/null || true
+    DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+    sleep 0.1
+    DISPLAY="$DISP" xdotool key --clearmodifiers F6 2>/dev/null && exit 0 || true
+fi
+
+# 4. Fallback ostateczny: uruchom skrypt testowy bezpośrednio w terminalu
+if [ -n "$PDIR" ] && [ -f "$PDIR/.algo/test.sh" ]; then
+    if command -v gnome-terminal &>/dev/null; then
+        gnome-terminal --title="AlgoDeck: TESTUJ ($PROB)" -- bash -c "cd '$PDIR' && bash .algo/test.sh; exec bash" >/dev/null 2>&1 &
+        exit 0
+    elif command -v xterm &>/dev/null; then
+        xterm -title "AlgoDeck: TESTUJ ($PROB)" -e "bash -c 'cd \"$PDIR\" && bash .algo/test.sh; exec bash'" >/dev/null 2>&1 &
+        exit 0
+    fi
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_test_vscode.sh"
@@ -508,11 +582,40 @@ SCRIPT="$HOME/.local/share/algodeck/scripts/add_task_dialog.py"
 if [ ! -f "$SCRIPT" ]; then
     SCRIPT="/home/linux/.gemini/antigravity-ide/scratch/algodeck/scripts/add_task_dialog.py"
 fi
-DISPLAY=:0 python3 "$SCRIPT" >/dev/null 2>&1 &
+DISP="${DISPLAY:-:0}"
+DISPLAY="$DISP" python3 "$SCRIPT" >/dev/null 2>&1 &
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
 
-# 7i. Skróty klawiszowe VS Code (Ctrl+Alt+R dla Run, Ctrl+Alt+E dla Test)
+# 7i. Konfiguracja VS Code (Wewnętrzne rozszerzenie bridge, maksymalizacja okna i skróty klawiszowe)
+echo "Konfiguracja integracji VS Code i Stream Deck..."
+mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+if [ -d "$INSTALL_DIR/backend/vscode_extension" ]; then
+    cp -r "$INSTALL_DIR/backend/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+elif [ -d "$SCRIPT_DIR/backend/vscode_extension" ]; then
+    cp -r "$SCRIPT_DIR/backend/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+fi
+
+# Konfiguracja settings.json (okno na pełny ekran / zmaksymalizowane)
+python3 -c '
+import json, os
+p = os.path.expanduser("~/.config/Code/User/settings.json")
+try:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {}
+    if cfg.get("window.newWindowDimensions") != "maximized":
+        cfg["window.newWindowDimensions"] = "maximized"
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=4)
+except Exception:
+    pass
+' 2>/dev/null || true
+
+# Konfiguracja keybindings.json (F6, Ctrl+Shift+B, Ctrl+Alt+R, Ctrl+Alt+E)
 python3 -c '
 import json, os
 p = os.path.expanduser("~/.config/Code/User/keybindings.json")
@@ -523,16 +626,25 @@ try:
             kb = json.load(f)
     except Exception:
         kb = []
-    
-    keys = {item.get("key") for item in kb}
-    changed = False
-    if "ctrl+alt+r" not in keys:
-        kb.append({"key": "ctrl+alt+r", "command": "workbench.action.terminal.sendSequence", "args": {"text": "clear && bash .algo/run.sh\r"}})
-        changed = True
-    if "ctrl+alt+e" not in keys:
-        kb.append({"key": "ctrl+alt+e", "command": "workbench.action.terminal.sendSequence", "args": {"text": "clear && bash .algo/test.sh\r"}})
-        changed = True
-    if changed:
+
+    needed = [
+        {"key": "f6", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: TESTUJ"},
+        {"key": "ctrl+alt+e", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: TESTUJ"},
+        {"key": "ctrl+shift+b", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: ODPAL"},
+        {"key": "ctrl+alt+r", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: ODPAL"},
+    ]
+
+    existing_map = {item.get("key", "").lower(): item for item in kb if isinstance(item, dict)}
+    modified = False
+    for n in needed:
+        key_l = n["key"].lower()
+        cur = existing_map.get(key_l)
+        if not cur or cur.get("command") != n["command"] or cur.get("args") != n["args"]:
+            kb = [item for item in kb if isinstance(item, dict) and item.get("key", "").lower() != key_l]
+            kb.append(n)
+            modified = True
+
+    if modified:
         with open(p, "w", encoding="utf-8") as f:
             json.dump(kb, f, indent=4)
 except Exception:

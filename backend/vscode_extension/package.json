@@ -1,0 +1,14 @@
+{
+  "name": "algodeck-vscode-bridge",
+  "displayName": "AlgoDeck Bridge",
+  "description": "Wbudowana integracja AlgoDeck Stream Deck z Visual Studio Code",
+  "version": "1.0.0",
+  "publisher": "algodeck",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./extension.js"
+}
