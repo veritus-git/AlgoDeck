@@ -233,15 +233,120 @@ echo -e "${GREEN}✓ Środowisko AlgoDeck i ikony zainstalowane.${NC}"
 # 7. Skrypty wykonawcze w ~/.local/bin/
 echo -e "\n${CYAN}[7/8] Instalacja skrótów systemowych w ~/.local/bin...${NC}"
 
-# 7a. CLI 'algodeck'
-cat > "$HOME/.local/bin/algodeck" << EOF
+# 7a. Daemon serwera 'algodeck-daemon' (dla systemd)
+cat > "$HOME/.local/bin/algodeck-daemon" << EOF
 #!/usr/bin/env bash
 source "$VENV_DIR/bin/activate"
 export PYTHONPATH="$INSTALL_DIR"
 cd "$INSTALL_DIR"
 exec python3 -m uvicorn backend.server:app --host 127.0.0.1 --port 8080 "\$@"
 EOF
+chmod +x "$HOME/.local/bin/algodeck-daemon"
+
+# 7a2. CLI 'algodeck' (uruchamianie w tle na żądanie z powiadomieniem pulpitu)
+cat > "$HOME/.local/bin/algodeck" << 'EOF'
+#!/usr/bin/env bash
+INSTALL_DIR="$HOME/.local/share/algodeck"
+[ -d "$INSTALL_DIR" ] || INSTALL_DIR="$(pwd)"
+VENV_DIR="$INSTALL_DIR/venv"
+
+ACTION="${1:-start}"
+
+is_running() {
+    curl -s --max-time 1 http://127.0.0.1:8080/api/status >/dev/null 2>&1
+}
+
+start_daemon() {
+    if is_running; then
+        echo "⚡ AlgoDeck już działa w tle na porcie 8080."
+        curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
+        notify-send "AlgoDeck ⚡" "AlgoDeck jest aktywny! Ekran zachęty na Stream Decku." 2>/dev/null || true
+        return 0
+    fi
+
+    echo "⚡ Uruchamianie AlgoDeck w tle..."
+
+    if systemctl --user is-enabled algodeck.service >/dev/null 2>&1; then
+        systemctl --user start algodeck.service >/dev/null 2>&1 || true
+    fi
+
+    if ! is_running; then
+        mkdir -p "$HOME/.config/algodeck/logs"
+        cd "$INSTALL_DIR"
+        export PYTHONPATH="$INSTALL_DIR"
+        PYTHON_BIN="python3"
+        [ -f "$VENV_DIR/bin/python3" ] && PYTHON_BIN="$VENV_DIR/bin/python3"
+        nohup "$PYTHON_BIN" -m uvicorn backend.server:app --host 127.0.0.1 --port 8080 > "$HOME/.config/algodeck/logs/server.log" 2>&1 &
+    fi
+
+    for i in {1..30}; do
+        if is_running; then break; fi
+        sleep 0.1
+    done
+
+    curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
+    notify-send "AlgoDeck ⚡" "Środowisko olimpijskie uruchomione w tle! Ekran zachęty aktywny na Stream Decku." 2>/dev/null || true
+
+    echo "✅ AlgoDeck został pomyślnie uruchomiony w tle! Ekran zachęty aktywny na Stream Decku."
+    echo "💡 Możesz zamknąć ten terminal — proces działa niezależnie."
+}
+
+stop_daemon() {
+    echo "⏹ Zatrzymywanie daemona AlgoDeck..."
+    systemctl --user stop algodeck.service >/dev/null 2>&1 || true
+    pkill -f "uvicorn backend.server:app" >/dev/null 2>&1 || true
+    notify-send "AlgoDeck ⚡" "Środowisko AlgoDeck zostało zatrzymane." 2>/dev/null || true
+    echo "✓ AlgoDeck zatrzymany."
+}
+
+open_gui() {
+    TAB="${1:---tab=settings}"
+    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
+        "$HOME/.local/bin/algodeck-gui" "$TAB" >/dev/null 2>&1 &
+    elif [ -x "$INSTALL_DIR/gui/target/release/algodeck-gui" ]; then
+        "$INSTALL_DIR/gui/target/release/algodeck-gui" "$TAB" >/dev/null 2>&1 &
+    else
+        python3 "$INSTALL_DIR/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
+    fi
+}
+
+case "$ACTION" in
+    start) start_daemon ;;
+    stop) stop_daemon ;;
+    restart) stop_daemon; sleep 1; start_daemon ;;
+    status)
+        if is_running; then
+            echo "🟢 AlgoDeck jest ONLINE (127.0.0.1:8080)"
+        else
+            echo "🔴 AlgoDeck jest OFFLINE"
+        fi
+        ;;
+    gui|settings) shift || true; open_gui "$@" ;;
+    --tab=*) open_gui "$ACTION" ;;
+    *)
+        if [[ "$ACTION" == --* ]]; then open_gui "$@"; else start_daemon; fi
+        ;;
+esac
+EOF
 chmod +x "$HOME/.local/bin/algodeck"
+
+# 7a3. Instalacja natywnego GUI w Rust (algodeck-gui)
+GUI_BIN_TARGET="$HOME/.local/bin/algodeck-gui"
+if [ -f "$INSTALL_DIR/gui/target/release/algodeck-gui" ]; then
+    cp "$INSTALL_DIR/gui/target/release/algodeck-gui" "$GUI_BIN_TARGET"
+    chmod +x "$GUI_BIN_TARGET"
+elif [ -f "$HOME/.local/bin/algodeck-gui" ]; then
+    chmod +x "$GUI_BIN_TARGET"
+else
+    echo -e "${CYAN}Pobieranie skompilowanej binarki algodeck-gui z GitHub Releases...${NC}"
+    if curl -sSL -f "https://github.com/veritus-git/AlgoDeck/releases/latest/download/algodeck-gui-linux-x86_64" -o "$GUI_BIN_TARGET"; then
+        chmod +x "$GUI_BIN_TARGET"
+        echo -e "${GREEN}✓ Pobrano natywną binarkę algodeck-gui z GitHub Releases!${NC}"
+    elif which cargo >/dev/null 2>&1 && [ -d "$INSTALL_DIR/gui" ]; then
+        echo -e "${YELLOW}Kompilacja natywnego GUI AlgoDeck w Rust...${NC}"
+        (cd "$INSTALL_DIR/gui" && cargo build --release && cp target/release/algodeck-gui "$GUI_BIN_TARGET" && chmod +x "$GUI_BIN_TARGET") || true
+    fi
+fi
 
 # 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code)
 cat > "$HOME/.local/bin/sd_algo_code.sh" << 'EOF'
@@ -446,7 +551,13 @@ WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck ⚡ Centrum Kontroli"
 if [ -n "$WID" ]; then
     DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
 else
-    python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
+    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
+        "$HOME/.local/bin/algodeck-gui" "$TAB" >/dev/null 2>&1 &
+    elif [ -x "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" ]; then
+        "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" "$TAB" >/dev/null 2>&1 &
+    else
+        python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
+    fi
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_panel.sh"
@@ -459,7 +570,13 @@ WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck ⚡ Centrum Kontroli"
 if [ -n "$WID" ]; then
     DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
 else
-    python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" --tab=new >/dev/null 2>&1 &
+    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
+        "$HOME/.local/bin/algodeck-gui" --tab=new >/dev/null 2>&1 &
+    elif [ -x "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" ]; then
+        "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" --tab=new >/dev/null 2>&1 &
+    else
+        python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" --tab=new >/dev/null 2>&1 &
+    fi
 fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
@@ -473,6 +590,19 @@ ACTION="${1:-next}"
 CURRENT="${2:-}"
 WORKSPACE="$HOME/algodeck-workspace"
 SERIAL="A00SA6042JGA63"
+
+# 0. Natychmiastowa obsługa wyjścia i zatrzymania AlgoDeck
+if [ "$ACTION" = "exit" ] || [ "$ACTION" = "stop" ]; then
+    "$HOME/.local/bin/algodeck" stop
+    exit 0
+fi
+
+if [ "$ACTION" = "idle" ]; then
+    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
+    echo "ALGO_IDLE" > /tmp/algodeck_active_task.txt
+    notify-send "AlgoDeck ⚡" "Powrót do ekranu zachęty" 2>/dev/null || true
+    exit 0
+fi
 
 # 1. Pobierz kolejność zadań z API AlgoDeck (ścisła kolejność chronologiczna utworzenia)
 PROJECTS=()
@@ -498,6 +628,13 @@ fi
 
 if [ ${#PROJECTS[@]} -eq 0 ]; then
     gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
+    exit 0
+fi
+
+if [ "$ACTION" = "idle" ]; then
+    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
+    echo "ALGO_IDLE" > /tmp/algodeck_active_task.txt
+    notify-send "AlgoDeck ⚡" "Powrót do menu głównego" 2>/dev/null || true
     exit 0
 fi
 
@@ -575,15 +712,10 @@ gdbus call --session --dest com.core447.StreamController --object-path /com/core
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_menu_back.sh"
 
-# 7h. Skrypt sd_algo_new_task.sh (Okno modalne dodawania nowego zadania)
+# 7h. Skrypt sd_algo_new_task.sh (Okno dodawania nowego zadania)
 cat > "$HOME/.local/bin/sd_algo_new_task.sh" << 'EOF'
 #!/usr/bin/env bash
-SCRIPT="$HOME/.local/share/algodeck/scripts/add_task_dialog.py"
-if [ ! -f "$SCRIPT" ]; then
-    SCRIPT="/home/linux/.gemini/antigravity-ide/scratch/algodeck/scripts/add_task_dialog.py"
-fi
-DISP="${DISPLAY:-:0}"
-DISPLAY="$DISP" python3 "$SCRIPT" >/dev/null 2>&1 &
+"$HOME/.local/bin/sd_algo_panel.sh" --tab=new >/dev/null 2>&1 &
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
 
@@ -667,6 +799,31 @@ fi
 EOF
 chmod +x "$HOME/.local/bin/algodeck-browser"
 
+# 7k. Native Messaging Host dla rozszerzenia przeglądarki
+if [ -f "$INSTALL_DIR/scripts/algodeck-native-host" ]; then
+    cp "$INSTALL_DIR/scripts/algodeck-native-host" "$HOME/.local/bin/algodeck-native-host"
+    chmod +x "$HOME/.local/bin/algodeck-native-host"
+fi
+
+for nm_dir in \
+    "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts" \
+    "$HOME/.config/google-chrome/NativeMessagingHosts" \
+    "$HOME/.config/chromium/NativeMessagingHosts"; do
+    mkdir -p "$nm_dir"
+    cat > "$nm_dir/com.algodeck.launcher.json" << 'EOF_NM'
+{
+  "name": "com.algodeck.launcher",
+  "description": "AlgoDeck Native Messaging Host for browser launching",
+  "path": "/home/linux/.local/bin/algodeck-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/"
+  ]
+}
+EOF_NM
+done
+
+
 # Dodanie ~/.local/bin do PATH w bashrc i zshrc jeśli brak
 for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$rc" ] && ! grep -q '\$HOME/\.local/bin' "$rc"; then
@@ -685,7 +842,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$HOME/.local/bin/algodeck
+ExecStart=$HOME/.local/bin/algodeck-daemon
 Restart=always
 RestartSec=3s
 

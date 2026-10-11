@@ -9,7 +9,8 @@ def _load_settings_dict():
     defaults = {
         "workspace_dir": os.path.expanduser("~/algodeck-workspace"),
         "vscode_mode": "single_window",
-        "notifications": True
+        "notifications": True,
+        "auto_detect_downloads": True
     }
     if CONFIG_FILE.exists():
         try:
@@ -26,6 +27,7 @@ class Settings(BaseModel):
     workspace_dir: Path = Path(_cfg.get("workspace_dir", os.path.expanduser("~/algodeck-workspace")))
     vscode_mode: str = _cfg.get("vscode_mode", "single_window")
     notifications: bool = _cfg.get("notifications", True)
+    auto_detect_downloads: bool = _cfg.get("auto_detect_downloads", True)
     
     # Web server configuration
     host: str = "127.0.0.1"
@@ -51,5 +53,6 @@ class Settings(BaseModel):
         self.workspace_dir = Path(new_cfg.get("workspace_dir", os.path.expanduser("~/algodeck-workspace")))
         self.vscode_mode = new_cfg.get("vscode_mode", "single_window")
         self.notifications = new_cfg.get("notifications", True)
+        self.auto_detect_downloads = new_cfg.get("auto_detect_downloads", True)
 
 settings = Settings()

@@ -29,3 +29,10 @@ test_workspace/
 # Stream Deck runtime dynamic icons
 frontend/icons/task_*
 frontend/icons/badge_*
+
+# Rust build artifacts
+target/
+gui/target/
+**/target/
+release_artifacts/
+dist/

@@ -1,5 +1,7 @@
 /* ==========================================================================
    AlgoDeck Extension - Client Logic (Koło MAP)
+   Widok Uruchamiania "URUCHOM" + Izolowany Widok Wykrytego Zadania
+   Obsługa Native Messaging, Drag-and-Drop, Staging PDF/ZIP oraz Stanów Online/Offline
    ========================================================================== */
 
 const API_BASE = "http://127.0.0.1:8080";
@@ -7,72 +9,73 @@ const API_BASE = "http://127.0.0.1:8080";
 // Globalny stan
 let activeProblemId = null;
 let allProblems = [];
+let isDaemonOnline = false;
 
-// DOM Elements: Status & Header
+// Elementy Widoku Launcher
+const viewLauncher = document.getElementById("view-launcher");
+const viewDetected = document.getElementById("view-detected");
+const btnRoundLaunch = document.getElementById("btn-round-launch");
+const launchHint = document.getElementById("launch-hint");
+const launcherActiveBar = document.getElementById("launcher-active-bar");
+const launcherActiveName = document.getElementById("launcher-active-name");
 const daemonStatus = document.getElementById("daemon-status");
 const statusText = document.getElementById("status-text");
-const activeTaskBar = document.getElementById("active-task-bar");
-const activeTaskName = document.getElementById("active-task-name");
-const btnQuickVscode = document.getElementById("btn-quick-vscode");
 
-// Zakładki
-const tabButtons = document.querySelectorAll(".tab-btn");
-const tabPanes = document.querySelectorAll(".tab-pane");
+// Elementy Szybkich Akcji
+const btnQuickSettings = document.getElementById("btn-quick-settings");
+const btnQuickIdle = document.getElementById("btn-quick-idle");
+const btnToggleWorkspace = document.getElementById("btn-toggle-workspace");
+const workspaceDrawer = document.getElementById("workspace-drawer");
 
-// Tab 1: Staging PDF
+// Staging: PDF i ZIP
 const dropPdf = document.getElementById("drop-pdf");
-const btnBrowsePdf = document.getElementById("btn-browse-pdf");
-const fileInputPdf = document.getElementById("file-input-pdf");
-const stagedPdfCard = document.getElementById("staged-pdf-card");
-const stagedPdfName = document.getElementById("staged-pdf-name");
-const stagedPdfMeta = document.getElementById("staged-pdf-meta");
-const btnRemovePdf = document.getElementById("btn-remove-pdf");
-
-// Tab 1: Staging ZIP
 const dropZip = document.getElementById("drop-zip");
+const btnBrowsePdf = document.getElementById("btn-browse-pdf");
 const btnBrowseZip = document.getElementById("btn-browse-zip");
+const fileInputPdf = document.getElementById("file-input-pdf");
 const fileInputZip = document.getElementById("file-input-zip");
+const stagedPdfCard = document.getElementById("staged-pdf-card");
 const stagedZipCard = document.getElementById("staged-zip-card");
+const stagedPdfName = document.getElementById("staged-pdf-name");
 const stagedZipName = document.getElementById("staged-zip-name");
-const stagedZipMeta = document.getElementById("staged-zip-meta");
+const btnRemovePdf = document.getElementById("btn-remove-pdf");
 const btnRemoveZip = document.getElementById("btn-remove-zip");
-
-// Tab 1: Form & Action
-const importDetails = document.getElementById("import-details");
-const impCode = document.getElementById("imp-code");
-const impTitle = document.getElementById("imp-title");
-const impTime = document.getElementById("imp-time");
-const impMem = document.getElementById("imp-mem");
-const testsCountText = document.getElementById("tests-count-text");
 const btnStartStaged = document.getElementById("btn-start-staged");
 
-// Tab 2: Manual
+// Elementy Zakładek Workspace (Drawer)
+const tabButtons = document.querySelectorAll(".tab-btn");
+const tabPanes = document.querySelectorAll(".tab-pane");
+const btnCreateManual = document.getElementById("btn-create-manual");
 const manCode = document.getElementById("man-code");
 const manTitle = document.getElementById("man-title");
-const manTime = document.getElementById("man-time");
-const manMem = document.getElementById("man-mem");
-const manInput = document.getElementById("man-input");
-const manOutput = document.getElementById("man-output");
-const btnCreateManual = document.getElementById("btn-create-manual");
-
-// Tab 3: Gallery
 const gallerySearch = document.getElementById("gallery-search");
 const btnRefreshGallery = document.getElementById("btn-refresh-gallery");
 const galleryList = document.getElementById("gallery-list");
 
 // ---------------- Inicjalizacja ----------------
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   setupTabs();
-  setupStagingZones();
-  setupActionButtons();
+  setupLauncher();
+  setupWorkspaceDrawer();
+  setupStaging();
 
-  checkDaemonHealth();
-  loadStagedState();
-  checkAutoPdfParam();
-  setInterval(checkDaemonHealth, 3000);
+  // Sprawdź czy otworzono w trybie wykrytego zadania (Powiadomienie 1-Klik)
+  const isDetected = await checkDetectedMode();
+
+  if (!isDetected) {
+    document.body.classList.remove("detected-mode");
+    viewDetected.classList.add("hidden");
+    viewLauncher.classList.remove("hidden");
+    
+    // Domyślnie startujemy w trybie offline dopóki serwer nie odpowie
+    setLauncherOffline();
+    await checkDaemonHealth();
+    setInterval(checkDaemonHealth, 2500);
+  }
 });
 
-async function checkAutoPdfParam() {
+// ---------------- 1. Sprawdzanie i obsługa trybu Wykrytego Zadania (1-Klik) ----------------
+async function checkDetectedMode() {
   const urlParams = new URLSearchParams(window.location.search);
   let autoPdf = urlParams.get("auto_pdf");
 
@@ -86,7 +89,25 @@ async function checkAutoPdfParam() {
     } catch (e) {}
   }
 
-  if (!autoPdf) return;
+  if (!autoPdf) {
+    return false;
+  }
+
+  document.body.classList.add("detected-mode");
+  viewLauncher.classList.add("hidden");
+  viewDetected.classList.remove("hidden");
+
+  const baseName = autoPdf.replace(/^.*[\\\/]/, '');
+  const cleanStem = baseName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().slice(0, 5);
+  let problemCode = cleanStem.toUpperCase() || "ZAD";
+
+  const detFilenameText = document.getElementById("det-filename-text");
+  const detCodeText = document.getElementById("det-code-text");
+  const btnDetClose = document.getElementById("btn-det-close");
+  const btnDetOneclick = document.getElementById("btn-det-oneclick");
+
+  detFilenameText.textContent = baseName;
+  detCodeText.textContent = problemCode;
 
   try {
     const res = await fetch(`${API_BASE}/api/auto-import-pdf`, {
@@ -94,604 +115,504 @@ async function checkAutoPdfParam() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file_path: autoPdf, auto_create: false })
     });
-    if (!res.ok) return;
-    const data = await res.json();
-
-    const tabImportBtn = document.querySelector('[data-tab="tab-import"]');
-    if (tabImportBtn) tabImportBtn.click();
-
-    const importPane = document.getElementById("tab-import");
-    const existingBanner = document.getElementById("auto-pdf-banner");
-    if (existingBanner) existingBanner.remove();
-
-    const banner = document.createElement("div");
-    banner.id = "auto-pdf-banner";
-    banner.className = "auto-pdf-banner";
-    const filename = data.pdf_filename || "zadanie.pdf";
-    const code = (data.problem_id || "zad").toUpperCase();
-    banner.innerHTML = `
-      <div class="auto-pdf-header">
-        <span class="auto-pdf-title">⚡ Wykryto zadanie PDF — 1 Kliknięcie</span>
-        <button type="button" class="btn-card-remove" id="btn-close-pdf-banner" title="Zamknij">✕</button>
-      </div>
-      <div class="auto-pdf-desc">
-        Plik: <strong>${escapeHtml(filename)}</strong> &bull; Zadanie: <strong>${escapeHtml(code)}</strong>
-      </div>
-      <button type="button" id="btn-auto-create-now" class="btn-primary w-full" style="margin-top: 6px; padding: 10px; font-weight: 700; font-size: 13px;">
-        <span>⚡ Utwórz Workspace i Otwórz VS Code (1 Klik)</span>
-      </button>
-    `;
-
-    importPane.prepend(banner);
-
-    banner.querySelector("#btn-close-pdf-banner").addEventListener("click", () => banner.remove());
-    banner.querySelector("#btn-auto-create-now").addEventListener("click", async () => {
-      const btn = banner.querySelector("#btn-auto-create-now");
-      btn.disabled = true;
-      btn.innerHTML = "<span>Tworzenie workspace i otwieranie VS Code...</span>";
-      try {
-        const createRes = await fetch(`${API_BASE}/api/auto-import-pdf`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_path: autoPdf, auto_create: true })
-        });
-        const createData = await createRes.json();
-        if (createRes.ok && createData.success) {
-          showToast(`Utworzono zadanie ${createData.problem_id.toUpperCase()}! Otwarto VS Code`, "success");
-          activeProblemId = createData.problem_id;
-          if (activeTaskBar) activeTaskBar.classList.remove("hidden");
-          if (activeTaskName) activeTaskName.textContent = `[${createData.problem_id.toUpperCase()}]`;
-          banner.remove();
-          renderStagedUI({ has_pdf: false, has_zip: false });
-          setTimeout(() => {
-            window.close();
-          }, 1200);
-        } else {
-          showToast(createData.detail || "Błąd tworzenia zadania", "error");
-          btn.disabled = false;
-          btn.innerHTML = "<span>⚡ Utwórz Workspace i Otwórz VS Code (1 Klik)</span>";
-        }
-      } catch (err) {
-        showToast("Błąd połączenia z serwerem!", "error");
-        btn.disabled = false;
-      }
-    });
-
-    loadStagedState();
-  } catch (err) {
-    console.debug("Błąd auto_pdf:", err);
-  }
-}
-
-// ---------------- Nawigacja Zakładek ----------------
-function setupTabs() {
-  tabButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      tabButtons.forEach(b => b.classList.remove("active"));
-      tabPanes.forEach(p => p.classList.remove("active"));
-
-      btn.classList.add("active");
-      const targetId = btn.dataset.tab;
-      const targetPane = document.getElementById(targetId);
-      if (targetPane) {
-        targetPane.classList.add("active");
-      }
-
-      if (targetId === "tab-gallery") {
-        loadProblems();
-      } else if (targetId === "tab-import") {
-        loadStagedState();
-      }
-    });
-  });
-}
-
-// ---------------- Daemon Health & Active Task ----------------
-async function checkDaemonHealth() {
-  try {
-    const res = await fetch(`${API_BASE}/api/status`, { method: "GET" });
     if (res.ok) {
       const data = await res.json();
-      daemonStatus.className = "status-pill status-online";
-      statusText.textContent = "ONLINE";
-
-      if (data.active_problem) {
-        activeProblemId = data.active_problem;
-        activeTaskBar.classList.remove("hidden");
-        activeTaskName.textContent = `[${data.active_problem.toUpperCase()}]`;
-      } else {
-        activeProblemId = null;
-        activeTaskBar.classList.add("hidden");
+      if (data.problem_id) {
+        problemCode = data.problem_id.toUpperCase();
+        detCodeText.textContent = problemCode;
       }
-    } else {
-      setDaemonOffline();
     }
-  } catch (err) {
-    setDaemonOffline();
-  }
+  } catch (e) {}
+
+  btnDetOneclick.onclick = async () => {
+    btnDetOneclick.disabled = true;
+    btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Tworzenie workspace i VS Code...`;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/auto-import-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file_path: autoPdf,
+          problem_id: problemCode.toLowerCase(),
+          auto_create: true
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        btnDetOneclick.innerHTML = `<span>✓ Utworzono [${problemCode}]!</span>`;
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
+        }
+        setTimeout(() => window.close(), 600);
+      } else {
+        alert(data.detail || "Błąd podczas tworzenia workspace");
+        btnDetOneclick.disabled = false;
+        btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
+      }
+    } catch (err) {
+      alert("Błąd połączenia z backendem AlgoDeck!");
+      btnDetOneclick.disabled = false;
+      btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
+    }
+  };
+
+  btnDetClose.onclick = () => {
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
+    }
+    window.close();
+  };
+
+  return true;
 }
 
-function setDaemonOffline() {
+// ---------------- 2. Zielony Okrągły Przycisk "URUCHOM" + Native Messaging ----------------
+function setupLauncher() {
+  btnRoundLaunch.addEventListener("click", async () => {
+    btnRoundLaunch.classList.add("running");
+    const launchTitle = btnRoundLaunch.querySelector(".launch-title");
+    if (launchTitle) launchTitle.textContent = "START...";
+    launchHint.textContent = "Uruchamianie środowiska AlgoDeck...";
+
+    // 1. Wywołaj natywny host (działa zawsze, nawet gdy daemon i StreamController są całkowicie wyłączone!)
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+      try {
+        chrome.runtime.sendNativeMessage(
+          "com.algodeck.launcher",
+          { action: "start" },
+          (resp) => {
+            console.log("AlgoDeck native launcher response:", resp, chrome.runtime.lastError);
+          }
+        );
+      } catch (e) {
+        console.error("Native message trigger error:", e);
+      }
+    }
+
+    // 2. Wyślij zapytanie HTTP na wypadek gdyby daemon już startował
+    fetch(`${API_BASE}/api/launch`, { method: "POST" }).catch(() => {});
+
+    // 3. Odpytuj status co 350ms, aż serwer odpowie
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
+        if (res.ok) {
+          clearInterval(pollInterval);
+          const data = await res.json();
+          setLauncherOnline(data);
+          showToast("AlgoDeck uruchomiony! ⚡", "success");
+        }
+      } catch (e) {}
+
+      if (attempts > 35) {
+        clearInterval(pollInterval);
+        if (!isDaemonOnline) {
+          launchHint.textContent = "Uruchom w terminalu wpisując: algodeck";
+          btnRoundLaunch.classList.remove("running");
+          if (launchTitle) launchTitle.textContent = "URUCHOM";
+        }
+      }
+    }, 350);
+  });
+
+  btnQuickIdle.addEventListener("click", async () => {
+    try {
+      await fetch(`${API_BASE}/api/streamdeck/idle`, { method: "POST" });
+      showToast("Włączono ekran zachęty (ALGO_IDLE)", "success");
+    } catch (e) {
+      showToast("Serwer AlgoDeck jest offline", "error");
+    }
+  });
+
+  btnQuickSettings.addEventListener("click", async () => {
+    try {
+      await fetch(`${API_BASE}/api/settings/open-gui`, { method: "POST" });
+    } catch (e) {
+      showToast("Otwórz terminal i wpisz: algodeck settings", "info");
+    }
+  });
+
+  btnToggleWorkspace.addEventListener("click", () => {
+    workspaceDrawer.classList.toggle("hidden");
+    const isHidden = workspaceDrawer.classList.contains("hidden");
+    btnToggleWorkspace.textContent = isHidden ? "📋 Zadania ▾" : "📋 Zwiń ▴";
+    if (!isHidden) {
+      fetchProblemsList();
+      fetchStagedState();
+    }
+  });
+}
+
+// ---------------- 3. Zarządzanie Stanami Offline vs Online (Req 3) ----------------
+function setLauncherOffline() {
+  isDaemonOnline = false;
+  viewLauncher.classList.remove("is-online");
+  viewLauncher.classList.add("is-offline");
+
   daemonStatus.className = "status-pill status-offline";
   statusText.textContent = "OFFLINE";
+  launchHint.textContent = "Kliknij, aby aktywować Stream Deck i środowisko";
+
+  btnRoundLaunch.classList.remove("running");
+  const launchTitle = btnRoundLaunch.querySelector(".launch-title");
+  if (launchTitle) launchTitle.textContent = "URUCHOM";
 }
 
-// ---------------- Dwa Osobne Obszary Stagingu (PDF + ZIP) ----------------
-function setupStagingZones() {
-  // 1. PDF Drag & Drop
-  setupDropEvents(dropPdf, files => {
-    const pdf = files.find(f => f.name.toLowerCase().endsWith(".pdf"));
-    if (pdf) {
-      stageFile(pdf, "pdf");
-    } else {
-      showToast("Upuść plik w formacie .pdf!", "error");
-    }
-  });
+function setLauncherOnline(data) {
+  isDaemonOnline = true;
+  viewLauncher.classList.remove("is-offline");
+  viewLauncher.classList.add("is-online");
 
-  btnBrowsePdf.addEventListener("click", e => {
-    e.stopPropagation();
-    fileInputPdf.click();
-  });
-  dropPdf.addEventListener("click", () => fileInputPdf.click());
+  daemonStatus.className = "status-pill status-online";
+  statusText.textContent = "ONLINE";
 
-  fileInputPdf.addEventListener("change", e => {
-    if (e.target.files && e.target.files[0]) {
-      stageFile(e.target.files[0], "pdf");
-      fileInputPdf.value = "";
-    }
-  });
+  const activeTask = data && data.active_problem ? data.active_problem.toUpperCase() : "ALGO_IDLE";
+  launcherActiveBar.classList.remove("hidden");
+  launcherActiveName.textContent = activeTask;
+  activeProblemId = activeTask;
 
-  btnRemovePdf.addEventListener("click", e => {
-    e.stopPropagation();
-    clearStagedFile("pdf");
-  });
-
-  // 2. ZIP Drag & Drop
-  setupDropEvents(dropZip, files => {
-    const zip = files.find(f => f.name.toLowerCase().endsWith(".zip"));
-    if (zip) {
-      stageFile(zip, "zip");
-    } else {
-      showToast("Upuść archiwum w formacie .zip!", "error");
-    }
-  });
-
-  btnBrowseZip.addEventListener("click", e => {
-    e.stopPropagation();
-    fileInputZip.click();
-  });
-  dropZip.addEventListener("click", () => fileInputZip.click());
-
-  fileInputZip.addEventListener("change", e => {
-    if (e.target.files && e.target.files[0]) {
-      stageFile(e.target.files[0], "zip");
-      fileInputZip.value = "";
-    }
-  });
-
-  btnRemoveZip.addEventListener("click", e => {
-    e.stopPropagation();
-    clearStagedFile("zip");
-  });
+  // Odśwież stan poczekalni i zadań
+  fetchStagedState();
+  fetchProblemsList();
 }
 
-function setupDropEvents(element, onDropFiles) {
-  ["dragenter", "dragover"].forEach(event => {
-    element.addEventListener(event, e => {
-      e.preventDefault();
-      e.stopPropagation();
-      element.classList.add("dragover");
-    });
-  });
-
-  ["dragleave", "drop"].forEach(event => {
-    element.addEventListener(event, e => {
-      e.preventDefault();
-      e.stopPropagation();
-      element.classList.remove("dragover");
-    });
-  });
-
-  element.addEventListener("drop", e => {
-    const files = Array.from(e.dataTransfer.files || []);
-    if (files.length > 0) {
-      onDropFiles(files);
-    }
-  });
-}
-
-// ---------------- Persistence & Staging API ----------------
-async function loadStagedState() {
+async function checkDaemonHealth() {
   try {
-    const res = await fetch(`${API_BASE}/api/staged-state`);
-    if (!res.ok) return;
-    const state = await res.json();
-    renderStagedUI(state);
+    const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      setLauncherOnline(data);
+    } else {
+      setLauncherOffline();
+    }
   } catch (err) {
-    console.debug("Błąd pobierania stanu stagingu:", err);
+    setLauncherOffline();
   }
 }
 
-function renderStagedUI(state) {
-  const hasPdf = !!state.has_pdf;
-  const hasZip = !!state.has_zip;
-
-  // Widok PDF
-  if (hasPdf) {
-    dropPdf.classList.add("hidden");
-    stagedPdfCard.classList.remove("hidden");
-    stagedPdfName.textContent = state.pdf_filename || "zadanie.pdf";
-    stagedPdfMeta.textContent = `Wczytano treść (${formatBytes(state.pdf_size)})`;
-  } else {
-    dropPdf.classList.remove("hidden");
-    stagedPdfCard.classList.add("hidden");
+// ---------------- 4. Obsługa Staging (Przycisk "Wybierz", Drag&Drop, PDF/ZIP - Req 8) ----------------
+function setupStaging() {
+  // Przycisk "Wybierz" dla PDF
+  if (btnBrowsePdf && fileInputPdf) {
+    btnBrowsePdf.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fileInputPdf.click();
+    });
+    fileInputPdf.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) {
+        uploadStagedFile(e.target.files[0], "pdf");
+      }
+    });
   }
 
-  // Widok ZIP
-  if (hasZip) {
-    dropZip.classList.add("hidden");
-    stagedZipCard.classList.remove("hidden");
-    stagedZipName.textContent = state.zip_filename || "testy.zip";
-    stagedZipMeta.textContent = `Wykryto ${state.tests_count || 0} testów (${formatBytes(state.zip_size)})`;
-  } else {
-    dropZip.classList.remove("hidden");
-    stagedZipCard.classList.add("hidden");
+  // Przycisk "Wybierz" dla ZIP
+  if (btnBrowseZip && fileInputZip) {
+    btnBrowseZip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fileInputZip.click();
+    });
+    fileInputZip.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) {
+        uploadStagedFile(e.target.files[0], "zip");
+      }
+    });
   }
 
-  // Formularz i przycisk Rozpocznij
-  if (hasPdf || hasZip) {
-    importDetails.classList.remove("hidden");
-    btnStartStaged.classList.remove("hidden");
+  // Drag & drop na drop-pdf
+  if (dropPdf) {
+    setupDropzone(dropPdf, "pdf");
+  }
 
-    if (state.problem_id && (!impCode.value || impCode.value === "zad")) {
-      impCode.value = state.problem_id;
-    }
-    if (state.title && !impTitle.value) {
-      impTitle.value = state.title;
-    }
-    impTime.value = state.time_limit_sec || 1.0;
-    impMem.value = state.memory_limit_mb || 128;
-    testsCountText.textContent = `${state.tests_count || 0} testów wykrytych w zadaniu`;
-  } else {
-    importDetails.classList.add("hidden");
-    btnStartStaged.classList.add("hidden");
-    impCode.value = "";
-    impTitle.value = "";
+  // Drag & drop na drop-zip
+  if (dropZip) {
+    setupDropzone(dropZip, "zip");
+  }
+
+  // Usuwanie pliku PDF z poczekalni
+  if (btnRemovePdf) {
+    btnRemovePdf.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await fetch(`${API_BASE}/api/clear-staged`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_type: "pdf" })
+        });
+        fileInputPdf.value = "";
+        fetchStagedState();
+      } catch (err) {
+        showToast("Błąd usuwania pliku", "error");
+      }
+    });
+  }
+
+  // Usuwanie pliku ZIP z poczekalni
+  if (btnRemoveZip) {
+    btnRemoveZip.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        await fetch(`${API_BASE}/api/clear-staged`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_type: "zip" })
+        });
+        fileInputZip.value = "";
+        fetchStagedState();
+      } catch (err) {
+        showToast("Błąd usuwania pliku", "error");
+      }
+    });
+  }
+
+  // Start importu z plików w poczekalni
+  if (btnStartStaged) {
+    btnStartStaged.addEventListener("click", async () => {
+      btnStartStaged.disabled = true;
+      btnStartStaged.innerHTML = `<span>⚡ Tworzenie workspace...</span>`;
+      try {
+        const res = await fetch(`${API_BASE}/api/start-staged`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        if (res.ok) {
+          showToast("Utworzono workspace i uruchomiono VS Code! ⚡", "success");
+          fetchStagedState();
+          fetchProblemsList();
+          checkDaemonHealth();
+        } else {
+          const err = await res.json();
+          showToast(err.detail || "Błąd podczas importu", "error");
+        }
+      } catch (e) {
+        showToast("Błąd połączenia z serwerem AlgoDeck", "error");
+      } finally {
+        btnStartStaged.disabled = false;
+        btnStartStaged.innerHTML = `<span>⚡ Rozpocznij import</span>`;
+      }
+    });
   }
 }
 
-async function stageFile(file, fileType) {
+function setupDropzone(el, type) {
+  ["dragenter", "dragover"].forEach(evt => {
+    el.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.add("dragover");
+    });
+  });
+
+  ["dragleave", "dragend"].forEach(evt => {
+    el.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove("dragover");
+    });
+  });
+
+  el.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove("dragover");
+
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      uploadStagedFile(file, type);
+    }
+  });
+}
+
+async function uploadStagedFile(file, type) {
+  showToast(`Wgrywanie ${file.name}...`, "info");
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("file_type", fileType);
+  formData.append("file_type", type);
 
-  showToast(`Wczytywanie ${file.name}...`, "info");
   try {
     const res = await fetch(`${API_BASE}/api/stage-file`, {
       method: "POST",
       body: formData
     });
     if (res.ok) {
-      const state = await res.json();
-      renderStagedUI(state);
-      showToast(`Zapisano ${file.name} w poczekalni`, "success");
+      showToast(`Wgrano ${file.name}!`, "success");
+      fetchStagedState();
     } else {
-      showToast("Błąd parsowania pliku!", "error");
+      const err = await res.json();
+      showToast(err.detail || "Błąd wgrywania", "error");
     }
-  } catch (err) {
-    showToast("Błąd połączenia z serwerem AlgoDeck!", "error");
+  } catch (e) {
+    showToast("Błąd połączenia z serwerem", "error");
   }
 }
 
-async function clearStagedFile(fileType) {
+async function fetchStagedState() {
+  if (!isDaemonOnline) return;
   try {
-    const res = await fetch(`${API_BASE}/api/clear-staged`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_type: fileType })
-    });
+    const res = await fetch(`${API_BASE}/api/staged-state`);
     if (res.ok) {
-      const state = await res.json();
-      renderStagedUI(state);
-      showToast(`Usunięto ${fileType.toUpperCase()} z poczekalni`, "info");
+      const data = await res.json();
+      updateStagingUI(data);
     }
-  } catch (err) {
-    showToast("Błąd usuwania pliku z poczekalni", "error");
+  } catch (e) {}
+}
+
+function updateStagingUI(state) {
+  // Stan PDF
+  if (state.has_pdf) {
+    dropPdf.classList.add("hidden");
+    stagedPdfCard.classList.remove("hidden");
+    stagedPdfName.textContent = state.pdf_filename || "zadanie.pdf";
+  } else {
+    dropPdf.classList.remove("hidden");
+    stagedPdfCard.classList.add("hidden");
+  }
+
+  // Stan ZIP
+  if (state.has_zip) {
+    dropZip.classList.add("hidden");
+    stagedZipCard.classList.remove("hidden");
+    stagedZipName.textContent = state.zip_filename || "testy.zip";
+  } else {
+    dropZip.classList.remove("hidden");
+    stagedZipCard.classList.add("hidden");
+  }
+
+  // Przycisk startu importu
+  if (state.has_pdf || state.has_zip) {
+    btnStartStaged.classList.remove("hidden");
+  } else {
+    btnStartStaged.classList.add("hidden");
   }
 }
 
-// ---------------- Akcje Tworzenia Zadań ----------------
-function setupActionButtons() {
-  // Przycisk "Rozpocznij" (Import ze Stagingu)
-  btnStartStaged.addEventListener("click", async () => {
-    const pid = impCode.value.trim();
-    if (!pid) {
-      showToast("Podaj kod zadania!", "error");
-      impCode.focus();
-      return;
-    }
-
-    const payload = {
-      problem_id: pid,
-      title: impTitle.value.trim() || pid.toUpperCase(),
-      time_limit: parseFloat(impTime.value) || 1.0,
-      memory_limit: parseInt(impMem.value) || 128
-    };
-
-    btnStartStaged.disabled = true;
-    btnStartStaged.innerHTML = "<span>⏳ Przygotowywanie środowiska...</span>";
-
-    try {
-      const res = await fetch(`${API_BASE}/api/start-staged`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`Utworzono '${data.problem_id}'! Otwarto VS Code`, "success");
-        activeProblemId = data.problem_id;
-        activeTaskBar.classList.remove("hidden");
-        activeTaskName.textContent = `[${data.problem_id.toUpperCase()}]`;
-
-        // Zresetuj widok stagingu
-        renderStagedUI({ has_pdf: false, has_zip: false });
-      } else {
-        showToast(data.detail || "Błąd uruchamiania zadania", "error");
-      }
-    } catch (err) {
-      showToast("Błąd połączenia z serwerem AlgoDeck!", "error");
-    } finally {
-      btnStartStaged.disabled = false;
-      btnStartStaged.innerHTML = "<span>⚡ Rozpocznij</span>";
-    }
+// ---------------- 5. Zakładki Drawer Workspace ----------------
+function setupTabs() {
+  tabButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const tabId = btn.dataset.tab;
+      tabButtons.forEach(b => b.classList.remove("active"));
+      tabPanes.forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      const target = document.getElementById(tabId);
+      if (target) target.classList.add("active");
+      if (tabId === "tab-gallery") fetchProblemsList();
+    });
   });
+}
 
-  // Ręczny Workspace
+function setupWorkspaceDrawer() {
   btnCreateManual.addEventListener("click", async () => {
-    const pId = manCode.value.trim();
-    if (!pId) {
-      showToast("Podaj nazwę zadania!", "error");
-      manCode.focus();
+    const code = manCode.value.trim().toLowerCase();
+    if (!code) {
+      showToast("Podaj kod zadania!", "error");
       return;
     }
-
-    const payload = {
-      problem_id: pId,
-      title: manTitle.value.trim() || pId.toUpperCase(),
-      time_limit: parseFloat(manTime.value) || 1.0,
-      memory_limit: parseInt(manMem.value) || 128,
-      tests: []
-    };
-
-    const inContent = manInput.value;
-    const outContent = manOutput.value;
-    if (inContent.trim() || outContent.trim()) {
-      payload.tests.push({
-        id: "test_1",
-        name: "Przykład 1",
-        input: inContent,
-        expected_output: outContent
-      });
-    }
-
+    const title = manTitle.value.trim() || code.toUpperCase();
     btnCreateManual.disabled = true;
-    btnCreateManual.innerHTML = "<span>Tworzenie workspace...</span>";
-
     try {
       const res = await fetch(`${API_BASE}/api/create-manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          problem_id: code,
+          title: title,
+          time_limit: 1.0,
+          memory_limit: 128,
+          tests: []
+        })
       });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`Workspace '${data.problem_id}' gotowy! Otwarto VS Code`, "success");
-        activeProblemId = data.problem_id;
-        activeTaskBar.classList.remove("hidden");
-        activeTaskName.textContent = `[${data.problem_id.toUpperCase()}]`;
-
+      if (res.ok) {
+        showToast(`Utworzono ${code.toUpperCase()}! Otwarto VS Code.`, "success");
         manCode.value = "";
         manTitle.value = "";
-        manInput.value = "";
-        manOutput.value = "";
-      } else {
-        showToast(data.detail || "Błąd tworzenia zadania", "error");
+        fetchProblemsList();
+        checkDaemonHealth();
       }
-    } catch (err) {
-      showToast("Błąd połączenia z serwerem!", "error");
+    } catch (e) {
+      showToast("Błąd tworzenia zadania", "error");
     } finally {
       btnCreateManual.disabled = false;
-      btnCreateManual.innerHTML = "<span>Utwórz Workspace i Otwórz VS Code</span>";
     }
   });
 
-  // Quick VS Code button
-  btnQuickVscode.addEventListener("click", async () => {
-    if (activeProblemId) {
-      await fetch(`${API_BASE}/api/open-vscode/${activeProblemId}`, { method: "POST" });
-      showToast(`Otwarto '${activeProblemId}' w VS Code`, "info");
-    }
-  });
-
-  // Galeria
-  btnRefreshGallery.addEventListener("click", loadProblems);
-  gallerySearch.addEventListener("input", filterGallery);
+  if (btnRefreshGallery) {
+    btnRefreshGallery.addEventListener("click", fetchProblemsList);
+  }
+  if (gallerySearch) {
+    gallerySearch.addEventListener("input", filterGalleryList);
+  }
 }
 
-// ---------------- Galeria Zadań & Usuwanie ----------------
-async function loadProblems() {
+async function fetchProblemsList() {
+  if (!galleryList || !isDaemonOnline) return;
   galleryList.innerHTML = `<div class="loading-state">Ładowanie zadań...</div>`;
   try {
     const res = await fetch(`${API_BASE}/api/problems`);
     if (res.ok) {
       const data = await res.json();
       allProblems = data.problems || [];
-      if (data.active) {
-        activeProblemId = data.active;
-        activeTaskBar.classList.remove("hidden");
-        activeTaskName.textContent = `[${data.active.toUpperCase()}]`;
-      }
-      renderGallery(allProblems);
+      activeProblemId = data.active || "";
+      renderGallery();
     }
-  } catch (err) {
-    galleryList.innerHTML = `<div class="empty-state">Błąd pobierania listy zadań</div>`;
+  } catch (e) {
+    galleryList.innerHTML = `<div class="loading-state">Brak połączenia z daemonem</div>`;
   }
 }
 
-function filterGallery() {
-  const query = gallerySearch.value.toLowerCase().trim();
-  if (!query) {
-    renderGallery(allProblems);
+function renderGallery() {
+  if (!galleryList) return;
+  if (allProblems.length === 0) {
+    galleryList.innerHTML = `<div class="loading-state">Brak zadań w workspace</div>`;
     return;
   }
-  const filtered = allProblems.filter(p => {
-    const pid = (p.problem_id || "").toLowerCase();
-    const ptitle = (p.title || "").toLowerCase();
-    return pid.includes(query) || ptitle.includes(query);
-  });
-  renderGallery(filtered);
-}
-
-function renderGallery(problems) {
-  if (!problems || problems.length === 0) {
-    galleryList.innerHTML = `<div class="empty-state">Brak zapisanych zadań</div>`;
-    return;
-  }
-
   galleryList.innerHTML = "";
-  problems.forEach(p => {
-    const pid = p.problem_id || "zad";
-    const title = p.title || pid.toUpperCase();
-    const testsCount = (p.tests || []).length;
-    const isActive = (pid.toLowerCase() === (activeProblemId || "").toLowerCase());
-
+  allProblems.forEach(p => {
     const card = document.createElement("div");
-    card.className = `problem-card ${isActive ? "active-card" : ""}`;
-    card.id = `card-prob-${pid}`;
+    card.className = "gallery-card" + (p.problem_id === activeProblemId ? " active" : "");
     card.innerHTML = `
-      <div class="problem-header">
-        <span class="problem-code-badge">${escapeHtml(pid.toUpperCase())}</span>
-        <span class="problem-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-        <span class="problem-tests-count" id="count-prob-${pid}">${testsCount} testów</span>
-      </div>
-      <div class="problem-actions">
-        <button class="btn-secondary btn-act-activate" title="Aktywuj i przełącz Stream Deck">Aktywuj</button>
-        <button class="btn-secondary btn-act-code" title="Otwórz w edytorze">VS Code</button>
-        <button class="btn-secondary btn-act-test" title="Uruchom testy">Testy</button>
-        <button class="btn-secondary btn-act-add-tests" title="Dodaj paczkę testów (.zip)">+ Testy (ZIP)</button>
-        <button class="btn-act-delete" title="Usuń to zadanie">Usuń</button>
-      </div>
+      <div style="font-weight: 700; color: #38bdf8;">${escapeHtml(p.title)} [${escapeHtml(p.problem_id.toUpperCase())}]</div>
+      <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Testów: ${p.tests ? p.tests.length : 0}</div>
     `;
-
-    card.querySelector(".btn-act-activate").addEventListener("click", async () => {
-      await fetch(`${API_BASE}/api/set-active/${pid}`, { method: "POST" });
-      activeProblemId = pid;
-      activeTaskBar.classList.remove("hidden");
-      activeTaskName.textContent = `[${pid.toUpperCase()}]`;
-      showToast(`Przełączono na '${pid.toUpperCase()}'`, "info");
-      loadProblems();
-    });
-
-    card.querySelector(".btn-act-code").addEventListener("click", async () => {
-      await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
-      showToast(`Otwarto '${pid}' w VS Code`, "info");
-    });
-
-    card.querySelector(".btn-act-test").addEventListener("click", async () => {
-      showToast(`Uruchamianie testów dla '${pid}'...`, "info");
-      const res = await fetch(`${API_BASE}/api/run-all/${pid}`, { method: "POST" });
-      const data = await res.json();
-      if (data.all_passed) {
-        showToast(`Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, "success");
-      } else {
-        showToast(`Wykryto błędy w testach (${data.summary || "WA"})`, "error");
-      }
-    });
-
-    // Dodawanie testów z ZIP do istniejącego zadania
-    card.querySelector(".btn-act-add-tests").addEventListener("click", () => {
-      const fileInput = document.createElement("input");
-      fileInput.type = "file";
-      fileInput.accept = ".zip";
-      fileInput.onchange = async () => {
-        if (!fileInput.files || fileInput.files.length === 0) return;
-        const file = fileInput.files[0];
-        const formData = new FormData();
-        formData.append("file", file);
-        showToast(`Wgrywanie testów dla '${pid.toUpperCase()}'...`, "info");
-        try {
-          const res = await fetch(`${API_BASE}/api/problems/${pid}/add-tests`, {
-            method: "POST",
-            body: formData
-          });
-          const data = await res.json();
-          if (res.ok && data.success) {
-            showToast(`✓ Dodano ${data.tests_added} testów (łącznie: ${data.total_tests})!`, "success");
-            loadProblems();
-          } else {
-            showToast(data.detail || "Błąd dodawania testów!", "error");
-          }
-        } catch (err) {
-          showToast("Błąd połączenia z serwerem!", "error");
-        }
-      };
-      fileInput.click();
-    });
-
-    // Usuwanie zadania
-    card.querySelector(".btn-act-delete").addEventListener("click", async () => {
-      if (!confirm(`Czy na pewno usunąć zadanie '${pid.toUpperCase()}' z workspace?`)) {
-        return;
-      }
-      try {
-        const res = await fetch(`${API_BASE}/api/problem/${pid}`, { method: "DELETE" });
-        if (res.ok) {
-          showToast(`Usunięto zadanie '${pid.toUpperCase()}'`, "info");
-          card.remove();
-          allProblems = allProblems.filter(x => (x.problem_id || "").toLowerCase() !== pid);
-          if (allProblems.length === 0) {
-            galleryList.innerHTML = `<div class="empty-state">Brak zapisanych zadań</div>`;
-          }
-          checkDaemonHealth();
-        } else {
-          showToast("Błąd podczas usuwania zadania!", "error");
-        }
-      } catch (err) {
-        showToast("Błąd połączenia z serwerem!", "error");
-      }
-    });
-
+    card.onclick = () => {
+      fetch(`${API_BASE}/api/set-active/${p.problem_id}`, { method: "POST" })
+        .then(() => fetchProblemsList());
+    };
     galleryList.appendChild(card);
   });
 }
 
-// ---------------- Powiadomienia Toast & Helpers ----------------
-function showToast(message, type = "info") {
+function filterGalleryList() {
+  const q = (gallerySearch.value || "").toLowerCase();
+  const filtered = allProblems.filter(p => p.problem_id.includes(q) || p.title.toLowerCase().includes(q));
+  galleryList.innerHTML = "";
+  filtered.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "gallery-card" + (p.problem_id === activeProblemId ? " active" : "");
+    card.innerHTML = `<div style="font-weight:700; color:#38bdf8;">${escapeHtml(p.title)} [${escapeHtml(p.problem_id.toUpperCase())}]</div>`;
+    card.onclick = () => {
+      fetch(`${API_BASE}/api/set-active/${p.problem_id}`, { method: "POST" }).then(() => fetchProblemsList());
+    };
+    galleryList.appendChild(card);
+  });
+}
+
+// ---------------- Toast i narzędzia ----------------
+function showToast(msg, type = "info") {
   const container = document.getElementById("toast-container");
+  if (!container) return;
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
-  toast.textContent = message;
-
+  toast.textContent = msg;
   container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transition = "opacity 0.3s ease";
-    setTimeout(() => toast.remove(), 300);
-  }, 2400);
+  setTimeout(() => toast.remove(), 3500);
 }
 
 function escapeHtml(str) {
-  if (!str) return "";
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function formatBytes(bytes) {
-  if (!bytes) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  return (str || "").replace(/[&<>"']/g, m => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[m]);
 }

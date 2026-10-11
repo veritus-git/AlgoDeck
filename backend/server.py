@@ -107,7 +107,8 @@ def get_app_settings():
     return {
         "workspace_dir": str(settings.workspace_dir),
         "vscode_mode": settings.vscode_mode,
-        "notifications": settings.notifications
+        "notifications": settings.notifications,
+        "auto_detect_downloads": settings.auto_detect_downloads
     }
 
 @app.post("/api/settings")
@@ -116,6 +117,7 @@ def update_app_settings(payload: Dict[str, Any] = Body(...)):
     new_dir = payload.get("workspace_dir")
     new_mode = payload.get("vscode_mode")
     new_notif = payload.get("notifications")
+    new_auto_det = payload.get("auto_detect_downloads")
 
     saved_data = {}
     if CONFIG_FILE.exists():
@@ -127,11 +129,34 @@ def update_app_settings(payload: Dict[str, Any] = Body(...)):
     if new_dir: saved_data["workspace_dir"] = str(new_dir)
     if new_mode: saved_data["vscode_mode"] = str(new_mode)
     if new_notif is not None: saved_data["notifications"] = bool(new_notif)
+    if new_auto_det is not None: saved_data["auto_detect_downloads"] = bool(new_auto_det)
 
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(saved_data, indent=2, ensure_ascii=False), encoding="utf-8")
     settings.reload()
     return {"success": True, "settings": saved_data}
+
+@app.post("/api/settings/open-gui")
+def open_settings_gui():
+    """Uruchamia natywne okno ustawień w Rust (algodeck-gui)."""
+    import subprocess
+    import sys
+    gui_paths = [
+        Path.home() / ".local/bin/algodeck-gui",
+        Path(__file__).resolve().parent.parent / "gui/target/release/algodeck-gui",
+        Path.home() / ".local/share/algodeck/gui/target/release/algodeck-gui"
+    ]
+    for gp in gui_paths:
+        if gp.exists() and os.access(gp, os.X_OK):
+            subprocess.Popen([str(gp), "--tab=settings"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"success": True, "method": "rust_gui"}
+
+    py_panel = Path(__file__).resolve().parent.parent / "scripts/panel_dialog.py"
+    if py_panel.exists():
+        subprocess.Popen([sys.executable, str(py_panel), "--tab=settings"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"success": True, "method": "python_fallback"}
+
+    return {"success": False, "error": "Nie znaleziono pliku wykonywalnego GUI"}
 
 # ----------------- Status & Health -----------------
 
@@ -843,6 +868,59 @@ def switch_task(direction: str = "next"):
 def open_streamdeck_menu():
     import subprocess
     subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_algo_switch.sh menu"], timeout=3)
+    return {"success": True}
+
+@app.post("/api/streamdeck/idle")
+def show_streamdeck_idle():
+    """Przełącza Stream Deck na ekran zachęty (ALGO_IDLE)."""
+    import subprocess
+    subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_algo_switch.sh idle"], timeout=3)
+    streamcontroller_bridge.switch_to_page("ALGO_IDLE")
+    streamdeck_controller.active_problem_id = ""
+    return {"success": True, "page": "ALGO_IDLE"}
+
+@app.post("/api/launch")
+def launch_algodeck():
+    """
+    Wywoływane zielonym przyciskiem 'URUCHOM' z rozszerzenia w przeglądarce.
+    Aktywuje ekran zachęty na Stream Decku oraz powiadamia użytkownika.
+    """
+    streamcontroller_bridge.ensure_streamcontroller_running()
+    import subprocess
+    subprocess.run(["bash", "-c", "$HOME/.local/bin/sd_algo_switch.sh idle"], timeout=3)
+    streamcontroller_bridge.switch_to_page("ALGO_IDLE")
+    streamdeck_controller.active_problem_id = ""
+
+    # Powiadomienie na pulpicie
+    subprocess.run([
+        "bash", "-c",
+        'notify-send "AlgoDeck ⚡" "Środowisko olimpijskie uruchomione! Ekran zachęty aktywny na Stream Decku." 2>/dev/null || true'
+    ])
+    return {
+        "success": True,
+        "state": "idle",
+        "message": "AlgoDeck uruchomiony! Ekran zachęty aktywny na Stream Decku."
+    }
+
+@app.post("/api/exit")
+def exit_algodeck():
+    """Całkowite wyłączenie AlgoDeck, usunięcie profili i zatrzymanie serwera."""
+    streamcontroller_bridge.cleanup_and_exit()
+    def _delayed_stop():
+        import time, subprocess
+        time.sleep(0.3)
+        subprocess.run(["systemctl", "--user", "stop", "algodeck.service"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-f", "algodeck-gui"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-f", "uvicorn backend.server:app"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import threading
+    threading.Thread(target=_delayed_stop, daemon=True).start()
+    return {"success": True, "message": "AlgoDeck wyłączony, profile usunięte ze Stream Decka."}
+
+@app.post("/api/streamdeck/sync")
+def sync_streamdeck_profiles():
+    """Wymusza ponowne wygenerowanie i synchronizację wszystkich profili Stream Decka."""
+    streamcontroller_bridge.ensure_vector_icons()
+    streamcontroller_bridge.sync_all_problems()
     return {"success": True}
 
 # ----------------- Kompilacja i Uruchamianie -----------------

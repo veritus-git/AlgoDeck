@@ -235,9 +235,9 @@ class StreamControllerBridge:
                 "3x1": make_empty_key(),
                 "4x1": make_empty_key(),
 
-                # RZĄD 2: [ ⚙ ] [   ] [   ] [   ] [   ]
+                # RZĄD 2: [ ⚙ ] [ ↩ WYJŚCIE ] [   ] [   ] [   ]
                 "0x2": make_key(settings_cmd, icon_settings),
-                "1x2": make_empty_key(),
+                "1x2": make_key('$HOME/.local/bin/sd_algo_switch.sh exit', STREAMCONTROLLER_ICONS / "icon_exit.png"),
                 "2x2": make_empty_key(),
                 "3x2": make_empty_key(),
                 "4x2": make_empty_key(),
@@ -252,7 +252,7 @@ class StreamControllerBridge:
         Zapisuje stronę zadania w StreamControllerze:
         - Rząd 0: [ = ] [ L1 ] [ L2 ] [ L3 ] [ = ]
         - Rząd 1: [ + ] [ ✓ ] [ ▶ ] [ ⏹ ] [ ⊞ ]
-        - Rząd 2: [ ⚙ ] [   ] [ ‹ ] [Nr ] [ › ] (Ustawienia, Pusty, Lewo, Nr zadania, Prawo)
+        - Rząd 2: [ ⚙ ] [ ↩ ] [ ‹ ] [Nr ] [ › ] (Ustawienia, Wyjście, Lewo, Nr zadania, Prawo)
         """
         prob_id = problem_id.upper()
         pdir = (self.workspace_dir / problem_id.lower()).resolve()
@@ -262,7 +262,8 @@ class StreamControllerBridge:
         self.ensure_vector_icons()
 
         from backend.streamdeck.icons_generator import (
-            generate_letter_icon, generate_settings_icon, generate_task_number_icon
+            generate_letter_icon, generate_settings_icon, generate_task_number_icon,
+            generate_exit_curved_arrow_icon
         )
 
         # Pobierz wszystkie zadania w ścisłej kolejności chronologicznej utworzenia (najstarsze = 1/N)
@@ -280,11 +281,13 @@ class StreamControllerBridge:
         icon_task = STREAMCONTROLLER_ICONS / "icon_task_sec.png"
         icon_equals = STREAMCONTROLLER_ICONS / "icon_equals.png"
         icon_settings = generate_settings_icon()
+        icon_exit = generate_exit_curved_arrow_icon()
         icon_num = generate_task_number_icon(current_idx, max(1, total_projects))
 
         # Komendy
         new_task_cmd = '$HOME/.local/bin/sd_algo_new_task.sh'
         settings_cmd = '$HOME/.local/bin/sd_algo_panel.sh'
+        exit_cmd = '$HOME/.local/bin/sd_algo_switch.sh exit'
         test_cmd = f'$HOME/.local/bin/sd_algo_test_vscode.sh "{pdir}" "{problem_id}"'
         run_cmd = f'$HOME/.local/bin/sd_algo_run_vscode.sh "{pdir}" "{problem_id}"'
         kill_cmd = f'bash "{pdir}/.algo/kill.sh"'
@@ -376,9 +379,9 @@ class StreamControllerBridge:
                 "3x1": make_key(kill_cmd, icon_kill),
                 "4x1": make_key(menu_cmd, icon_task),
 
-                # RZĄD 2 (DÓŁ): [ ⚙ ] [   ] [ ‹ ] [Nr ] [ › ]
+                # RZĄD 2 (DÓŁ): [ ⚙ ] [ ↩ ] [ ‹ ] [Nr ] [ › ]
                 "0x2": make_key(settings_cmd, icon_settings),
-                "1x2": make_empty_key(),
+                "1x2": make_key(exit_cmd, icon_exit),
                 "2x2": make_key(left_cmd, icon_left),
                 "3x2": make_key(info_cmd, icon_num),
                 "4x2": make_key(right_cmd, icon_right),
@@ -570,6 +573,24 @@ class StreamControllerBridge:
                 }
             }
 
+            # 2b. Przycisk wyjścia z AlgoDeck w slocie (1x2)
+            icon_exit = STREAMCONTROLLER_ICONS / "icon_exit.png"
+            exit_cmd = "$HOME/.local/bin/sd_algo_switch.sh exit"
+            keys["1x2"] = {
+                "states": {
+                    "0": {
+                        "actions": [{"id": "com_core447_OSPlugin::EasyCommand", "settings": {"command": exit_cmd}}],
+                        "labels": {},
+                        "background": {"color": [0, 0, 0, 255]},
+                        "media": {
+                            "path": str(icon_exit.resolve()),
+                            "size": 1.0, "valign": 0.0, "halign": 0.0, "fill-mode": "cover"
+                        },
+                        "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0
+                    }
+                }
+            }
+
             # 3. Jeśli są kolejne zadania, w prawym dolnym rogu (4x2) pojawia się strzałka w prawo ›
             if page_idx < total_pages - 1:
                 next_target = f"ALGO_MENU_{page_idx + 2}"
@@ -591,8 +612,168 @@ class StreamControllerBridge:
 
             self.sync_page_to_streamcontroller(page_name, {"screensaver": {}, "keys": keys})
 
+    def ensure_streamcontroller_running(self):
+        """Upewnia się, że StreamController (lub oficjalny Stream Deck na macOS/Win) jest uruchomiony w tle i gotowy do przyjmowania poleceń."""
+        import sys
+        import time
+        if sys.platform.startswith("linux"):
+            try:
+                res = subprocess.run(["pgrep", "-f", "StreamController"], capture_output=True)
+                if res.returncode != 0:
+                    logger.info("StreamController nie jest uruchomiony. Uruchamiam w tle...")
+                    launched = False
+                    if shutil.which("flatpak"):
+                        try:
+                            chk = subprocess.run(["flatpak", "info", "com.core447.StreamController"], capture_output=True)
+                            if chk.returncode == 0:
+                                env = dict(os.environ)
+                                if "DISPLAY" not in env or not env["DISPLAY"]:
+                                    env["DISPLAY"] = ":0"
+                                subprocess.Popen(["flatpak", "run", "com.core447.StreamController"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                launched = True
+                        except Exception:
+                            pass
+                    if not launched and shutil.which("streamcontroller"):
+                        env = dict(os.environ)
+                        if "DISPLAY" not in env or not env["DISPLAY"]:
+                            env["DISPLAY"] = ":0"
+                        subprocess.Popen(["streamcontroller"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        launched = True
+
+                    # Czekaj na rejestrację na DBus (max 6 sekund)
+                    for _ in range(30):
+                        time.sleep(0.2)
+                        chk_dbus = subprocess.run([
+                            "gdbus", "call", "--session",
+                            "--dest", "com.core447.StreamController",
+                            "--object-path", "/com/core447/StreamController",
+                            "--method", "org.freedesktop.DBus.Peer.Ping"
+                        ], capture_output=True)
+                        if chk_dbus.returncode == 0:
+                            logger.info("StreamController jest gotowy i odpowiada na DBus.")
+                            break
+            except Exception as e:
+                logger.warning(f"Błąd uruchamiania StreamControllera: {e}")
+        elif sys.platform == "darwin":
+            try:
+                res = subprocess.run(["pgrep", "-f", "Stream Deck"], capture_output=True)
+                if res.returncode != 0:
+                    subprocess.Popen(["open", "-a", "Elgato Stream Deck"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(1.5)
+            except Exception:
+                pass
+        elif sys.platform == "win32":
+            try:
+                res = subprocess.run(["tasklist", "/FI", "IMAGENAME eq StreamDeck.exe"], capture_output=True, text=True)
+                if "StreamDeck.exe" not in res.stdout:
+                    sd_exe = Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "Elgato" / "StreamDeck" / "StreamDeck.exe"
+                    if sd_exe.exists():
+                        subprocess.Popen([str(sd_exe)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(1.5)
+            except Exception:
+                pass
+
+    def cleanup_and_exit(self):
+        """
+        Całkowite wyłączenie AlgoDeck:
+        1. Odczytuje domyślną stronę użytkownika (np. 'Main') i natychmiast przełącza StreamController z powrotem na nią.
+        2. Pobiera listę stron ze StreamControllera przez DBus oraz katalogu workspace.
+        3. Usuwa wszystkie profile zadań i menu ze StreamControllera przez DBus RemovePage oraz z dysku.
+        4. Czyści plik /tmp/algodeck_active_task.txt.
+        """
+        default_page = "Main"
+        pages_settings = STREAMCONTROLLER_DATA / "settings/pages.json"
+        if pages_settings.exists():
+            try:
+                pdata = json.loads(pages_settings.read_text(encoding="utf-8"))
+                defs = pdata.get("default-pages", {})
+                if SERIAL in defs:
+                    default_page = Path(defs[SERIAL]).stem
+                elif defs:
+                    default_page = Path(next(iter(defs.values()))).stem
+            except Exception:
+                pass
+
+        # 1. Przełącz na domyślną stronę użytkownika
+        try:
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "com.core447.StreamController.ChangePage",
+                SERIAL, default_page
+            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        # 2. Zbierz wszystkie strony AlgoDeck do usunięcia
+        pages_to_remove = ["ALGO_IDLE", "ALGO_MENU"]
+        
+        # Pobierz aktualne strony ze StreamControllera przez właściwość DBus Pages
+        try:
+            import re
+            res = subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "org.freedesktop.DBus.Properties.Get",
+                "com.core447.StreamController", "Pages"
+            ], timeout=2, capture_output=True, text=True)
+            if res.returncode == 0:
+                found_pages = re.findall(r"'([^']+)'", res.stdout)
+                for p in found_pages:
+                    if p.startswith("ALGO_") or p.isupper():
+                        pages_to_remove.append(p)
+        except Exception:
+            pass
+
+        ws_dir = settings.workspace_dir
+        if ws_dir.exists():
+            for p in ws_dir.iterdir():
+                if p.is_dir() and not p.name.startswith("."):
+                    pages_to_remove.append(p.name.upper())
+
+        if STREAMCONTROLLER_PAGES.exists():
+            for pf in STREAMCONTROLLER_PAGES.glob("*.json"):
+                stem = pf.stem
+                if stem.startswith("ALGO_") or stem.isupper():
+                    pages_to_remove.append(stem)
+
+        # Wyklucz prywatne profile użytkownika
+        protected_pages = {"MAIN", "DEV & SECRETS", "PULPIT 1 - DEV", "PULPIT 2 - PERSONAL"}
+        pages_to_remove = [p for p in set(pages_to_remove) if p.upper() not in protected_pages]
+
+        # 3. Usuń każdą stronę AlgoDeck przez DBus i usuń plik JSON
+        for p in pages_to_remove:
+            try:
+                subprocess.run([
+                    "gdbus", "call", "--session",
+                    "--dest", "com.core447.StreamController",
+                    "--object-path", "/com/core447/StreamController",
+                    "--method", "com.core447.StreamController.RemovePage",
+                    p
+                ], timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+            json_file = STREAMCONTROLLER_PAGES / f"{p}.json"
+            if json_file.exists():
+                try:
+                    json_file.unlink()
+                except Exception:
+                    pass
+
+        try:
+            if Path("/tmp/algodeck_active_task.txt").exists():
+                Path("/tmp/algodeck_active_task.txt").unlink()
+        except Exception:
+            pass
+
+        logger.info(f"Usunięto profile AlgoDeck ({pages_to_remove}) ze StreamControllera i przywrócono stronę {default_page}.")
+
     def switch_to_page(self, page_name: str) -> bool:
         """Wysyła sygnał DBus do StreamControllera, by natychmiast wyświetlić stronę na fizycznym Stream Decku."""
+        self.ensure_streamcontroller_running()
         prob_id = page_name.upper()
         if prob_id != "ALGO_IDLE" and not prob_id.startswith("ALGO_MENU"):
             try:

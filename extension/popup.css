@@ -757,3 +757,329 @@ textarea {
   border: 1px solid var(--accent-crimson);
   color: #fef2f2;
 }
+
+/* =========================================================================
+   LAUNCHER VIEW: ZIELONY OKRĄGŁY PRZYCISK "URUCHOM"
+   ========================================================================= */
+.view-launcher {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding-bottom: 8px;
+}
+
+.launcher-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.launcher-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 16px;
+}
+
+.launch-button-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 130px;
+  height: 130px;
+}
+
+.btn-round-launch {
+  position: relative;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: radial-gradient(circle at 35% 35%, #10b981 0%, #059669 60%, #047857 100%);
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.45), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.btn-round-launch:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 35px rgba(16, 185, 129, 0.7), inset 0 2px 6px rgba(255, 255, 255, 0.6);
+}
+
+.btn-round-launch:active {
+  transform: scale(0.96);
+}
+
+.launch-circle-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: #ffffff;
+  z-index: 2;
+}
+
+.launch-play-icon {
+  font-size: 24px;
+  margin-left: 3px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+
+.launch-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.launch-circle-glow {
+  position: absolute;
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  border: 2px dashed rgba(16, 185, 129, 0.4);
+  animation: rotateGlow 12s linear infinite;
+}
+
+@keyframes rotateGlow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.btn-round-launch.running {
+  background: radial-gradient(circle at 35% 35%, #0284c7 0%, #0369a1 60%, #075985 100%);
+  box-shadow: 0 0 25px rgba(56, 189, 248, 0.45), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+}
+
+.launch-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 12px;
+  max-width: 260px;
+}
+
+.launcher-active-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 10px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 12px;
+  font-size: 11px;
+}
+
+.active-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+}
+
+.launcher-actions-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 14px 12px;
+}
+
+.btn-action-pill {
+  padding: 5px 10px;
+  border-radius: 6px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-action-pill:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+  border-color: var(--accent-cyan);
+}
+
+.workspace-drawer {
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* =========================================================================
+   STAN LAUNCHERA: OFFLINE (TYLKO ZIELONY PRZYCISK URUCHOM) vs ONLINE
+   ========================================================================= */
+.view-launcher.is-offline .launch-button-wrapper {
+  display: flex !important;
+}
+.view-launcher.is-offline .launch-hint {
+  display: block !important;
+}
+.view-launcher.is-offline .launcher-active-bar,
+.view-launcher.is-offline .launcher-actions-row,
+.view-launcher.is-offline .workspace-drawer {
+  display: none !important;
+}
+
+.view-launcher.is-online .launch-button-wrapper {
+  display: none !important;
+}
+.view-launcher.is-online .launch-hint {
+  display: none !important;
+}
+.view-launcher.is-online .launcher-active-bar {
+  display: flex !important;
+}
+.view-launcher.is-online .launcher-actions-row {
+  display: flex !important;
+}
+.view-launcher.is-online .workspace-drawer {
+  display: block !important;
+}
+
+
+/* =========================================================================
+   TRYB WYKRYTEGO ZADANIA (SCREENSHOT 3: TYLKO DOSŁOWNIE NIEBIESKA RAMKA)
+   ========================================================================= */
+body.detected-mode {
+  width: 370px !important;
+  min-width: 370px !important;
+  max-width: 370px !important;
+  height: auto !important;
+  min-height: unset !important;
+  max-height: unset !important;
+  background-color: #070a12 !important;
+  padding: 8px !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+body.detected-mode .app-container {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+body.detected-mode .view-launcher {
+  display: none !important;
+}
+
+body.detected-mode .view-detected {
+  display: block !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.detected-box-card {
+  background-color: #0c1527;
+  border: 1.5px solid #0099ff;
+  border-radius: 9px;
+  padding: 12px 14px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 153, 255, 0.15);
+}
+
+.det-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.det-title-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.det-bolt {
+  font-size: 15px;
+  color: #fbbf24;
+  line-height: 1;
+}
+
+.det-title-text {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #00a2ff;
+  letter-spacing: 0.2px;
+}
+
+.det-btn-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.det-btn-close:hover {
+  background-color: rgba(239, 68, 68, 0.35);
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+.det-meta-row {
+  font-size: 12px;
+  color: #e2e8f0;
+  line-height: 1.4;
+}
+
+.det-meta-row strong {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.btn-det-oneclick {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #0284c7 0%, #0099ff 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 153, 255, 0.25);
+}
+
+.btn-det-oneclick:hover {
+  background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%);
+  box-shadow: 0 4px 14px rgba(0, 153, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-det-oneclick:active {
+  transform: translateY(0);
+}
+
+.btn-det-oneclick .btn-bolt {
+  font-size: 14px;
+  color: #fef08a;
+}

@@ -251,6 +251,38 @@ def generate_arrow_back_icon() -> Path:
     cr.stroke()
     return _save_cairo_surf(surf, "icon_arrow_back.png")
 
+def generate_exit_curved_arrow_icon() -> Path:
+    """
+    Zawinięta strzałka wyjścia/powrotu (↩ / curved return arrow)
+    Elegancki, minimalistyczny łuk w kolorze Slate-200 (#e2e8f0) na czarnym tle.
+    Umieszczana obok ikonki ustawień (klawisz 1x2) do powrotu do ekranu zachęty ALGO_IDLE.
+    """
+    if cairo is None:
+        return _ensure_base_icon("icon_exit.png")
+    import math
+    surf, cr = _new_cairo_surface()
+    cr.set_line_width(9.0)
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.set_line_join(cairo.LINE_JOIN_ROUND)
+    cr.set_source_rgb(226/255, 232/255, 240/255)  # Slate-200 #e2e8f0
+
+    # Pionowa nóżka z dołu po prawej: (98, 100) do (98, 76)
+    cr.move_to(98, 100)
+    cr.line_to(98, 76)
+    # Łuk 90 stopni w lewo: środek (76, 76), promień 22, od 0 do -pi/2
+    cr.arc_negative(76, 76, 22, 0.0, -math.pi / 2)
+    # Odcinek poziomy w lewo do grotu
+    cr.line_to(54, 54)
+    cr.stroke()
+
+    # Grot strzałki przy (50, 54) skierowany w lewo
+    cr.move_to(66, 42)
+    cr.line_to(50, 54)
+    cr.line_to(66, 66)
+    cr.stroke()
+
+    return _save_cairo_surf(surf, "icon_exit.png")
+
 def generate_settings_icon() -> Path:
     """
     Dyskretny, pomniejszony trybik / ustawienia ⚙ na czarnym tle.
@@ -466,6 +498,7 @@ def generate_all_base_icons():
             generate_arrow_right_icon(disabled=False)
             generate_arrow_right_icon(disabled=True)
             generate_arrow_back_icon()
+            generate_exit_curved_arrow_icon()
             generate_vscode_icon()
         except Exception:
             pass
