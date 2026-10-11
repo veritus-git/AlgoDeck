@@ -176,9 +176,20 @@ def sanitize_problem_id(raw_id: str) -> str:
     """Oczyszcza kod zadania, zachowując litery (w tym polskie ąćęłńóśźż), cyfry oraz myślniki/podkreślenia."""
     return re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ_-]', '', (raw_id or "").strip()).lower()
 
-STAGING_DIR = Path("/tmp/algodeck_staging")
+STAGING_DIR = Path.home() / ".local/share/algodeck/staging"
+STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-def _compute_staged_state(include_tests: bool = True) -> Dict[str, Any]:
+# Migracja ze starego /tmp jeśli istniały
+_old_tmp = Path("/tmp/algodeck_staging")
+if _old_tmp.exists():
+    try:
+        for _f in _old_tmp.glob("*"):
+            if not (STAGING_DIR / _f.name).exists():
+                shutil.copy2(_f, STAGING_DIR / _f.name)
+    except Exception:
+        pass
+
+def _compute_staged_state(include_tests: bool = True, force_recompute: bool = False) -> Dict[str, Any]:
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
     pdf_path = STAGING_DIR / "staged_pdf.pdf"
     zip_path = STAGING_DIR / "staged_zip.zip"
@@ -205,6 +216,22 @@ def _compute_staged_state(include_tests: bool = True) -> Dict[str, Any]:
             "memory_limit_mb": 128,
             "tests_count": 0,
             "tests": []
+        }
+
+    # Szybki powrót z cache dla odpytywań stanu (bez re-parsowania archiwów i pdf przy każdym requeście)
+    if not force_recompute and not include_tests and meta.get("cached") and (has_pdf == ("pdf_filename" in meta)) and (has_zip == ("zip_filename" in meta)):
+        return {
+            "has_pdf": has_pdf,
+            "pdf_filename": meta.get("pdf_filename", "zadanie.pdf"),
+            "pdf_size": pdf_path.stat().st_size if has_pdf else 0,
+            "has_zip": has_zip,
+            "zip_filename": meta.get("zip_filename", "testy.zip"),
+            "zip_size": zip_path.stat().st_size if has_zip else 0,
+            "problem_id": meta.get("problem_id", "zad"),
+            "title": meta.get("title", "ZAD"),
+            "time_limit_sec": meta.get("time_limit_sec", 1.0),
+            "memory_limit_mb": meta.get("memory_limit_mb", 128),
+            "tests_count": meta.get("tests_count", 0)
         }
 
     pdf_info: Dict[str, Any] = {}
@@ -235,6 +262,18 @@ def _compute_staged_state(include_tests: bool = True) -> Dict[str, Any]:
 
     tests = zip_info.get("tests") or pdf_info.get("tests") or []
     tests_count = len(tests)
+
+    # Zapisz w meta.json do szybkiego odczytu
+    meta["problem_id"] = final_id
+    meta["title"] = final_title
+    meta["time_limit_sec"] = final_time
+    meta["memory_limit_mb"] = final_mem
+    meta["tests_count"] = tests_count
+    meta["cached"] = True
+    try:
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
     result = {
         "has_pdf": has_pdf,
@@ -290,7 +329,7 @@ async def stage_file(
         raise HTTPException(status_code=400, detail="Nieobsługiwany typ pliku (wymagany pdf lub zip).")
 
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return _compute_staged_state(include_tests=False)
+    return _compute_staged_state(include_tests=False, force_recompute=True)
 
 @app.post("/api/upload-staging")
 async def upload_staging(
@@ -329,12 +368,12 @@ def clear_staged(payload: Dict[str, Any] = Body(default={})):
     else:
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    return _compute_staged_state(include_tests=False)
+    return _compute_staged_state(include_tests=False, force_recompute=True)
 
 @app.post("/api/start-staged")
 async def start_staged(payload: Dict[str, Any] = Body(default={})):
     """Rozpoczyna zadanie na bazie plików w poczekalni (PDF i/lub ZIP)."""
-    state = _compute_staged_state()
+    state = _compute_staged_state(include_tests=True, force_recompute=True)
     if not state.get("has_pdf") and not state.get("has_zip"):
         raise HTTPException(status_code=400, detail="Brak wgranych plików (PDF lub ZIP) w poczekalni.")
 
@@ -815,15 +854,23 @@ async def auto_import_pdf(payload: Dict[str, Any] = Body(...)):
     memory_limit = int(payload.get("memory_limit") or pdf_info.get("memory_limit_mb") or 128)
     tests = pdf_info.get("tests", [])
 
-    meta = {
+    meta_path = STAGING_DIR / "meta.json"
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+
+    meta.update({
         "problem_id": pid,
         "title": title,
         "time_limit_sec": time_limit,
         "memory_limit_mb": memory_limit,
         "pdf_filename": pdf_path.name,
         "pdf_size": pdf_path.stat().st_size
-    }
-    (STAGING_DIR / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    })
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     auto_create = payload.get("auto_create", False)
     if auto_create:

@@ -66,7 +66,7 @@ let isStartingDaemon = false;
 
 // ---------------- Inicjalizacja ----------------
 document.addEventListener("DOMContentLoaded", async () => {
-  restoreStagedFromLocalStorage();
+  restoreStagedStorage();
   setupTabs();
   setupStaging();
   setupManualForm();
@@ -79,10 +79,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.body.classList.remove("detected-mode");
     viewDetected.classList.add("hidden");
 
-    const online = await checkDaemonHealth();
-    if (online) {
-      await loadExistingStagedState();
-    }
+    // Równoległe, nieblokujące sprawdzenie daemona i stanu plików
+    checkDaemonHealth();
+    loadExistingStagedState();
     setInterval(checkDaemonHealth, 3000);
   }
 });
@@ -251,12 +250,17 @@ async function checkDetectedMode() {
         try {
           await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
         } catch (_) {}
+        try {
+          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
+          }
+        } catch (_) {}
 
-        btnDetOneclick.innerHTML = `<span>✓ Utworzono [${pid.toUpperCase()}]! Uruchomiono VS Code</span>`;
+        btnDetOneclick.innerHTML = `<span>✓ Otwarto zadanie [${pid.toUpperCase()}] w VS Code!</span>`;
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
           chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
         }
-        setTimeout(() => window.close(), 700);
+        setTimeout(() => window.close(), 1200);
       } else {
         alert(data.detail || "Błąd podczas tworzenia workspace");
         btnDetOneclick.disabled = false;
@@ -344,7 +348,7 @@ function setupStaging() {
         body: JSON.stringify({ file_type: "pdf" })
       });
     } catch (_) {}
-    try { localStorage.removeItem("algodeck_staged_pdf"); } catch (_) {}
+    clearStagedStorage("pdf");
     stagedPdfPill.classList.add("hidden");
     dropPdfBody.classList.remove("hidden");
     fileInputPdf.value = "";
@@ -361,7 +365,7 @@ function setupStaging() {
         body: JSON.stringify({ file_type: "zip" })
       });
     } catch (_) {}
-    try { localStorage.removeItem("algodeck_staged_zip"); } catch (_) {}
+    clearStagedStorage("zip");
     stagedZipPill.classList.add("hidden");
     dropZipBody.classList.remove("hidden");
     fileInputZip.value = "";
@@ -385,18 +389,19 @@ function setupStaging() {
         try {
           await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
         } catch (_) {}
-
         try {
-          localStorage.removeItem("algodeck_staged_pdf");
-          localStorage.removeItem("algodeck_staged_zip");
+          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
+          }
         } catch (_) {}
 
+        clearStagedStorage("all");
         hasPdfStaged = false;
         hasZipStaged = false;
 
         showToast(`✓ Utworzono [${pid.toUpperCase()}]! Uruchomiono VS Code.`, false);
-        btnSubmitFiles.innerHTML = `<span>✓ Uruchomiono VS Code!</span>`;
-        setTimeout(() => window.close(), 700);
+        btnSubmitFiles.innerHTML = `<span>✓ Otwarto zadanie [${pid.toUpperCase()}] w VS Code!</span>`;
+        setTimeout(() => window.close(), 1200);
       } else {
         showToast(data.detail || "Błąd tworzenia workspace z plików.", true);
         btnSubmitFiles.disabled = false;
@@ -410,17 +415,65 @@ function setupStaging() {
   });
 }
 
-function restoreStagedFromLocalStorage() {
+function saveStagedStorage(pdfName, zipName) {
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    const data = {};
+    if (pdfName !== undefined) data.algodeck_staged_pdf = pdfName || "";
+    if (zipName !== undefined) data.algodeck_staged_zip = zipName || "";
+    chrome.storage.local.set(data);
+  }
+  try {
+    if (pdfName !== undefined) {
+      if (pdfName) localStorage.setItem("algodeck_staged_pdf", pdfName);
+      else localStorage.removeItem("algodeck_staged_pdf");
+    }
+    if (zipName !== undefined) {
+      if (zipName) localStorage.setItem("algodeck_staged_zip", zipName);
+      else localStorage.removeItem("algodeck_staged_zip");
+    }
+  } catch (_) {}
+}
+
+function clearStagedStorage(type = "all") {
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    if (type === "all") chrome.storage.local.remove(["algodeck_staged_pdf", "algodeck_staged_zip"]);
+    else if (type === "pdf") chrome.storage.local.remove(["algodeck_staged_pdf"]);
+    else if (type === "zip") chrome.storage.local.remove(["algodeck_staged_zip"]);
+  }
+  try {
+    if (type === "all" || type === "pdf") localStorage.removeItem("algodeck_staged_pdf");
+    if (type === "all" || type === "zip") localStorage.removeItem("algodeck_staged_zip");
+  } catch (_) {}
+}
+
+function restoreStagedStorage() {
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(["algodeck_staged_pdf", "algodeck_staged_zip"], (res) => {
+      if (res && res.algodeck_staged_pdf) {
+        hasPdfStaged = true;
+        stagedPdfName.textContent = res.algodeck_staged_pdf;
+        dropPdfBody.classList.add("hidden");
+        stagedPdfPill.classList.remove("hidden");
+      }
+      if (res && res.algodeck_staged_zip) {
+        hasZipStaged = true;
+        stagedZipName.textContent = res.algodeck_staged_zip;
+        dropZipBody.classList.add("hidden");
+        stagedZipPill.classList.remove("hidden");
+      }
+      updateFilesSubmitBtn();
+    });
+  }
   try {
     const savedPdf = localStorage.getItem("algodeck_staged_pdf");
-    if (savedPdf) {
+    if (savedPdf && !hasPdfStaged) {
       hasPdfStaged = true;
       stagedPdfName.textContent = savedPdf;
       dropPdfBody.classList.add("hidden");
       stagedPdfPill.classList.remove("hidden");
     }
     const savedZip = localStorage.getItem("algodeck_staged_zip");
-    if (savedZip) {
+    if (savedZip && !hasZipStaged) {
       hasZipStaged = true;
       stagedZipName.textContent = savedZip;
       dropZipBody.classList.add("hidden");
@@ -482,13 +535,13 @@ async function uploadStagedFile(file, type) {
       if (isPdf) {
         nameEl.textContent = file.name;
         hasPdfStaged = true;
-        try { localStorage.setItem("algodeck_staged_pdf", file.name); } catch (_) {}
+        saveStagedStorage(file.name, undefined);
       } else {
         const testsCount = data.tests_count || 0;
         const dispName = `${file.name} (${testsCount} testów)`;
         nameEl.textContent = dispName;
         hasZipStaged = true;
-        try { localStorage.setItem("algodeck_staged_zip", dispName); } catch (_) {}
+        saveStagedStorage(undefined, dispName);
       }
       pillEl.classList.remove("hidden");
       showToast(`Dołączono: ${file.name}`, false);
@@ -511,16 +564,16 @@ async function loadExistingStagedState() {
       const state = await res.json();
       if (state.has_pdf) {
         hasPdfStaged = true;
-        const pdfName = state.pdf_filename || "plik.pdf";
+        const pdfName = state.pdf_filename || "zadanie.pdf";
         stagedPdfName.textContent = pdfName;
         dropPdfBody.classList.add("hidden");
         stagedPdfPill.classList.remove("hidden");
-        try { localStorage.setItem("algodeck_staged_pdf", pdfName); } catch (_) {}
+        saveStagedStorage(pdfName, undefined);
       } else {
         hasPdfStaged = false;
         stagedPdfPill.classList.add("hidden");
         dropPdfBody.classList.remove("hidden");
-        try { localStorage.removeItem("algodeck_staged_pdf"); } catch (_) {}
+        clearStagedStorage("pdf");
       }
 
       if (state.has_zip) {
@@ -529,12 +582,12 @@ async function loadExistingStagedState() {
         stagedZipName.textContent = zipName;
         dropZipBody.classList.add("hidden");
         stagedZipPill.classList.remove("hidden");
-        try { localStorage.setItem("algodeck_staged_zip", zipName); } catch (_) {}
+        saveStagedStorage(undefined, zipName);
       } else {
         hasZipStaged = false;
         stagedZipPill.classList.add("hidden");
         dropZipBody.classList.remove("hidden");
-        try { localStorage.removeItem("algodeck_staged_zip"); } catch (_) {}
+        clearStagedStorage("zip");
       }
       updateFilesSubmitBtn();
     }
@@ -592,10 +645,15 @@ function setupManualForm() {
         try {
           await fetch(`${API_BASE}/api/open-vscode/${code}`, { method: "POST" });
         } catch (_) {}
+        try {
+          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: code }, () => {});
+          }
+        } catch (_) {}
 
         showToast(`✓ Utworzono zadanie [${code.toUpperCase()}]! Uruchomiono VS Code.`, false);
-        btnSubmitManual.innerHTML = `<span>✓ Uruchomiono VS Code!</span>`;
-        setTimeout(() => window.close(), 700);
+        btnSubmitManual.innerHTML = `<span>✓ Otwarto zadanie [${code.toUpperCase()}] w VS Code!</span>`;
+        setTimeout(() => window.close(), 1200);
       } else {
         showToast(data.detail || "Błąd tworzenia zadania.", true);
         btnSubmitManual.disabled = false;

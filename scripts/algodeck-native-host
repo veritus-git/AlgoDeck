@@ -57,6 +57,19 @@ if __name__ == '__main__':
                 if os.path.isfile(panel_sh):
                     subprocess.Popen([panel_sh], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             send_message({"success": True, "status": "gui_launched"})
+        elif action == "open_vscode":
+            pid = msg.get("problem_id", "")
+            sd_code_sh = os.path.expanduser("~/.local/bin/sd_algo_code.sh")
+            env = dict(os.environ)
+            if "DISPLAY" not in env or not env["DISPLAY"]:
+                env["DISPLAY"] = ":0"
+            if pid:
+                pdir = os.path.expanduser(f"~/algodeck-workspace/{pid}")
+                pcpp = os.path.join(pdir, f"{pid}.cpp")
+                subprocess.Popen(["bash", sd_code_sh, pdir, pcpp], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            else:
+                subprocess.Popen(["bash", sd_code_sh], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            send_message({"success": True, "status": "vscode_launched"})
         else:
             send_message({"success": False, "error": "unknown action"})
     except Exception as e:

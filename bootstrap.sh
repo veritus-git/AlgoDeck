@@ -299,22 +299,27 @@ else
     OPEN_DIR="$TARGET_DIR"
 fi
 
-# Zawsze podajemy katalog roboczy, aby VS Code otworzył Explorer i załadował .vscode/tasks.json!
-"$CODE_BIN" --reuse-window "$OPEN_DIR" >/dev/null 2>&1 &
+# Zawsze podajemy katalog roboczy i plik zrodlowy, aby VS Code otworzyl Explorer i plik jednoczesnie!
 if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-    sleep 0.15
-    "$CODE_BIN" --reuse-window -g "$TARGET_FILE" >/dev/null 2>&1 &
+    "$CODE_BIN" --reuse-window "$OPEN_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+else
+    "$CODE_BIN" --reuse-window "$OPEN_DIR" >/dev/null 2>&1 &
 fi
 
-for i in {1..20}; do
-    WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
-    if [ -n "$WID" ]; then
-        DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        xdotool windowactivate "$WID" 2>/dev/null || DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-        exit 0
-    fi
-    sleep 0.1
-done
+# Asynchroniczna petla aktywacji okna (podnosi VS Code ponad przegladarke)
+(
+    for attempt in {1..8}; do
+        sleep 0.25
+        WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
+        if [ -n "$WID" ]; then
+            DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
+            DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+            DISPLAY="$DISP" wmctrl -i -R "$WID" 2>/dev/null || true
+            DISPLAY="$DISP" xdotool windowactivate "$WID" 2>/dev/null || true
+            DISPLAY="$DISP" xdotool windowraise "$WID" 2>/dev/null || true
+        fi
+    done
+) &
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_code.sh"
 
