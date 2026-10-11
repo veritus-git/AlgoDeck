@@ -34,9 +34,7 @@ class StreamControllerBridge:
         target_page_path = STREAMCONTROLLER_PAGES / f"{prob_id}.json"
 
         try:
-            target_page_path.write_text(json_str, encoding="utf-8")
-            logger.info(f"Pomyślnie zsynchronizowano stronę {prob_id} ze StreamControllerem.")
-            # Odśwież stronę w pamięci działającego StreamControllera przez D-Bus
+            # 1. Usuń poprzednią wersję ze StreamControllera (czyści pamięć i stary plik)
             subprocess.run([
                 "gdbus", "call", "--session",
                 "--dest", "com.core447.StreamController",
@@ -44,17 +42,24 @@ class StreamControllerBridge:
                 "--method", "com.core447.StreamController.RemovePage",
                 prob_id
             ], timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # 2. Dodaj zaktualizowaną stronę przez AddPage z poprawnym kodowaniem GVariant string
+            gvariant_str = json.dumps(json_str)
             subprocess.run([
                 "gdbus", "call", "--session",
                 "--dest", "com.core447.StreamController",
                 "--object-path", "/com/core447/StreamController",
                 "--method", "com.core447.StreamController.AddPage",
-                prob_id, json_str
+                prob_id, gvariant_str
             ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # 3. Zawsze upewnij się, że plik na dysku zawiera kompletną definicję
+            target_page_path.write_text(json_str, encoding="utf-8")
+            logger.info(f"Pomyślnie zsynchronizowano stronę {prob_id} ze StreamControllerem.")
         except Exception as e:
             logger.error(f"Nie udało się zapisać pliku {target_page_path}: {e}")
 
-    def generate_idle_page(self):
+    def generate_idle_page(self, switch_now: bool = False):
         """
         Generuje 'Ekran zachęty' (ALGO_IDLE) w stylu minimalistycznego menu głównego:
         - Rząd 0: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ] (Logo jak w instalatorze)
@@ -127,7 +132,8 @@ class StreamControllerBridge:
             }
         }
         self.sync_page_to_streamcontroller("ALGO_IDLE", page_data)
-        self.switch_to_page("ALGO_IDLE")
+        if switch_now:
+            self.switch_to_page("ALGO_IDLE")
 
     def generate_page_for_problem(self, problem_id: str, analysis: Optional[Dict[str, Any]] = None, switch_now: bool = True) -> bool:
         """
@@ -295,14 +301,43 @@ class StreamControllerBridge:
         (STREAMCONTROLLER_ICONS / f"task_{problem_id.lower()}.png").unlink(missing_ok=True)
         self.sync_all_problems()
 
+    def get_active_page_name(self) -> str:
+        """Pobiera aktualnie wyświetlaną stronę ze StreamControllera."""
+        try:
+            import re
+            res = subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", f"/com/core447/StreamController/controllers/{SERIAL}",
+                "--method", "org.freedesktop.DBus.Properties.Get",
+                "com.core447.StreamController.Controller", "ActivePageName"
+            ], timeout=2, capture_output=True, text=True)
+            if res.returncode == 0:
+                m = re.search(r"<'([^']+)'", res.stdout)
+                if m:
+                    return m.group(1)
+        except Exception:
+            pass
+        return ""
+
     def sync_all_problems(self):
         """Automatycznie generuje i synchronizuje czyste profile dla wszystkich zadań w workspace."""
         self.ensure_vector_icons()
         if not self.workspace_dir.exists():
-            self.generate_idle_page()
+            self.generate_idle_page(switch_now=True)
             return
         
+        # Zapamiętaj aktualną stronę lub ostatnio aktywne zadanie
+        saved_page = self.get_active_page_name()
+        if not saved_page or saved_page in ("Main", "ALGO_IDLE"):
+            if Path("/tmp/algodeck_active_task.txt").exists():
+                try:
+                    saved_page = Path("/tmp/algodeck_active_task.txt").read_text(encoding="utf-8").strip()
+                except Exception:
+                    pass
+
         count = 0
+        first_prob_id = ""
         for p in sorted(self.workspace_dir.iterdir()):
             if not p.is_dir() or p.name.startswith("."):
                 continue
@@ -310,6 +345,9 @@ class StreamControllerBridge:
             if pid in ("tests",):
                 continue
             
+            if not first_prob_id:
+                first_prob_id = pid.upper()
+
             mfile = p / ".algo" / "problem.json"
             if not mfile.exists():
                 mfile = p / "problem.json"
@@ -325,8 +363,13 @@ class StreamControllerBridge:
             count += 1
         
         self.generate_menu_page()
-        self.generate_idle_page()
-        if count == 0:
+        self.generate_idle_page(switch_now=(count == 0))
+
+        if count > 0:
+            target = saved_page if (saved_page and saved_page not in ("Main", "ALGO_IDLE")) else first_prob_id
+            if target:
+                self.switch_to_page(target)
+        else:
             self.switch_to_page("ALGO_IDLE")
 
     def generate_menu_page(self, active_id: str = ""):

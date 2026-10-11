@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 from pathlib import Path
+import time
 from typing import Dict, Any, List, Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException, Body
@@ -78,53 +79,11 @@ def on_streamdeck_keys_changed(keys_state: List[Dict[str, Any]]):
 
 streamdeck_controller.add_listener(on_streamdeck_keys_changed)
 
-async def watch_downloads_for_pdf():
-    """W tle automatycznie monitoruje foldery pobierania w poszukiwaniu nowych zadań PDF."""
-    watch_dirs = [
-        Path.home() / "Pobrane" / "Downloads",
-        Path.home() / "Pobrane",
-        Path.home() / "Downloads"
-    ]
-    seen_files = set()
-    for d in watch_dirs:
-        if d.exists():
-            for f in d.glob("*.pdf"):
-                try:
-                    seen_files.add(str(f.resolve()))
-                except Exception:
-                    pass
+EXTENSION_BUILD_ID = int(time.time())
 
-    logger.info(f"Watcher PDF aktywny dla katalogów pobierania: {[str(d) for d in watch_dirs if d.exists()]}")
-
-    while True:
-        try:
-            await asyncio.sleep(1.5)
-            for d in watch_dirs:
-                if not d.exists():
-                    continue
-                for f in d.glob("*.pdf"):
-                    f_str = str(f.resolve())
-                    if f_str not in seen_files:
-                        seen_files.add(f_str)
-                        if f.stat().st_size > 0:
-                            logger.info(f"⚡ Wykryto nowo pobrany plik PDF: {f}")
-                            if settings.notifications:
-                                subprocess.run([
-                                    "notify-send",
-                                    "AlgoDeck ⚡ Wykryto Zadanie PDF",
-                                    f"Pobrano {f.name}. Otwieram kreator zadania..."
-                                ], timeout=2)
-                            panel_py = Path.home() / ".local/share/algodeck/scripts/panel_dialog.py"
-                            if not panel_py.exists():
-                                panel_py = Path(__file__).resolve().parent.parent / "scripts" / "panel_dialog.py"
-                            if panel_py.exists():
-                                subprocess.Popen([
-                                    "python3", str(panel_py), "--tab=new", f"--pdf={f_str}"
-                                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.debug(f"Błąd watchera PDF: {e}")
+@app.get("/api/extension-reload-id")
+def get_extension_reload_id():
+    return {"build_id": EXTENSION_BUILD_ID}
 
 @app.on_event("startup")
 async def startup_event():
@@ -136,9 +95,6 @@ async def startup_event():
         streamcontroller_bridge.sync_all_problems()
     except Exception as e:
         logger.warning(f"Ostrzeżenie startowe Stream Deck: {e}")
-
-    # Uruchom monitor pobieranych zadań PDF
-    asyncio.create_task(watch_downloads_for_pdf())
 
 @app.on_event("shutdown")
 def shutdown_event():

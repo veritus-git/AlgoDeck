@@ -74,7 +74,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function checkAutoPdfParam() {
   const urlParams = new URLSearchParams(window.location.search);
-  const autoPdf = urlParams.get("auto_pdf");
+  let autoPdf = urlParams.get("auto_pdf");
+
+  if (!autoPdf && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    try {
+      const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
+      if (stored.auto_pdf && stored.auto_pdf_ts && (Date.now() - stored.auto_pdf_ts < 60000)) {
+        autoPdf = stored.auto_pdf;
+        chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts"]);
+      }
+    } catch (e) {}
+  }
+
   if (!autoPdf) return;
 
   try {
