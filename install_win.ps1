@@ -31,24 +31,53 @@ if (-not $PythonPath) {
 }
 Write-Host "✓ Wykryto Python: $PythonPath" -ForegroundColor Green
 
-# 3. Sprawdzanie kompilatora C++ (G++ / Clang)
-Write-Host "`n[3/6] Sprawdzanie kompilatora C++ (MinGW G++ / Clang)..." -ForegroundColor Cyan
+# 3. Sprawdzanie i instalacja kompilatora C++ (G++ / MinGW)
+Write-Host "`n[3/6] Sprawdzanie kompilatora C++ (G++ / MinGW dla C++20)..." -ForegroundColor Cyan
 $GppPath = Get-Command g++ -ErrorAction SilentlyContinue
 if (-not $GppPath) {
-    Write-Host "Kompilator g++ nie został znaleziony w PATH." -ForegroundColor Yellow
-    Write-Host "Wskazówka: Zainstaluj MinGW-w64 (np. MSYS2 lub w64devkit) dla pełnego wsparcia C++20." -ForegroundColor Yellow
+    Write-Host "Kompilator g++ nie zostal wykryty. Automatyczna instalacja MinGW-w64..." -ForegroundColor Yellow
+    $Installed = $false
+    try {
+        winget install -e --id BrechtSanders.winlibs.posix.ucrt.gcc --accept-package-agreements --accept-source-agreements --silent
+        $Installed = $true
+    } catch {}
+
+    if (-not $Installed) {
+        Write-Host "Pobieranie w64devkit (GCC/G++ 14 dla C++20)..." -ForegroundColor Cyan
+        try {
+            $W64Zip = "$env:TEMP\w64devkit.zip"
+            Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/download/v2.0.0/w64devkit-2.0.0.zip" -OutFile $W64Zip
+            Expand-Archive -Path $W64Zip -DestinationPath "$InstallDir" -Force
+            Remove-Item -Force $W64Zip
+            $MingwBin = "$InstallDir\w64devkit\bin"
+            $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            if ($UserPath -notlike "*$MingwBin*") {
+                [Environment]::SetEnvironmentVariable("Path", "$UserPath;$MingwBin", "User")
+                $env:Path += ";$MingwBin"
+            }
+            Write-Host "✓ Zainstalowano w64devkit G++ w $MingwBin" -ForegroundColor Green
+        } catch {
+            Write-Host "Ostrzezenie: Nie udalo sie automatycznie pobrac MinGW. Zainstaluj MinGW recznie." -ForegroundColor Yellow
+        }
+    }
 } else {
     Write-Host "✓ Wykryto kompilator g++." -ForegroundColor Green
 }
 
-# 4. Sprawdzanie Visual Studio Code
+# 4. Sprawdzanie i instalacja Visual Studio Code
 Write-Host "`n[4/6] Sprawdzanie Visual Studio Code..." -ForegroundColor Cyan
+$CodeCmd = Get-Command code -ErrorAction SilentlyContinue
+if (-not $CodeCmd) {
+    Write-Host "Visual Studio Code nie zostal wykryty. Instalacja przez winget..." -ForegroundColor Yellow
+    try {
+        winget install -e --id Microsoft.VisualStudioCode --accept-package-agreements --accept-source-agreements --silent
+    } catch {}
+}
+
 $CodeCmd = Get-Command code -ErrorAction SilentlyContinue
 if ($CodeCmd) {
     Write-Host "✓ Visual Studio Code zainstalowany." -ForegroundColor Green
     & code --install-extension ms-vscode.cpptools --force | Out-Null
-} else {
-    Write-Host "Wskazówka: Pobierz Visual Studio Code z https://code.visualstudio.com/" -ForegroundColor Yellow
 }
 
 # 5. Pobranie plików AlgoDeck
@@ -77,7 +106,15 @@ $PythonVenv = "$VenvDir\Scripts\python.exe"
 & $PipExe install websockets --quiet
 
 # 6. Oficjalny plugin Elgato Stream Deck na Windows
-Write-Host "`n[6/6] Konfiguracja Elgato Stream Deck (Oficjalny plugin Windows)..." -ForegroundColor Cyan
+Write-Host "`n[6/6] Konfiguracja Elgato Stream Deck (Program i plugin Windows)..." -ForegroundColor Cyan
+$StreamDeckAppExe = "$env:ProgramFiles\Elgato\StreamDeck\StreamDeck.exe"
+if (-not (Test-Path "$StreamDeckAppExe")) {
+    Write-Host "Oficjalna aplikacja Elgato Stream Deck nie zostala wykryta. Instalacja przez winget..." -ForegroundColor Yellow
+    try {
+        winget install -e --id Corsair.StreamDeck --accept-package-agreements --accept-source-agreements --silent
+    } catch {}
+}
+
 $ElgatoPluginsDir = "$env:APPDATA\Elgato\StreamDeck\Plugins"
 $PluginDest = "$ElgatoPluginsDir\com.algodeck.streamdeck.sdPlugin"
 
@@ -85,6 +122,31 @@ if (Test-Path "$InstallDir\streamdeck_plugin\com.algodeck.streamdeck.sdPlugin") 
     New-Item -ItemType Directory -Force -Path $ElgatoPluginsDir | Out-Null
     Copy-Item -Recurse -Force "$InstallDir\streamdeck_plugin\com.algodeck.streamdeck.sdPlugin" "$PluginDest"
     Write-Host "✓ Zainstalowano plugin Elgato Stream Deck w: $PluginDest" -ForegroundColor Green
+}
+
+# Rejestracja Native Messaging Host w Windows Registry
+$NmJsonPath = "$InstallDir\com.algodeck.launcher.json"
+$NmContent = @"
+{
+  "name": "com.algodeck.launcher",
+  "description": "AlgoDeck Native Messaging Host for browser launching",
+  "path": "$BinDir\algodeck-native-host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/"
+  ]
+}
+"@
+Set-Content -Path $NmJsonPath -Value $NmContent
+
+$RegKeys = @(
+    "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.algodeck.launcher",
+    "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.algodeck.launcher",
+    "HKCU:\Software\Chromium\NativeMessagingHosts\com.algodeck.launcher"
+)
+foreach ($reg in $RegKeys) {
+    New-Item -Path $reg -Force | Out-Null
+    Set-ItemProperty -Path $reg -Name "(Default)" -Value $NmJsonPath
 }
 
 # 6b. Pobranie binarnego GUI w Rust (algodeck-gui.exe)

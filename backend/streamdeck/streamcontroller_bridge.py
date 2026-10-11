@@ -14,8 +14,25 @@ STREAMCONTROLLER_PAGES = STREAMCONTROLLER_DATA / "pages"
 STREAMCONTROLLER_ICONS = STREAMCONTROLLER_DATA / "custom_icons"
 SERIAL = "A00SA6042JGA63"
 
+
+def make_empty_key() -> Dict[str, Any]:
+    return {
+        "states": {
+            "0": {
+                "actions": [],
+                "labels": {},
+                "background": {"color": [0, 0, 0, 255]},
+                "image-control-action": 0,
+                "label-control-actions": [0, 0, 0],
+                "background-control-action": 0,
+            }
+        }
+    }
+
+
 class StreamControllerBridge:
     def __init__(self, workspace_dir: Path = settings.workspace_dir):
+
         self.workspace_dir = workspace_dir
 
     def get_ordered_problem_ids(self) -> List[str]:
@@ -149,35 +166,40 @@ class StreamControllerBridge:
     def sync_page_to_streamcontroller(self, page_name: str, page_data: Dict[str, Any]):
         """
         Zapisuje stronę na dysk w katalogu stron StreamControllera.
-        StreamController automatycznie monitoruje ten katalog i ładuje definicję w locie.
+        StreamController automatycznie monitoruje ten katalog i ładuje definicję w locie bez migania.
         """
         prob_id = page_name.upper()
         json_str = json.dumps(page_data, indent=4)
         target_page_path = STREAMCONTROLLER_PAGES / f"{prob_id}.json"
 
         try:
-            # 1. Usuń poprzednią wersję ze StreamControllera (czyści pamięć i stary plik)
-            subprocess.run([
-                "gdbus", "call", "--session",
-                "--dest", "com.core447.StreamController",
-                "--object-path", "/com/core447/StreamController",
-                "--method", "com.core447.StreamController.RemovePage",
-                prob_id
-            ], timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 1. Sprawdź czy plik już istnieje i ma dokładnie taką samą zawartość
+            if target_page_path.exists():
+                try:
+                    if target_page_path.read_text(encoding="utf-8") == json_str:
+                        return  # Nic się nie zmieniło, nie dotykaj pliku i nie spamuj D-Bus!
+                except Exception:
+                    pass
 
-            # 2. Dodaj zaktualizowaną stronę przez AddPage z poprawnym kodowaniem GVariant string
-            gvariant_str = json.dumps(json_str)
-            subprocess.run([
-                "gdbus", "call", "--session",
-                "--dest", "com.core447.StreamController",
-                "--object-path", "/com/core447/StreamController",
-                "--method", "com.core447.StreamController.AddPage",
-                prob_id, gvariant_str
-            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            is_new = not target_page_path.exists()
 
-            # 3. Zawsze upewnij się, że plik na dysku zawiera kompletną definicję
+            # 2. Zapisz zaktualizowany plik na dysku
             target_page_path.write_text(json_str, encoding="utf-8")
-            logger.info(f"Pomyślnie zsynchronizowano stronę {prob_id} ze StreamControllerem.")
+            logger.info(f"Pomyślnie zapisano stronę {prob_id} dla StreamControllera.")
+
+            # 3. Jeśli to zupełnie nowa strona, zarejestruj ją przez AddPage
+            if is_new:
+                try:
+                    gvariant_str = json.dumps(json_str)
+                    subprocess.run([
+                        "gdbus", "call", "--session",
+                        "--dest", "com.core447.StreamController",
+                        "--object-path", "/com/core447/StreamController",
+                        "--method", "com.core447.StreamController.AddPage",
+                        prob_id, gvariant_str
+                    ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Nie udało się zapisać pliku {target_page_path}: {e}")
 
@@ -212,32 +234,27 @@ class StreamControllerBridge:
                 }
             return {"states": {"0": state_data}}
 
-        def make_empty_key():
-            return {
-                "states": {"0": {"actions": [], "labels": {}, "background": {"color": [0, 0, 0, 255]},
-                                 "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0}}
-            }
 
         page_data = {
             "screensaver": {},
             "keys": {
-                # RZĄD 0: [   ] [ ALGO ] [ ⚡ ] [ DECK ] [   ]
+                # RZĄD 0 (GÓRA): Pusty
                 "0x0": make_empty_key(),
-                "1x0": make_key(start_cmd, icon_algo),
-                "2x0": make_key(start_cmd, icon_bolt),
-                "3x0": make_key(start_cmd, icon_deck),
+                "1x0": make_empty_key(),
+                "2x0": make_empty_key(),
+                "3x0": make_empty_key(),
                 "4x0": make_empty_key(),
 
-                # RZĄD 1: [   ] [   ] [ ▶ ZACZNIJ ] [   ] [   ]
+                # RZĄD 1 (ŚRODEK): JEDYNIE LOGO (ALGO, ⚡, DECK) na środkowych 3 przyciskach
                 "0x1": make_empty_key(),
-                "1x1": make_empty_key(),
-                "2x1": make_key(start_cmd, icon_start),
-                "3x1": make_empty_key(),
+                "1x1": make_key(start_cmd, icon_algo),
+                "2x1": make_key(start_cmd, icon_bolt),
+                "3x1": make_key(start_cmd, icon_deck),
                 "4x1": make_empty_key(),
 
-                # RZĄD 2: [ ⚙ ] [ ↩ WYJŚCIE ] [   ] [   ] [   ]
-                "0x2": make_key(settings_cmd, icon_settings),
-                "1x2": make_key('$HOME/.local/bin/sd_algo_switch.sh exit', STREAMCONTROLLER_ICONS / "icon_exit.png"),
+                # RZĄD 2 (DÓŁ): Całkowicie pusty
+                "0x2": make_empty_key(),
+                "1x2": make_empty_key(),
                 "2x2": make_empty_key(),
                 "3x2": make_empty_key(),
                 "4x2": make_empty_key(),
@@ -245,6 +262,24 @@ class StreamControllerBridge:
         }
         self.sync_page_to_streamcontroller("ALGO_IDLE", page_data)
         if switch_now:
+            try:
+                prev_file = Path(os.path.expanduser("~/.config/algodeck/prev_page.txt"))
+                prev_file.parent.mkdir(parents=True, exist_ok=True)
+                if not prev_file.exists():
+                    res = subprocess.run([
+                        "gdbus", "call", "--session",
+                        "--dest", "com.core447.StreamController",
+                        "--object-path", "/com/core447/StreamController",
+                        "--method", "org.freedesktop.DBus.Properties.Get",
+                        "com.core447.StreamController", "CurrentPage"
+                    ], timeout=1, capture_output=True, text=True)
+                    if res.returncode == 0 and res.stdout:
+                        import re
+                        m = re.search(r"'([^']+)'", res.stdout)
+                        if m and not m.group(1).startswith("ALGO_"):
+                            prev_file.write_text(m.group(1))
+            except Exception:
+                pass
             self.switch_to_page("ALGO_IDLE")
 
     def generate_page_for_problem(self, problem_id: str, analysis: Optional[Dict[str, Any]] = None, switch_now: bool = True) -> bool:
@@ -281,13 +316,11 @@ class StreamControllerBridge:
         icon_task = STREAMCONTROLLER_ICONS / "icon_task_sec.png"
         icon_equals = STREAMCONTROLLER_ICONS / "icon_equals.png"
         icon_settings = generate_settings_icon()
-        icon_exit = generate_exit_curved_arrow_icon()
         icon_num = generate_task_number_icon(current_idx, max(1, total_projects))
 
         # Komendy
         new_task_cmd = '$HOME/.local/bin/sd_algo_new_task.sh'
         settings_cmd = '$HOME/.local/bin/sd_algo_panel.sh'
-        exit_cmd = '$HOME/.local/bin/sd_algo_switch.sh exit'
         test_cmd = f'$HOME/.local/bin/sd_algo_test_vscode.sh "{pdir}" "{problem_id}"'
         run_cmd = f'$HOME/.local/bin/sd_algo_run_vscode.sh "{pdir}" "{problem_id}"'
         kill_cmd = f'bash "{pdir}/.algo/kill.sh"'
@@ -338,22 +371,6 @@ class StreamControllerBridge:
                 }
             }
 
-        def make_empty_key():
-            return {
-                "states": {
-                    "0": {
-                        "actions": [],
-                        "labels": {},
-                        "background": {
-                            "color": [0, 0, 0, 255]
-                        },
-                        "image-control-action": 0,
-                        "label-control-actions": [0, 0, 0],
-                        "background-control-action": 0
-                    }
-                }
-            }
-
         # 1. RZĄD 0: Przycisk 1 i 5 to '=', a środkowe 3 klawisze to litery zadania
         letters = list(prob_id[:3].ljust(3))
         icon_l1 = generate_letter_icon(letters[0])
@@ -379,9 +396,9 @@ class StreamControllerBridge:
                 "3x1": make_key(kill_cmd, icon_kill),
                 "4x1": make_key(menu_cmd, icon_task),
 
-                # RZĄD 2 (DÓŁ): [ ⚙ ] [ ↩ ] [ ‹ ] [Nr ] [ › ]
+                # RZĄD 2 (DÓŁ): [ ⚙ ] [   ] [ ‹ ] [Nr ] [ › ]
                 "0x2": make_key(settings_cmd, icon_settings),
-                "1x2": make_key(exit_cmd, icon_exit),
+                "1x2": make_empty_key(),
                 "2x2": make_key(left_cmd, icon_left),
                 "3x2": make_key(info_cmd, icon_num),
                 "4x2": make_key(right_cmd, icon_right),
@@ -471,7 +488,8 @@ class StreamControllerBridge:
 
         if count > 0:
             target = saved_page if (saved_page and saved_page not in ("Main", "ALGO_IDLE")) else first_prob_id
-            if target:
+            current_active = self.get_active_page_name()
+            if target and target.upper() != current_active.upper():
                 self.switch_to_page(target)
         else:
             self.switch_to_page("ALGO_IDLE")
@@ -573,23 +591,8 @@ class StreamControllerBridge:
                 }
             }
 
-            # 2b. Przycisk wyjścia z AlgoDeck w slocie (1x2)
-            icon_exit = STREAMCONTROLLER_ICONS / "icon_exit.png"
-            exit_cmd = "$HOME/.local/bin/sd_algo_switch.sh exit"
-            keys["1x2"] = {
-                "states": {
-                    "0": {
-                        "actions": [{"id": "com_core447_OSPlugin::EasyCommand", "settings": {"command": exit_cmd}}],
-                        "labels": {},
-                        "background": {"color": [0, 0, 0, 255]},
-                        "media": {
-                            "path": str(icon_exit.resolve()),
-                            "size": 1.0, "valign": 0.0, "halign": 0.0, "fill-mode": "cover"
-                        },
-                        "image-control-action": 0, "label-control-actions": [0, 0, 0], "background-control-action": 0
-                    }
-                }
-            }
+            # 2b. Slot (1x2) pozostaje pusty (wyjście przeniesione do zasobnika systemowego)
+            keys["1x2"] = make_empty_key()
 
             # 3. Jeśli są kolejne zadania, w prawym dolnym rogu (4x2) pojawia się strzałka w prawo ›
             if page_idx < total_pages - 1:
@@ -694,22 +697,41 @@ class StreamControllerBridge:
             except Exception:
                 pass
 
-        # 1. Przełącz na domyślną stronę użytkownika
+        # 1. Przełącz na poprzednią stronę użytkownika (lub domyślną)
+        prev_file = Path(os.path.expanduser("~/.config/algodeck/prev_page.txt"))
+        target_restore = default_page
+        if prev_file.exists():
+            try:
+                saved = prev_file.read_text().strip()
+                if saved and not saved.startswith("ALGO_"):
+                    target_restore = saved
+            except Exception:
+                pass
+
         try:
             subprocess.run([
                 "gdbus", "call", "--session",
                 "--dest", "com.core447.StreamController",
                 "--object-path", "/com/core447/StreamController",
                 "--method", "com.core447.StreamController.ChangePage",
-                SERIAL, default_page
+                SERIAL, target_restore
             ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
-        # 2. Zbierz wszystkie strony AlgoDeck do usunięcia
+        # 2. Zbierz WYŁĄCZNIE strony AlgoDeck do usunięcia (nigdy stron użytkownika!)
+        ws_problems = set()
+        ws_dir = settings.workspace_dir
+        if ws_dir.exists():
+            for p in ws_dir.iterdir():
+                if p.is_dir() and not p.name.startswith("."):
+                    ws_problems.add(p.name.upper())
+
         pages_to_remove = ["ALGO_IDLE", "ALGO_MENU"]
-        
-        # Pobierz aktualne strony ze StreamControllera przez właściwość DBus Pages
+        # Dodaj problem pages
+        pages_to_remove.extend(list(ws_problems))
+
+        # Sprawdź strony ze StreamControllera przez właściwość DBus Pages
         try:
             import re
             res = subprocess.run([
@@ -722,25 +744,20 @@ class StreamControllerBridge:
             if res.returncode == 0:
                 found_pages = re.findall(r"'([^']+)'", res.stdout)
                 for p in found_pages:
-                    if p.startswith("ALGO_") or p.isupper():
+                    # Tylko i wyłącznie strony AlgoDeck!
+                    if p.startswith("ALGO_") or p in ws_problems:
                         pages_to_remove.append(p)
         except Exception:
             pass
 
-        ws_dir = settings.workspace_dir
-        if ws_dir.exists():
-            for p in ws_dir.iterdir():
-                if p.is_dir() and not p.name.startswith("."):
-                    pages_to_remove.append(p.name.upper())
-
         if STREAMCONTROLLER_PAGES.exists():
             for pf in STREAMCONTROLLER_PAGES.glob("*.json"):
                 stem = pf.stem
-                if stem.startswith("ALGO_") or stem.isupper():
+                if stem.startswith("ALGO_") or stem in ws_problems:
                     pages_to_remove.append(stem)
 
         # Wyklucz prywatne profile użytkownika
-        protected_pages = {"MAIN", "DEV & SECRETS", "PULPIT 1 - DEV", "PULPIT 2 - PERSONAL"}
+        protected_pages = {"MAIN", "DEFAULT", "DEV & SECRETS", "PULPIT 1 - DEV", "PULPIT 2 - PERSONAL"}
         pages_to_remove = [p for p in set(pages_to_remove) if p.upper() not in protected_pages]
 
         # 3. Usuń każdą stronę AlgoDeck przez DBus i usuń plik JSON

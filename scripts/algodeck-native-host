@@ -29,12 +29,34 @@ if __name__ == '__main__':
             if "DISPLAY" not in env or not env["DISPLAY"]:
                 env["DISPLAY"] = ":0"
             bin_path = os.path.expanduser("~/.local/bin/algodeck")
-            subprocess.Popen([bin_path, "start"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if not os.path.isfile(bin_path):
+                repo_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "algodeck")
+                if os.path.isfile(repo_bin):
+                    bin_path = repo_bin
+
+            subprocess.Popen([bin_path, "start"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             send_message({"success": True, "status": "starting"})
         elif action == "stop":
             bin_path = os.path.expanduser("~/.local/bin/algodeck")
-            subprocess.Popen([bin_path, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if not os.path.isfile(bin_path):
+                repo_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "algodeck")
+                if os.path.isfile(repo_bin):
+                    bin_path = repo_bin
+
+            subprocess.Popen([bin_path, "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             send_message({"success": True, "status": "stopping"})
+        elif action == "gui":
+            env = dict(os.environ)
+            if "DISPLAY" not in env or not env["DISPLAY"]:
+                env["DISPLAY"] = ":0"
+            bin_path = os.path.expanduser("~/.local/bin/algodeck")
+            if os.path.isfile(bin_path):
+                subprocess.Popen([bin_path, "gui"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            else:
+                panel_sh = os.path.expanduser("~/.local/bin/sd_algo_panel.sh")
+                if os.path.isfile(panel_sh):
+                    subprocess.Popen([panel_sh], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            send_message({"success": True, "status": "gui_launched"})
         else:
             send_message({"success": False, "error": "unknown action"})
     except Exception as e:

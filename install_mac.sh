@@ -40,23 +40,41 @@ else
     echo -e "${GREEN}✓ Narzędzia programistyczne Xcode zainstalowane (clang, clang++).${NC}"
 fi
 
-# 3. Sprawdzanie Visual Studio Code
+# 3. Sprawdzanie i instalacja Visual Studio Code
 echo -e "\n${CYAN}[2/6] Sprawdzanie Visual Studio Code...${NC}"
+if [ ! -d "/Applications/Visual Studio Code.app" ] && ! which code >/dev/null 2>&1; then
+    echo -e "${YELLOW}Visual Studio Code nie został wykryty. Automatyczna instalacja...${NC}"
+    if which brew >/dev/null 2>&1; then
+        brew install --cask visual-studio-code || true
+    else
+        echo -e "Pobieranie Visual Studio Code dla macOS..."
+        VSCODE_ZIP="/tmp/VSCode-mac.zip"
+        curl -sSL "https://code.visualstudio.com/sha/download?build=stable&os=darwin-universal" -o "$VSCODE_ZIP" 2>/dev/null || true
+        if [ -f "$VSCODE_ZIP" ]; then
+            unzip -q "$VSCODE_ZIP" -d "/Applications/" 2>/dev/null || true
+            rm -f "$VSCODE_ZIP"
+        fi
+    fi
+fi
+
 if [ -d "/Applications/Visual Studio Code.app" ] || which code >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Visual Studio Code jest zainstalowany.${NC}"
     if which code >/dev/null 2>&1; then
         code --install-extension ms-vscode.cpptools --force >/dev/null 2>&1 || true
     fi
-else
-    echo -e "${YELLOW}Wskazówka: Zainstaluj Visual Studio Code z https://code.visualstudio.com/${NC}"
 fi
 
 # 4. Sprawdzanie Pythona 3
 echo -e "\n${CYAN}[3/6] Konfiguracja środowiska Python 3...${NC}"
 PYTHON_CMD="python3"
 if ! which $PYTHON_CMD >/dev/null 2>&1; then
-    echo -e "${RED}Błąd: Python 3 nie został znaleziony. Zainstaluj go przez Homebrew (brew install python3) lub z python.org.${NC}"
-    exit 1
+    if which brew >/dev/null 2>&1; then
+        echo -e "${YELLOW}Instalacja Python 3 przez Homebrew...${NC}"
+        brew install python3 || true
+    else
+        echo -e "${RED}Błąd: Python 3 nie został znaleziony. Zainstaluj go z python.org lub przez Homebrew.${NC}"
+        exit 1
+    fi
 fi
 echo -e "${GREEN}✓ Używam: $($PYTHON_CMD --version)${NC}"
 
@@ -66,7 +84,6 @@ echo -e "\n${CYAN}[4/6] Pobieranie AlgoDeck do $INSTALL_DIR...${NC}"
 mkdir -p "$INSTALL_DIR"
 
 if [ -d ".git" ] && [ -f "backend/server.py" ]; then
-    # Instalacja z lokalnego folderu repozytorium
     echo -e "Kopiowanie plików z lokalnego katalogu roboczego..."
     cp -R . "$INSTALL_DIR/"
 else
@@ -93,7 +110,14 @@ pip install -r "$INSTALL_DIR/requirements.txt" >/dev/null 2>&1 || true
 pip install websockets >/dev/null 2>&1 || true
 
 # 6. Oficjalna integracja z Elgato Stream Deck na macOS
-echo -e "\n${CYAN}[5/6] Konfiguracja Elgato Stream Deck (Oficjalny plugin macOS)...${NC}"
+echo -e "\n${CYAN}[5/6] Konfiguracja Elgato Stream Deck (Oficjalny program i plugin macOS)...${NC}"
+if [ ! -d "/Applications/Elgato Stream Deck.app" ] && [ ! -d "/Applications/Stream Deck.app" ]; then
+    echo -e "${YELLOW}Instalacja oficjalnej aplikacji Elgato Stream Deck...${NC}"
+    if which brew >/dev/null 2>&1; then
+        brew install --cask elgato-stream-deck || true
+    fi
+fi
+
 ELGATO_PLUGIN_DIR="$HOME/Library/Application Support/com.elgato.StreamDeck/Plugins/com.algodeck.streamdeck.sdPlugin"
 mkdir -p "$(dirname "$ELGATO_PLUGIN_DIR")"
 
@@ -101,6 +125,25 @@ if [ -d "$INSTALL_DIR/streamdeck_plugin/com.algodeck.streamdeck.sdPlugin" ]; the
     cp -R "$INSTALL_DIR/streamdeck_plugin/com.algodeck.streamdeck.sdPlugin" "$(dirname "$ELGATO_PLUGIN_DIR")/"
     echo -e "${GREEN}✓ Zainstalowano plugin w: $ELGATO_PLUGIN_DIR${NC}"
 fi
+
+# Rejestracja Native Messaging Host na macOS
+for mac_nm in \
+    "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts" \
+    "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts" \
+    "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"; do
+    mkdir -p "$mac_nm"
+    cat > "$mac_nm/com.algodeck.launcher.json" << EOF_MAC_NM
+{
+  "name": "com.algodeck.launcher",
+  "description": "AlgoDeck Native Messaging Host for browser launching",
+  "path": "$HOME/.local/bin/algodeck-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/"
+  ]
+}
+EOF_MAC_NM
+done
 
 # 7. Konfiguracja CLI i skrótów macOS
 echo -e "\n${CYAN}[6/6] Konfiguracja komend CLI 'algodeck' w ~/.local/bin...${NC}"

@@ -1,6 +1,5 @@
 use egui::{vec2, Align, Color32, Layout, RichText, Rounding, Stroke, Ui};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::api::{ApiClient, ProblemInfo};
 use crate::settings::AppSettings;
@@ -40,6 +39,7 @@ pub struct AlgoDeckApp {
     pub active_problem_id: String,
     pub selected_problem_idx: Option<usize>,
     pub filter_query: String,
+    pub is_launcher_status: bool,
 
     // Komunikaty statusu (Toast)
     pub status_message: Option<(String, bool)>, // (treść, is_error)
@@ -67,6 +67,7 @@ impl AlgoDeckApp {
             active_problem_id: active_id,
             selected_problem_idx: None,
             filter_query: String::new(),
+            is_launcher_status: false,
             status_message: None,
         };
 
@@ -149,6 +150,16 @@ impl eframe::App for AlgoDeckApp {
                 }
             }
         });
+
+        // Obsługa trybu okienka statusu uruchomienia (z menu systemowego / wyszukiwarki)
+        if self.is_launcher_status {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(COLOR_BG_DARK))
+                .show(ctx, |ui| {
+                    self.render_launcher_status_view(ctx, ui);
+                });
+            return;
+        }
 
         // Główny kontener aplikacji
         egui::CentralPanel::default()
@@ -300,6 +311,19 @@ impl AlgoDeckApp {
                         }
                         ui.add_space(2.0);
                     }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let btn_shutdown = ui.add(
+                            egui::Button::new(RichText::new("🛑 Wyłącz").color(Color32::from_rgb(254, 202, 202)).size(11.0).strong())
+                                .fill(Color32::from_rgb(127, 29, 29))
+                                .stroke(Stroke::NONE)
+                                .rounding(Rounding::same(5.0)),
+                        );
+                        if btn_shutdown.clicked() {
+                            ApiClient::shutdown();
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
                 });
             });
     }
@@ -478,6 +502,8 @@ impl AlgoDeckApp {
             match result {
                 Ok(_) => {
                     self.set_status(&format!("Utworzono zadanie {}! Otwarto VS Code.", code.to_uppercase()), false);
+                    ApiClient::open_in_vscode(&code, &self.settings.workspace_dir);
+                    self.refresh_problems();
                     self.task_code.clear();
                     self.task_title.clear();
                     self.pdf_path.clear();
@@ -510,6 +536,11 @@ impl AlgoDeckApp {
         );
 
         ui.add_space(6.0);
+
+        if self.selected_problem_idx.is_none() && !self.problems.is_empty() {
+            let active_idx = self.problems.iter().position(|p| p.problem_id == self.active_problem_id).unwrap_or(0);
+            self.selected_problem_idx = Some(active_idx);
+        }
 
         // Lista zadań
         let filtered_indices: Vec<usize> = self.problems
@@ -598,30 +629,43 @@ impl AlgoDeckApp {
                         ui.label(RichText::new(format!("{} [{}]", prob.title, prob.problem_id.to_uppercase())).color(COLOR_CYAN_ACCENT).size(12.0).strong());
                         ui.add_space(4.0);
 
-                        ui.horizontal(|ui| {
-                            if ui.button(RichText::new("Aktywuj na SD").color(Color32::WHITE).size(11.0).strong()).clicked() {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(RichText::new("🎯 Aktywuj (SD + VS Code)").color(Color32::WHITE).size(11.0).strong()).clicked() {
                                 let _ = ApiClient::set_active_problem(&prob.problem_id);
+                                ApiClient::open_in_vscode(&prob.problem_id, &self.settings.workspace_dir);
                                 self.active_problem_id = prob.problem_id.clone();
                                 self.set_status(&format!("Aktywowano zadanie: {}", prob.problem_id.to_uppercase()), false);
                             }
 
-                            if ui.button(RichText::new("VS Code").size(11.0)).clicked() {
-                                let wpath = PathBuf::from(&self.settings.workspace_dir).join(&prob.problem_id);
-                                let _ = Command::new("code").arg(&wpath).spawn();
+                            if ui.button(RichText::new("💻 VS Code").size(11.0)).clicked() {
+                                ApiClient::open_in_vscode(&prob.problem_id, &self.settings.workspace_dir);
+                                self.set_status(&format!("Otwarto VS Code dla {}", prob.problem_id.to_uppercase()), false);
                             }
 
-                            if ui.button(RichText::new("Folder").size(11.0)).clicked() {
+                            if ui.button(RichText::new("📁 Otwórz Folder").size(11.0)).clicked() {
                                 let wpath = PathBuf::from(&self.settings.workspace_dir).join(&prob.problem_id);
                                 let _ = open::that(&wpath);
                             }
 
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.add(egui::Button::new(RichText::new("Usuń").color(Color32::from_rgb(254, 202, 202)).size(11.0).strong()).fill(Color32::from_rgb(127, 29, 29))).clicked() {
-                                    let _ = ApiClient::delete_problem(&prob.problem_id, &self.settings.workspace_dir);
-                                    self.refresh_problems();
-                                    self.set_status("Usunięto zadanie z workspace.", false);
+                            if ui.button(RichText::new("📦 Dodaj testy (.zip)").size(11.0)).clicked() {
+                                if let Some(zip_file) = rfd::FileDialog::new().add_filter("Archiwum ZIP", &["zip"]).pick_file() {
+                                    match ApiClient::add_tests_zip(&prob.problem_id, &zip_file) {
+                                        Ok(count) => {
+                                            self.set_status(&format!("Dodano {} testów do zadania!", count), false);
+                                            self.refresh_problems();
+                                        }
+                                        Err(err) => {
+                                            self.set_status(&format!("Błąd wgrywania testów: {}", err), true);
+                                        }
+                                    }
                                 }
-                            });
+                            }
+
+                            if ui.add(egui::Button::new(RichText::new("🗑 Usuń").color(Color32::from_rgb(254, 202, 202)).size(11.0).strong()).fill(Color32::from_rgb(127, 29, 29))).clicked() {
+                                let _ = ApiClient::delete_problem(&prob.problem_id, &self.settings.workspace_dir);
+                                self.refresh_problems();
+                                self.set_status("Usunięto zadanie z workspace.", false);
+                            }
                         });
                     });
             }
@@ -715,6 +759,10 @@ impl AlgoDeckApp {
                             ApiClient::show_idle_screen();
                             self.set_status("Przełączono Stream Deck na ekran zachęty.", false);
                         }
+                        if ui.add(egui::Button::new(RichText::new("🛑 Wyłącz AlgoDeck").color(Color32::from_rgb(254, 202, 202)).size(10.5).strong()).fill(Color32::from_rgb(127, 29, 29))).clicked() {
+                            ApiClient::shutdown();
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
                     });
 
                     ui.add_space(8.0);
@@ -751,5 +799,67 @@ impl AlgoDeckApp {
                 Err(e) => self.set_status(&format!("Błąd zapisu: {}", e), true),
             }
         }
+    }
+
+    fn render_launcher_status_view(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        let width = ui.available_width();
+
+        // Górny pasek z przyciskiem zamknięcia
+        egui::Frame::none()
+            .fill(Color32::from_rgb(20, 24, 34))
+            .show(ui, |ui| {
+                ui.set_min_size(vec2(width, 32.0));
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("AlgoDeck ⚡").color(COLOR_CYAN_ACCENT).size(12.0).strong());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(RichText::new("✕").color(COLOR_TEXT_MUTED).size(12.0)).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                });
+            });
+
+        ui.add_space(12.0);
+
+        egui::Frame::none()
+            .fill(COLOR_SURFACE)
+            .rounding(Rounding::same(8.0))
+            .stroke(Stroke::new(1.0f32, COLOR_BORDER))
+            .inner_margin(egui::Margin::symmetric(16.0, 14.0))
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("⚡ AlgoDeck jest aktywny!").color(COLOR_CYAN_ACCENT).size(16.0).strong());
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Środowisko olimpijskie zostało uruchomione w tle.").color(COLOR_TEXT_MAIN).size(12.0));
+                    ui.label(RichText::new("Ekran zachęty czeka na Stream Decku, a aplikacja czuwa w zasobniku systemowym.").color(COLOR_TEXT_MUTED).size(11.0));
+                });
+
+                ui.add_space(14.0);
+
+                ui.horizontal(|ui| {
+                    let btn_gui = ui.add_sized(
+                        vec2(ui.available_width() * 0.55, 34.0),
+                        egui::Button::new(RichText::new("🖥 Otwórz Centrum Kontroli").color(Color32::WHITE).size(11.5).strong())
+                            .fill(COLOR_CYAN)
+                            .rounding(Rounding::same(6.0)),
+                    );
+                    if btn_gui.clicked() {
+                        self.is_launcher_status = false;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(760.0, 540.0)));
+                    }
+
+                    let btn_min = ui.add_sized(
+                        vec2(ui.available_width(), 34.0),
+                        egui::Button::new(RichText::new("✕ Minimalizuj").color(COLOR_TEXT_MAIN).size(11.5).strong())
+                            .fill(COLOR_SURFACE_LIGHT)
+                            .stroke(Stroke::new(1.0f32, COLOR_BORDER))
+                            .rounding(Rounding::same(6.0)),
+                    );
+                    if btn_min.clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+            });
     }
 }

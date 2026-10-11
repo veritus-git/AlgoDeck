@@ -244,91 +244,13 @@ EOF
 chmod +x "$HOME/.local/bin/algodeck-daemon"
 
 # 7a2. CLI 'algodeck' (uruchamianie w tle na żądanie z powiadomieniem pulpitu)
-cat > "$HOME/.local/bin/algodeck" << 'EOF'
-#!/usr/bin/env bash
-INSTALL_DIR="$HOME/.local/share/algodeck"
-[ -d "$INSTALL_DIR" ] || INSTALL_DIR="$(pwd)"
-VENV_DIR="$INSTALL_DIR/venv"
-
-ACTION="${1:-start}"
-
-is_running() {
-    curl -s --max-time 1 http://127.0.0.1:8080/api/status >/dev/null 2>&1
-}
-
-start_daemon() {
-    if is_running; then
-        echo "⚡ AlgoDeck już działa w tle na porcie 8080."
-        curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
-        notify-send "AlgoDeck ⚡" "AlgoDeck jest aktywny! Ekran zachęty na Stream Decku." 2>/dev/null || true
-        return 0
-    fi
-
-    echo "⚡ Uruchamianie AlgoDeck w tle..."
-
-    if systemctl --user is-enabled algodeck.service >/dev/null 2>&1; then
-        systemctl --user start algodeck.service >/dev/null 2>&1 || true
-    fi
-
-    if ! is_running; then
-        mkdir -p "$HOME/.config/algodeck/logs"
-        cd "$INSTALL_DIR"
-        export PYTHONPATH="$INSTALL_DIR"
-        PYTHON_BIN="python3"
-        [ -f "$VENV_DIR/bin/python3" ] && PYTHON_BIN="$VENV_DIR/bin/python3"
-        nohup "$PYTHON_BIN" -m uvicorn backend.server:app --host 127.0.0.1 --port 8080 > "$HOME/.config/algodeck/logs/server.log" 2>&1 &
-    fi
-
-    for i in {1..30}; do
-        if is_running; then break; fi
-        sleep 0.1
-    done
-
-    curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
-    notify-send "AlgoDeck ⚡" "Środowisko olimpijskie uruchomione w tle! Ekran zachęty aktywny na Stream Decku." 2>/dev/null || true
-
-    echo "✅ AlgoDeck został pomyślnie uruchomiony w tle! Ekran zachęty aktywny na Stream Decku."
-    echo "💡 Możesz zamknąć ten terminal — proces działa niezależnie."
-}
-
-stop_daemon() {
-    echo "⏹ Zatrzymywanie daemona AlgoDeck..."
-    systemctl --user stop algodeck.service >/dev/null 2>&1 || true
-    pkill -f "uvicorn backend.server:app" >/dev/null 2>&1 || true
-    notify-send "AlgoDeck ⚡" "Środowisko AlgoDeck zostało zatrzymane." 2>/dev/null || true
-    echo "✓ AlgoDeck zatrzymany."
-}
-
-open_gui() {
-    TAB="${1:---tab=settings}"
-    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
-        "$HOME/.local/bin/algodeck-gui" "$TAB" >/dev/null 2>&1 &
-    elif [ -x "$INSTALL_DIR/gui/target/release/algodeck-gui" ]; then
-        "$INSTALL_DIR/gui/target/release/algodeck-gui" "$TAB" >/dev/null 2>&1 &
-    else
-        python3 "$INSTALL_DIR/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
-    fi
-}
-
-case "$ACTION" in
-    start) start_daemon ;;
-    stop) stop_daemon ;;
-    restart) stop_daemon; sleep 1; start_daemon ;;
-    status)
-        if is_running; then
-            echo "🟢 AlgoDeck jest ONLINE (127.0.0.1:8080)"
-        else
-            echo "🔴 AlgoDeck jest OFFLINE"
-        fi
-        ;;
-    gui|settings) shift || true; open_gui "$@" ;;
-    --tab=*) open_gui "$ACTION" ;;
-    *)
-        if [[ "$ACTION" == --* ]]; then open_gui "$@"; else start_daemon; fi
-        ;;
-esac
-EOF
+if [ -f "$INSTALL_DIR/scripts/algodeck" ]; then
+    cp "$INSTALL_DIR/scripts/algodeck" "$HOME/.local/bin/algodeck"
+elif [ -f "$SCRIPT_DIR/scripts/algodeck" ]; then
+    cp "$SCRIPT_DIR/scripts/algodeck" "$HOME/.local/bin/algodeck"
+fi
 chmod +x "$HOME/.local/bin/algodeck"
+
 
 # 7a3. Instalacja natywnego GUI w Rust (algodeck-gui)
 GUI_BIN_TARGET="$HOME/.local/bin/algodeck-gui"
@@ -348,7 +270,7 @@ else
     fi
 fi
 
-# 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code)
+# 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code z otwartym folderem)
 cat > "$HOME/.local/bin/sd_algo_code.sh" << 'EOF'
 #!/usr/bin/env bash
 TARGET_DIR="${1:-$HOME/algodeck-workspace}"
@@ -369,42 +291,26 @@ fi
 DISP="${DISPLAY:-:0}"
 CODE_BIN=$(command -v code || echo "/usr/bin/code")
 
+# W trybie single_window zawsze otwieramy główny folder algodeck-workspace.
+# W trybie separate_windows otwieramy dedykowany podfolder zadania.
 if [ "$VSCODE_MODE" = "single_window" ]; then
-    WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
-    if [ -n "$WID" ]; then
-        if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-            "$CODE_BIN" --reuse-window --maximized "$TARGET_FILE" >/dev/null 2>&1 &
-        fi
-        DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-        exit 0
-    fi
-
-    if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-        nohup "$CODE_BIN" --maximized "$WORKSPACE_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
-    else
-        nohup "$CODE_BIN" --maximized "$WORKSPACE_DIR" >/dev/null 2>&1 &
-    fi
+    OPEN_DIR="$WORKSPACE_DIR"
 else
-    WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB_NAME" | awk '{print $1}' | head -n 1)
-    if [ -n "$WID" ]; then
-        DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-        exit 0
-    fi
+    OPEN_DIR="$TARGET_DIR"
+fi
 
-    if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-        nohup "$CODE_BIN" --maximized "$TARGET_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
-    else
-        nohup "$CODE_BIN" --maximized "$TARGET_DIR" >/dev/null 2>&1 &
-    fi
+# Zawsze podajemy katalog roboczy, aby VS Code otworzył Explorer i załadował .vscode/tasks.json!
+"$CODE_BIN" --reuse-window "$OPEN_DIR" >/dev/null 2>&1 &
+if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
+    sleep 0.15
+    "$CODE_BIN" --reuse-window -g "$TARGET_FILE" >/dev/null 2>&1 &
 fi
 
 for i in {1..20}; do
     WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
     if [ -n "$WID" ]; then
         DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-        DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+        xdotool windowactivate "$WID" 2>/dev/null || DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
         exit 0
     fi
     sleep 0.1
@@ -433,9 +339,11 @@ fi
 
 if [ "$BRIDGE_OK" = "false" ]; then
     if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-        "$CODE_BIN" --reuse-window --maximized "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
+        sleep 0.15
+        "$CODE_BIN" --reuse-window -g "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
     elif [ -n "$PDIR" ]; then
-        "$CODE_BIN" --reuse-window --maximized "$PDIR" >/dev/null 2>&1 &
+        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
     fi
 
     for i in {1..15}; do
@@ -449,7 +357,7 @@ fi
 
 # 2. Wywołaj bezpośrednio zadanie w VS Code przez bridge HTTP (niezależnie od Wayland / X11)
 if [ "$BRIDGE_OK" = "true" ]; then
-    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/run" 2>/dev/null)
+    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/run?pdir=$PDIR" 2>/dev/null)
     if echo "$RESP" | grep -q '"ok"'; then
         exit 0
     fi
@@ -459,9 +367,11 @@ fi
 WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
 if [ -n "$WID" ]; then
     DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+    xdotool windowactivate "$WID" 2>/dev/null || DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
     sleep 0.1
-    DISPLAY="$DISP" xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null && exit 0 || true
+    DISPLAY="$DISP" xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null
+    sleep 0.15
+    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null && exit 0 || true
 fi
 
 # 4. Fallback ostateczny: uruchom skrypt bezpośrednio w terminalu
@@ -498,9 +408,11 @@ fi
 
 if [ "$BRIDGE_OK" = "false" ]; then
     if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-        "$CODE_BIN" --reuse-window --maximized "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
+        sleep 0.15
+        "$CODE_BIN" --reuse-window -g "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
     elif [ -n "$PDIR" ]; then
-        "$CODE_BIN" --reuse-window --maximized "$PDIR" >/dev/null 2>&1 &
+        "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
     fi
 
     for i in {1..15}; do
@@ -514,7 +426,7 @@ fi
 
 # 2. Wywołaj bezpośrednio test w VS Code przez bridge HTTP (niezależnie od Wayland / X11)
 if [ "$BRIDGE_OK" = "true" ]; then
-    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/test" 2>/dev/null)
+    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/test?pdir=$PDIR" 2>/dev/null)
     if echo "$RESP" | grep -q '"ok"'; then
         exit 0
     fi
@@ -524,9 +436,11 @@ fi
 WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
 if [ -n "$WID" ]; then
     DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
+    xdotool windowactivate "$WID" 2>/dev/null || DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
     sleep 0.1
-    DISPLAY="$DISP" xdotool key --clearmodifiers F6 2>/dev/null && exit 0 || true
+    DISPLAY="$DISP" xdotool key --clearmodifiers F6 2>/dev/null
+    sleep 0.15
+    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null && exit 0 || true
 fi
 
 # 4. Fallback ostateczny: uruchom skrypt testowy bezpośrednio w terminalu
@@ -597,6 +511,7 @@ if [ "$ACTION" = "exit" ] || [ "$ACTION" = "stop" ]; then
     exit 0
 fi
 
+# 1. Ekran zachęty / idle
 if [ "$ACTION" = "idle" ]; then
     gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
     echo "ALGO_IDLE" > /tmp/algodeck_active_task.txt
@@ -604,7 +519,16 @@ if [ "$ACTION" = "idle" ]; then
     exit 0
 fi
 
-# 1. Pobierz kolejność zadań z API AlgoDeck (ścisła kolejność chronologiczna utworzenia)
+# 2. Widok galerii zadań / Menu
+if [ "$ACTION" = "menu" ]; then
+    if [ -n "$CURRENT" ]; then
+        echo "${CURRENT^^}" > /tmp/algodeck_active_task.txt
+    fi
+    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_MENU" >/dev/null 2>&1 || true
+    exit 0
+fi
+
+# 3. Pobierz listę zadań w ścisłej kolejności chronologicznej
 PROJECTS=()
 API_RES=$(curl -s --max-time 1 http://127.0.0.1:8080/api/problems 2>/dev/null || true)
 if [ -n "$API_RES" ]; then
@@ -614,7 +538,6 @@ if [ -n "$API_RES" ]; then
     fi
 fi
 
-# 2. Fallback gdy serwer jest wyłączony: sortuj według czasu utworzenia katalogu (najstarsze pierwsze)
 if [ ${#PROJECTS[@]} -eq 0 ]; then
     while IFS= read -r dir; do
         [ -d "$dir" ] || continue
@@ -628,50 +551,38 @@ fi
 
 if [ ${#PROJECTS[@]} -eq 0 ]; then
     gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
-    exit 0
-fi
-
-if [ "$ACTION" = "idle" ]; then
-    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
     echo "ALGO_IDLE" > /tmp/algodeck_active_task.txt
-    notify-send "AlgoDeck ⚡" "Powrót do menu głównego" 2>/dev/null || true
     exit 0
 fi
 
-if [ "$ACTION" = "menu" ]; then
-    if [ -n "$CURRENT" ]; then
-        echo "${CURRENT^^}" > /tmp/algodeck_active_task.txt
-    fi
-    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_MENU" >/dev/null 2>&1 || true
-    exit 0
+COUNT=${#PROJECTS[@]}
+
+CURRENT_PID="$CURRENT"
+if [ -z "$CURRENT_PID" ] && [ -f /tmp/algodeck_active_task.txt ]; then
+    CURRENT_PID=$(cat /tmp/algodeck_active_task.txt 2>/dev/null || true)
 fi
+CURRENT_PID=$(echo "$CURRENT_PID" | tr '[:upper:]' '[:lower:]')
+
+CURR_IDX=0
+for i in "${!PROJECTS[@]}"; do
+    if [ "${PROJECTS[$i]}" = "$CURRENT_PID" ]; then
+        CURR_IDX=$i
+        break
+    fi
+done
 
 if [ "$ACTION" = "to" ]; then
-    TARGET="${CURRENT,,}"
+    TARGET=$(echo "$CURRENT" | tr '[:upper:]' '[:lower:]')
+elif [ "$ACTION" = "prev" ]; then
+    TARGET_IDX=$(( (CURR_IDX - 1 + COUNT) % COUNT ))
+    TARGET="${PROJECTS[$TARGET_IDX]}"
 else
-    INDEX=0
-    if [ -n "$CURRENT" ]; then
-        CURRENT="${CURRENT,,}"
-        for i in "${!PROJECTS[@]}"; do
-            if [ "${PROJECTS[$i]}" = "$CURRENT" ]; then
-                INDEX=$i
-                break
-            fi
-        done
-    fi
-
-    TOTAL=${#PROJECTS[@]}
-    if [ "$ACTION" = "next" ]; then
-        NEW_INDEX=$(( (INDEX + 1) % TOTAL ))
-    elif [ "$ACTION" = "prev" ]; then
-        NEW_INDEX=$(( (INDEX - 1 + TOTAL) % TOTAL ))
-    else
-        NEW_INDEX=$INDEX
-    fi
-    TARGET="${PROJECTS[$NEW_INDEX]}"
+    # "next"
+    TARGET_IDX=$(( (CURR_IDX + 1) % COUNT ))
+    TARGET="${PROJECTS[$TARGET_IDX]}"
 fi
 
-TARGET_UPPER="${TARGET^^}"
+TARGET_UPPER=$(echo "$TARGET" | tr '[:lower:]' '[:upper:]')
 echo "$TARGET_UPPER" > /tmp/algodeck_active_task.txt
 
 gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "$TARGET_UPPER" >/dev/null 2>&1 || true
@@ -805,19 +716,25 @@ if [ -f "$INSTALL_DIR/scripts/algodeck-native-host" ]; then
     chmod +x "$HOME/.local/bin/algodeck-native-host"
 fi
 
+# Oblicz dynamiczne identyfikatory Chrome dla obu możliwych ścieżek
+EXT_ID_1=$(python3 -c "import hashlib; d=hashlib.sha256(b'$INSTALL_DIR/extension').digest()[:16]; print(''.join(chr(ord('a')+(b>>4))+chr(ord('a')+(b&0x0F)) for b in d))" 2>/dev/null || echo "cdgdnkfkkbadljdgjjjbaefefcbelplf")
+EXT_ID_2=$(python3 -c "import hashlib; d=hashlib.sha256(b'$SCRIPT_DIR/extension').digest()[:16]; print(''.join(chr(ord('a')+(b>>4))+chr(ord('a')+(b&0x0F)) for b in d))" 2>/dev/null || echo "cdgdnkfkkbadljdgjjjbaefefcbelplf")
+
 for nm_dir in \
     "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts" \
     "$HOME/.config/google-chrome/NativeMessagingHosts" \
     "$HOME/.config/chromium/NativeMessagingHosts"; do
     mkdir -p "$nm_dir"
-    cat > "$nm_dir/com.algodeck.launcher.json" << 'EOF_NM'
+    cat > "$nm_dir/com.algodeck.launcher.json" << EOF_NM
 {
   "name": "com.algodeck.launcher",
   "description": "AlgoDeck Native Messaging Host for browser launching",
-  "path": "/home/linux/.local/bin/algodeck-native-host",
+  "path": "$HOME/.local/bin/algodeck-native-host",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/"
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
+    "chrome-extension://$EXT_ID_1/",
+    "chrome-extension://$EXT_ID_2/"
   ]
 }
 EOF_NM
@@ -831,8 +748,8 @@ for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     fi
 done
 
-# 8. Konfiguracja usługi systemd użytkownika (Autostart w tle)
-echo -e "\n${CYAN}[8/8] Konfiguracja i uruchomienie usługi AlgoDeck w systemd...${NC}"
+# 8. Konfiguracja usługi systemd użytkownika
+echo -e "\n${CYAN}[8/8] Konfiguracja usługi AlgoDeck w systemd...${NC}"
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/algodeck.service" << EOF
 [Unit]
@@ -850,17 +767,15 @@ RestartSec=3s
 WantedBy=default.target
 EOF
 
-systemctl --user daemon-reload
-systemctl --user enable algodeck.service
-systemctl --user restart algodeck.service || true
+systemctl --user daemon-reload || true
 
-# Aktywator w menu aplikacji (.desktop)
+# Aktywator w menu aplikacji / wyszukiwarce systemowej (.desktop)
 mkdir -p "$HOME/.local/share/applications"
 cat > "$HOME/.local/share/applications/algodeck.desktop" << EOF
 [Desktop Entry]
-Name=AlgoDeck ⚡ Koło MAP
+Name=AlgoDeck
 Comment=Zautomatyzowane środowisko do algorytmiki C++ i Stream Decka
-Exec=$HOME/.local/bin/algodeck-browser
+Exec=$HOME/.local/bin/algodeck --gui-launch
 Icon=applications-development
 Terminal=false
 Type=Application

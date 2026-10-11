@@ -1,80 +1,188 @@
 /* ==========================================================================
-   AlgoDeck Extension - Client Logic (Koło MAP)
-   Widok Uruchamiania "URUCHOM" + Izolowany Widok Wykrytego Zadania
-   Obsługa Native Messaging, Drag-and-Drop, Staging PDF/ZIP oraz Stanów Online/Offline
+   AlgoDeck Extension - Client Logic
+   Obsługa trybu offline (zielony przycisk), stagingu plików, zadań i Stream Decka
    ========================================================================== */
 
 const API_BASE = "http://127.0.0.1:8080";
 
-// Globalny stan
-let activeProblemId = null;
-let allProblems = [];
-let isDaemonOnline = false;
-
-// Elementy Widoku Launcher
-const viewLauncher = document.getElementById("view-launcher");
+// Główne widoki
+const viewOffline = document.getElementById("view-offline");
 const viewDetected = document.getElementById("view-detected");
-const btnRoundLaunch = document.getElementById("btn-round-launch");
-const launchHint = document.getElementById("launch-hint");
-const launcherActiveBar = document.getElementById("launcher-active-bar");
-const launcherActiveName = document.getElementById("launcher-active-name");
-const daemonStatus = document.getElementById("daemon-status");
-const statusText = document.getElementById("status-text");
+const viewMain = document.getElementById("view-main");
 
-// Elementy Szybkich Akcji
-const btnQuickSettings = document.getElementById("btn-quick-settings");
-const btnQuickIdle = document.getElementById("btn-quick-idle");
-const btnToggleWorkspace = document.getElementById("btn-toggle-workspace");
-const workspaceDrawer = document.getElementById("workspace-drawer");
+// Elementy offline
+const btnStartAlgodeck = document.getElementById("btn-start-algodeck");
+const offlineSpinner = document.getElementById("offline-spinner");
+const offlineBtnText = document.getElementById("offline-btn-text");
 
-// Staging: PDF i ZIP
-const dropPdf = document.getElementById("drop-pdf");
-const dropZip = document.getElementById("drop-zip");
-const btnBrowsePdf = document.getElementById("btn-browse-pdf");
-const btnBrowseZip = document.getElementById("btn-browse-zip");
-const fileInputPdf = document.getElementById("file-input-pdf");
-const fileInputZip = document.getElementById("file-input-zip");
-const stagedPdfCard = document.getElementById("staged-pdf-card");
-const stagedZipCard = document.getElementById("staged-zip-card");
-const stagedPdfName = document.getElementById("staged-pdf-name");
-const stagedZipName = document.getElementById("staged-zip-name");
-const btnRemovePdf = document.getElementById("btn-remove-pdf");
-const btnRemoveZip = document.getElementById("btn-remove-zip");
-const btnStartStaged = document.getElementById("btn-start-staged");
-
-// Elementy Zakładek Workspace (Drawer)
+// Zakładki
 const tabButtons = document.querySelectorAll(".tab-btn");
 const tabPanes = document.querySelectorAll(".tab-pane");
-const btnCreateManual = document.getElementById("btn-create-manual");
+
+// Staging plików
+const dropPdf = document.getElementById("drop-pdf");
+const dropPdfBody = document.getElementById("drop-pdf-body");
+const btnBrowsePdf = document.getElementById("btn-browse-pdf");
+const fileInputPdf = document.getElementById("file-input-pdf");
+const progressPdf = document.getElementById("progress-pdf");
+const stagedPdfPill = document.getElementById("staged-pdf-pill");
+const stagedPdfName = document.getElementById("staged-pdf-name");
+const btnRemovePdf = document.getElementById("btn-remove-pdf");
+
+const dropZip = document.getElementById("drop-zip");
+const dropZipBody = document.getElementById("drop-zip-body");
+const btnBrowseZip = document.getElementById("btn-browse-zip");
+const fileInputZip = document.getElementById("file-input-zip");
+const progressZip = document.getElementById("progress-zip");
+const stagedZipPill = document.getElementById("staged-zip-pill");
+const stagedZipName = document.getElementById("staged-zip-name");
+const btnRemoveZip = document.getElementById("btn-remove-zip");
+
+const btnSubmitFiles = document.getElementById("btn-submit-files");
+
+// Formularz ręczny
 const manCode = document.getElementById("man-code");
 const manTitle = document.getElementById("man-title");
-const gallerySearch = document.getElementById("gallery-search");
-const btnRefreshGallery = document.getElementById("btn-refresh-gallery");
-const galleryList = document.getElementById("gallery-list");
+const manTime = document.getElementById("man-time");
+const manMem = document.getElementById("man-mem");
+const manCin = document.getElementById("man-cin");
+const manCout = document.getElementById("man-cout");
+const btnSubmitManual = document.getElementById("btn-submit-manual");
+
+// Zakładka Zadania
+const tasksSearch = document.getElementById("tasks-search");
+const btnRefreshTasks = document.getElementById("btn-refresh-tasks");
+const tasksList = document.getElementById("tasks-list");
+
+// Pasek statusu
+const statusBar = document.getElementById("status-bar");
+const statusMsg = document.getElementById("status-msg");
+
+let hasPdfStaged = false;
+let hasZipStaged = false;
+let allProblems = [];
+let activeProblemId = null;
+let isStartingDaemon = false;
 
 // ---------------- Inicjalizacja ----------------
 document.addEventListener("DOMContentLoaded", async () => {
+  restoreStagedFromLocalStorage();
   setupTabs();
-  setupLauncher();
-  setupWorkspaceDrawer();
   setupStaging();
+  setupManualForm();
+  setupTasksGallery();
+  setupOfflineStarter();
+  setupShutdown();
 
-  // Sprawdź czy otworzono w trybie wykrytego zadania (Powiadomienie 1-Klik)
   const isDetected = await checkDetectedMode();
-
   if (!isDetected) {
     document.body.classList.remove("detected-mode");
     viewDetected.classList.add("hidden");
-    viewLauncher.classList.remove("hidden");
-    
-    // Domyślnie startujemy w trybie offline dopóki serwer nie odpowie
-    setLauncherOffline();
-    await checkDaemonHealth();
-    setInterval(checkDaemonHealth, 2500);
+
+    const online = await checkDaemonHealth();
+    if (online) {
+      await loadExistingStagedState();
+    }
+    setInterval(checkDaemonHealth, 3000);
   }
 });
 
-// ---------------- 1. Sprawdzanie i obsługa trybu Wykrytego Zadania (1-Klik) ----------------
+
+// ---------------- 1. Start AlgoDeck gdy OFFLINE ----------------
+function setupOfflineStarter() {
+  btnStartAlgodeck.addEventListener("click", async () => {
+    if (isStartingDaemon) return;
+    isStartingDaemon = true;
+
+    btnStartAlgodeck.classList.add("loading");
+    btnStartAlgodeck.disabled = true;
+    offlineSpinner.classList.remove("hidden");
+    offlineBtnText.textContent = "Uruchamianie AlgoDeck...";
+
+    // 1. Wyślij komunikat przez native messaging host
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+        chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "start" }, (resp) => {
+          if (chrome.runtime.lastError) {
+            console.warn("[AlgoDeck] Native messaging fallback:", chrome.runtime.lastError.message);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("[AlgoDeck] Błąd native host:", e);
+    }
+
+    // 2. Odpytuj serwer co 300ms aż wstanie
+    let attempts = 0;
+    const maxAttempts = 40; // 12 sekund max
+    const checkTimer = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
+        if (res.ok) {
+          clearInterval(checkTimer);
+          isStartingDaemon = false;
+
+          // Wyświetl powiadomienie systemowe
+          try {
+            if (chrome.notifications && chrome.notifications.create) {
+              chrome.notifications.create(`online_${Date.now()}`, {
+                type: "basic",
+                iconUrl: "icons/icon128.png",
+                title: "AlgoDeck ⚡",
+                message: "Środowisko olimpijskie zostało pomyślnie uruchomione!"
+              });
+            }
+          } catch (_) {}
+
+          // Schowaj całkowicie ekran offline i przełącz na główny widok
+          viewOffline.classList.add("hidden");
+          viewMain.classList.remove("hidden");
+          btnStartAlgodeck.classList.remove("loading");
+          btnStartAlgodeck.disabled = false;
+          offlineSpinner.classList.add("hidden");
+          offlineBtnText.textContent = "⚡ Uruchom AlgoDeck";
+
+          loadExistingStagedState();
+          loadTasks();
+          return;
+        }
+      } catch (err) {}
+
+      if (attempts >= maxAttempts) {
+        clearInterval(checkTimer);
+        isStartingDaemon = false;
+        btnStartAlgodeck.classList.remove("loading");
+        btnStartAlgodeck.disabled = false;
+        offlineSpinner.classList.add("hidden");
+        offlineBtnText.textContent = "⚡ Spróbuj ponownie uruchomić";
+        alert("Nie udało się połączyć z serwerem AlgoDeck. Upewnij się, że instalacja została zakończona.");
+      }
+    }, 300);
+  });
+}
+
+// ---------------- 2. Sprawdzanie stanu demona ----------------
+async function checkDaemonHealth() {
+  if (isStartingDaemon) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
+    if (res.ok) {
+      // ONLINE: Schowaj widok offline, pokaż główny
+      viewOffline.classList.add("hidden");
+      viewMain.classList.remove("hidden");
+      return true;
+    }
+  } catch (e) {}
+
+  // OFFLINE: Pokaż TYLKO widok offline
+  viewMain.classList.add("hidden");
+  viewOffline.classList.remove("hidden");
+  return false;
+}
+
+// ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
   const urlParams = new URLSearchParams(window.location.search);
   let autoPdf = urlParams.get("auto_pdf");
@@ -82,19 +190,18 @@ async function checkDetectedMode() {
   if (!autoPdf && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
     try {
       const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
-      if (stored.auto_pdf && stored.auto_pdf_ts && (Date.now() - stored.auto_pdf_ts < 60000)) {
+      if (stored.auto_pdf && stored.auto_pdf_ts && (Date.now() - stored.auto_pdf_ts < 30000)) {
         autoPdf = stored.auto_pdf;
         chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts"]);
       }
     } catch (e) {}
   }
 
-  if (!autoPdf) {
-    return false;
-  }
+  if (!autoPdf) return false;
 
   document.body.classList.add("detected-mode");
-  viewLauncher.classList.add("hidden");
+  viewOffline.classList.add("hidden");
+  viewMain.classList.add("hidden");
   viewDetected.classList.remove("hidden");
 
   const baseName = autoPdf.replace(/^.*[\\\/]/, '');
@@ -126,7 +233,7 @@ async function checkDetectedMode() {
 
   btnDetOneclick.onclick = async () => {
     btnDetOneclick.disabled = true;
-    btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Tworzenie workspace i VS Code...`;
+    btnDetOneclick.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace i VS Code...`;
 
     try {
       const res = await fetch(`${API_BASE}/api/auto-import-pdf`, {
@@ -140,11 +247,16 @@ async function checkDetectedMode() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        btnDetOneclick.innerHTML = `<span>✓ Utworzono [${problemCode}]!</span>`;
+        const pid = (data.problem_id || problemCode).toLowerCase();
+        try {
+          await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+        } catch (_) {}
+
+        btnDetOneclick.innerHTML = `<span>✓ Utworzono [${pid.toUpperCase()}]! Uruchomiono VS Code</span>`;
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
           chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
         }
-        setTimeout(() => window.close(), 600);
+        setTimeout(() => window.close(), 700);
       } else {
         alert(data.detail || "Błąd podczas tworzenia workspace");
         btnDetOneclick.disabled = false;
@@ -167,267 +279,193 @@ async function checkDetectedMode() {
   return true;
 }
 
-// ---------------- 2. Zielony Okrągły Przycisk "URUCHOM" + Native Messaging ----------------
-function setupLauncher() {
-  btnRoundLaunch.addEventListener("click", async () => {
-    btnRoundLaunch.classList.add("running");
-    const launchTitle = btnRoundLaunch.querySelector(".launch-title");
-    if (launchTitle) launchTitle.textContent = "START...";
-    launchHint.textContent = "Uruchamianie środowiska AlgoDeck...";
+// ---------------- 4. Nawigacja Zakładek ----------------
+function setupTabs() {
+  tabButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      tabButtons.forEach(b => b.classList.remove("active"));
+      tabPanes.forEach(p => p.classList.remove("active"));
 
-    // 1. Wywołaj natywny host (działa zawsze, nawet gdy daemon i StreamController są całkowicie wyłączone!)
-    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-      try {
-        chrome.runtime.sendNativeMessage(
-          "com.algodeck.launcher",
-          { action: "start" },
-          (resp) => {
-            console.log("AlgoDeck native launcher response:", resp, chrome.runtime.lastError);
-          }
-        );
-      } catch (e) {
-        console.error("Native message trigger error:", e);
+      btn.classList.add("active");
+      const targetId = btn.getAttribute("data-tab");
+      const targetPane = document.getElementById(targetId);
+      if (targetPane) targetPane.classList.add("active");
+
+      if (targetId === "tab-tasks") {
+        loadTasks();
       }
-    }
-
-    // 2. Wyślij zapytanie HTTP na wypadek gdyby daemon już startował
-    fetch(`${API_BASE}/api/launch`, { method: "POST" }).catch(() => {});
-
-    // 3. Odpytuj status co 350ms, aż serwer odpowie
-    let attempts = 0;
-    const pollInterval = setInterval(async () => {
-      attempts++;
-      try {
-        const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
-        if (res.ok) {
-          clearInterval(pollInterval);
-          const data = await res.json();
-          setLauncherOnline(data);
-          showToast("AlgoDeck uruchomiony! ⚡", "success");
-        }
-      } catch (e) {}
-
-      if (attempts > 35) {
-        clearInterval(pollInterval);
-        if (!isDaemonOnline) {
-          launchHint.textContent = "Uruchom w terminalu wpisując: algodeck";
-          btnRoundLaunch.classList.remove("running");
-          if (launchTitle) launchTitle.textContent = "URUCHOM";
-        }
-      }
-    }, 350);
+    });
   });
 
-  btnQuickIdle.addEventListener("click", async () => {
-    try {
-      await fetch(`${API_BASE}/api/streamdeck/idle`, { method: "POST" });
-      showToast("Włączono ekran zachęty (ALGO_IDLE)", "success");
-    } catch (e) {
-      showToast("Serwer AlgoDeck jest offline", "error");
-    }
-  });
-
-  btnQuickSettings.addEventListener("click", async () => {
-    try {
-      await fetch(`${API_BASE}/api/settings/open-gui`, { method: "POST" });
-    } catch (e) {
-      showToast("Otwórz terminal i wpisz: algodeck settings", "info");
-    }
-  });
-
-  btnToggleWorkspace.addEventListener("click", () => {
-    workspaceDrawer.classList.toggle("hidden");
-    const isHidden = workspaceDrawer.classList.contains("hidden");
-    btnToggleWorkspace.textContent = isHidden ? "📋 Zadania ▾" : "📋 Zwiń ▴";
-    if (!isHidden) {
-      fetchProblemsList();
-      fetchStagedState();
-    }
-  });
-}
-
-// ---------------- 3. Zarządzanie Stanami Offline vs Online (Req 3) ----------------
-function setLauncherOffline() {
-  isDaemonOnline = false;
-  viewLauncher.classList.remove("is-online");
-  viewLauncher.classList.add("is-offline");
-
-  daemonStatus.className = "status-pill status-offline";
-  statusText.textContent = "OFFLINE";
-  launchHint.textContent = "Kliknij, aby aktywować Stream Deck i środowisko";
-
-  btnRoundLaunch.classList.remove("running");
-  const launchTitle = btnRoundLaunch.querySelector(".launch-title");
-  if (launchTitle) launchTitle.textContent = "URUCHOM";
-}
-
-function setLauncherOnline(data) {
-  isDaemonOnline = true;
-  viewLauncher.classList.remove("is-offline");
-  viewLauncher.classList.add("is-online");
-
-  daemonStatus.className = "status-pill status-online";
-  statusText.textContent = "ONLINE";
-
-  const activeTask = data && data.active_problem ? data.active_problem.toUpperCase() : "ALGO_IDLE";
-  launcherActiveBar.classList.remove("hidden");
-  launcherActiveName.textContent = activeTask;
-  activeProblemId = activeTask;
-
-  // Odśwież stan poczekalni i zadań
-  fetchStagedState();
-  fetchProblemsList();
-}
-
-async function checkDaemonHealth() {
-  try {
-    const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
-    if (res.ok) {
-      const data = await res.json();
-      setLauncherOnline(data);
-    } else {
-      setLauncherOffline();
-    }
-  } catch (err) {
-    setLauncherOffline();
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramTab = urlParams.get("tab");
+  if (paramTab) {
+    const targetBtn = document.querySelector(`.tab-btn[data-tab="tab-${paramTab}"]`) || document.querySelector(`.tab-btn[data-tab="${paramTab}"]`);
+    if (targetBtn) targetBtn.click();
   }
 }
 
-// ---------------- 4. Obsługa Staging (Przycisk "Wybierz", Drag&Drop, PDF/ZIP - Req 8) ----------------
+
+// ---------------- 5. Staging Plików PDF i ZIP ----------------
 function setupStaging() {
-  // Przycisk "Wybierz" dla PDF
-  if (btnBrowsePdf && fileInputPdf) {
-    btnBrowsePdf.addEventListener("click", (e) => {
-      e.stopPropagation();
-      fileInputPdf.click();
-    });
-    fileInputPdf.addEventListener("change", (e) => {
-      if (e.target.files && e.target.files[0]) {
-        uploadStagedFile(e.target.files[0], "pdf");
+  // Kliknięcie w dowolne miejsce karty wywołuje wybór pliku (chyba że kliknięto usunięcie)
+  dropPdf.addEventListener("click", (e) => {
+    if (e.target.closest("#btn-remove-pdf") || e.target.closest("#staged-pdf-pill")) return;
+    fileInputPdf.click();
+  });
+  fileInputPdf.addEventListener("change", (e) => {
+    if (e.target.files.length > 0) uploadStagedFile(e.target.files[0], "pdf");
+  });
+
+  dropZip.addEventListener("click", (e) => {
+    if (e.target.closest("#btn-remove-zip") || e.target.closest("#staged-zip-pill")) return;
+    fileInputZip.click();
+  });
+  fileInputZip.addEventListener("change", (e) => {
+    if (e.target.files.length > 0) uploadStagedFile(e.target.files[0], "zip");
+  });
+
+  setupDropZone(dropPdf, (file) => {
+    if (file.name.toLowerCase().endsWith(".pdf")) uploadStagedFile(file, "pdf");
+    else showToast("Wymagany plik .pdf!", true);
+  });
+
+  setupDropZone(dropZip, (file) => {
+    if (file.name.toLowerCase().endsWith(".zip")) uploadStagedFile(file, "zip");
+    else showToast("Wymagany plik .zip!", true);
+  });
+
+  btnRemovePdf.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      await fetch(`${API_BASE}/api/clear-staged`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_type: "pdf" })
+      });
+    } catch (_) {}
+    try { localStorage.removeItem("algodeck_staged_pdf"); } catch (_) {}
+    stagedPdfPill.classList.add("hidden");
+    dropPdfBody.classList.remove("hidden");
+    fileInputPdf.value = "";
+    hasPdfStaged = false;
+    updateFilesSubmitBtn();
+  });
+
+  btnRemoveZip.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      await fetch(`${API_BASE}/api/clear-staged`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_type: "zip" })
+      });
+    } catch (_) {}
+    try { localStorage.removeItem("algodeck_staged_zip"); } catch (_) {}
+    stagedZipPill.classList.add("hidden");
+    dropZipBody.classList.remove("hidden");
+    fileInputZip.value = "";
+    hasZipStaged = false;
+    updateFilesSubmitBtn();
+  });
+
+  btnSubmitFiles.addEventListener("click", async () => {
+    btnSubmitFiles.disabled = true;
+    btnSubmitFiles.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace i VS Code...`;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/create-from-staging`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const pid = (data.problem_id || "zad").toLowerCase();
+        try {
+          await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+        } catch (_) {}
+
+        try {
+          localStorage.removeItem("algodeck_staged_pdf");
+          localStorage.removeItem("algodeck_staged_zip");
+        } catch (_) {}
+
+        hasPdfStaged = false;
+        hasZipStaged = false;
+
+        showToast(`✓ Utworzono [${pid.toUpperCase()}]! Uruchomiono VS Code.`, false);
+        btnSubmitFiles.innerHTML = `<span>✓ Uruchomiono VS Code!</span>`;
+        setTimeout(() => window.close(), 700);
+      } else {
+        showToast(data.detail || "Błąd tworzenia workspace z plików.", true);
+        btnSubmitFiles.disabled = false;
+        btnSubmitFiles.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code`;
       }
-    });
-  }
-
-  // Przycisk "Wybierz" dla ZIP
-  if (btnBrowseZip && fileInputZip) {
-    btnBrowseZip.addEventListener("click", (e) => {
-      e.stopPropagation();
-      fileInputZip.click();
-    });
-    fileInputZip.addEventListener("change", (e) => {
-      if (e.target.files && e.target.files[0]) {
-        uploadStagedFile(e.target.files[0], "zip");
-      }
-    });
-  }
-
-  // Drag & drop na drop-pdf
-  if (dropPdf) {
-    setupDropzone(dropPdf, "pdf");
-  }
-
-  // Drag & drop na drop-zip
-  if (dropZip) {
-    setupDropzone(dropZip, "zip");
-  }
-
-  // Usuwanie pliku PDF z poczekalni
-  if (btnRemovePdf) {
-    btnRemovePdf.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await fetch(`${API_BASE}/api/clear-staged`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_type: "pdf" })
-        });
-        fileInputPdf.value = "";
-        fetchStagedState();
-      } catch (err) {
-        showToast("Błąd usuwania pliku", "error");
-      }
-    });
-  }
-
-  // Usuwanie pliku ZIP z poczekalni
-  if (btnRemoveZip) {
-    btnRemoveZip.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await fetch(`${API_BASE}/api/clear-staged`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_type: "zip" })
-        });
-        fileInputZip.value = "";
-        fetchStagedState();
-      } catch (err) {
-        showToast("Błąd usuwania pliku", "error");
-      }
-    });
-  }
-
-  // Start importu z plików w poczekalni
-  if (btnStartStaged) {
-    btnStartStaged.addEventListener("click", async () => {
-      btnStartStaged.disabled = true;
-      btnStartStaged.innerHTML = `<span>⚡ Tworzenie workspace...</span>`;
-      try {
-        const res = await fetch(`${API_BASE}/api/start-staged`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
-        });
-        if (res.ok) {
-          showToast("Utworzono workspace i uruchomiono VS Code! ⚡", "success");
-          fetchStagedState();
-          fetchProblemsList();
-          checkDaemonHealth();
-        } else {
-          const err = await res.json();
-          showToast(err.detail || "Błąd podczas importu", "error");
-        }
-      } catch (e) {
-        showToast("Błąd połączenia z serwerem AlgoDeck", "error");
-      } finally {
-        btnStartStaged.disabled = false;
-        btnStartStaged.innerHTML = `<span>⚡ Rozpocznij import</span>`;
-      }
-    });
-  }
+    } catch (err) {
+      showToast("Błąd połączenia z backendem AlgoDeck!", true);
+      btnSubmitFiles.disabled = false;
+      btnSubmitFiles.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code`;
+    }
+  });
 }
 
-function setupDropzone(el, type) {
-  ["dragenter", "dragover"].forEach(evt => {
-    el.addEventListener(evt, (e) => {
+function restoreStagedFromLocalStorage() {
+  try {
+    const savedPdf = localStorage.getItem("algodeck_staged_pdf");
+    if (savedPdf) {
+      hasPdfStaged = true;
+      stagedPdfName.textContent = savedPdf;
+      dropPdfBody.classList.add("hidden");
+      stagedPdfPill.classList.remove("hidden");
+    }
+    const savedZip = localStorage.getItem("algodeck_staged_zip");
+    if (savedZip) {
+      hasZipStaged = true;
+      stagedZipName.textContent = savedZip;
+      dropZipBody.classList.add("hidden");
+      stagedZipPill.classList.remove("hidden");
+    }
+    updateFilesSubmitBtn();
+  } catch (_) {}
+}
+
+function setupDropZone(dropZoneEl, onFileDrop) {
+  ["dragenter", "dragover"].forEach(eventName => {
+    dropZoneEl.addEventListener(eventName, (e) => {
       e.preventDefault();
       e.stopPropagation();
-      el.classList.add("dragover");
+      dropZoneEl.classList.add("drag-over");
     });
   });
 
-  ["dragleave", "dragend"].forEach(evt => {
-    el.addEventListener(evt, (e) => {
+  ["dragleave", "drop"].forEach(eventName => {
+    dropZoneEl.addEventListener(eventName, (e) => {
       e.preventDefault();
       e.stopPropagation();
-      el.classList.remove("dragover");
+      dropZoneEl.classList.remove("drag-over");
     });
   });
 
-  el.addEventListener("drop", (e) => {
+  dropZoneEl.addEventListener("drop", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    el.classList.remove("dragover");
-
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      uploadStagedFile(file, type);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onFileDrop(e.dataTransfer.files[0]);
     }
   });
 }
 
 async function uploadStagedFile(file, type) {
-  showToast(`Wgrywanie ${file.name}...`, "info");
+  const isPdf = (type === "pdf");
+  const progressEl = isPdf ? progressPdf : progressZip;
+  const bodyEl = isPdf ? dropPdfBody : dropZipBody;
+  const pillEl = isPdf ? stagedPdfPill : stagedZipPill;
+  const nameEl = isPdf ? stagedPdfName : stagedZipName;
+
+  bodyEl.classList.add("hidden");
+  progressEl.classList.remove("hidden");
+
   const formData = new FormData();
   formData.append("file", file);
   formData.append("file_type", type);
@@ -437,82 +475,105 @@ async function uploadStagedFile(file, type) {
       method: "POST",
       body: formData
     });
+    const data = await res.json();
+    progressEl.classList.add("hidden");
+
     if (res.ok) {
-      showToast(`Wgrano ${file.name}!`, "success");
-      fetchStagedState();
+      if (isPdf) {
+        nameEl.textContent = file.name;
+        hasPdfStaged = true;
+        try { localStorage.setItem("algodeck_staged_pdf", file.name); } catch (_) {}
+      } else {
+        const testsCount = data.tests_count || 0;
+        const dispName = `${file.name} (${testsCount} testów)`;
+        nameEl.textContent = dispName;
+        hasZipStaged = true;
+        try { localStorage.setItem("algodeck_staged_zip", dispName); } catch (_) {}
+      }
+      pillEl.classList.remove("hidden");
+      showToast(`Dołączono: ${file.name}`, false);
+      updateFilesSubmitBtn();
     } else {
-      const err = await res.json();
-      showToast(err.detail || "Błąd wgrywania", "error");
+      bodyEl.classList.remove("hidden");
+      showToast(data.detail || "Błąd podczas przesyłania pliku.", true);
     }
-  } catch (e) {
-    showToast("Błąd połączenia z serwerem", "error");
+  } catch (err) {
+    progressEl.classList.add("hidden");
+    bodyEl.classList.remove("hidden");
+    showToast("Błąd przesyłania pliku na serwer AlgoDeck.", true);
   }
 }
 
-async function fetchStagedState() {
-  if (!isDaemonOnline) return;
+async function loadExistingStagedState() {
   try {
     const res = await fetch(`${API_BASE}/api/staged-state`);
     if (res.ok) {
-      const data = await res.json();
-      updateStagingUI(data);
+      const state = await res.json();
+      if (state.has_pdf) {
+        hasPdfStaged = true;
+        const pdfName = state.pdf_filename || "plik.pdf";
+        stagedPdfName.textContent = pdfName;
+        dropPdfBody.classList.add("hidden");
+        stagedPdfPill.classList.remove("hidden");
+        try { localStorage.setItem("algodeck_staged_pdf", pdfName); } catch (_) {}
+      } else {
+        hasPdfStaged = false;
+        stagedPdfPill.classList.add("hidden");
+        dropPdfBody.classList.remove("hidden");
+        try { localStorage.removeItem("algodeck_staged_pdf"); } catch (_) {}
+      }
+
+      if (state.has_zip) {
+        hasZipStaged = true;
+        const zipName = `${state.zip_filename || "testy.zip"} (${state.tests_count || 0} testów)`;
+        stagedZipName.textContent = zipName;
+        dropZipBody.classList.add("hidden");
+        stagedZipPill.classList.remove("hidden");
+        try { localStorage.setItem("algodeck_staged_zip", zipName); } catch (_) {}
+      } else {
+        hasZipStaged = false;
+        stagedZipPill.classList.add("hidden");
+        dropZipBody.classList.remove("hidden");
+        try { localStorage.removeItem("algodeck_staged_zip"); } catch (_) {}
+      }
+      updateFilesSubmitBtn();
     }
   } catch (e) {}
 }
 
-function updateStagingUI(state) {
-  // Stan PDF
-  if (state.has_pdf) {
-    dropPdf.classList.add("hidden");
-    stagedPdfCard.classList.remove("hidden");
-    stagedPdfName.textContent = state.pdf_filename || "zadanie.pdf";
-  } else {
-    dropPdf.classList.remove("hidden");
-    stagedPdfCard.classList.add("hidden");
-  }
-
-  // Stan ZIP
-  if (state.has_zip) {
-    dropZip.classList.add("hidden");
-    stagedZipCard.classList.remove("hidden");
-    stagedZipName.textContent = state.zip_filename || "testy.zip";
-  } else {
-    dropZip.classList.remove("hidden");
-    stagedZipCard.classList.add("hidden");
-  }
-
-  // Przycisk startu importu
-  if (state.has_pdf || state.has_zip) {
-    btnStartStaged.classList.remove("hidden");
-  } else {
-    btnStartStaged.classList.add("hidden");
-  }
+function updateFilesSubmitBtn() {
+  btnSubmitFiles.disabled = !(hasPdfStaged || hasZipStaged);
 }
 
-// ---------------- 5. Zakładki Drawer Workspace ----------------
-function setupTabs() {
-  tabButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const tabId = btn.dataset.tab;
-      tabButtons.forEach(b => b.classList.remove("active"));
-      tabPanes.forEach(p => p.classList.remove("active"));
-      btn.classList.add("active");
-      const target = document.getElementById(tabId);
-      if (target) target.classList.add("active");
-      if (tabId === "tab-gallery") fetchProblemsList();
-    });
-  });
-}
-
-function setupWorkspaceDrawer() {
-  btnCreateManual.addEventListener("click", async () => {
+// ---------------- 6. Ręczne Zadanie ----------------
+function setupManualForm() {
+  btnSubmitManual.addEventListener("click", async () => {
     const code = manCode.value.trim().toLowerCase();
     if (!code) {
-      showToast("Podaj kod zadania!", "error");
+      showToast("Podaj kod lub nazwę zadania!", true);
+      manCode.focus();
       return;
     }
+
     const title = manTitle.value.trim() || code.toUpperCase();
-    btnCreateManual.disabled = true;
+    const timeLimit = parseFloat(manTime.value) || 1.0;
+    const memoryLimit = parseInt(manMem.value, 10) || 128;
+    const cinVal = manCin.value.trim();
+    const coutVal = manCout.value.trim();
+
+    const tests = [];
+    if (cinVal || coutVal) {
+      tests.push({
+        id: "test_1",
+        name: "Przykład 1",
+        input: cinVal,
+        expected_output: coutVal
+      });
+    }
+
+    btnSubmitManual.disabled = true;
+    btnSubmitManual.innerHTML = `<span class="mini-spinner"></span> Tworzenie zadania...`;
+
     try {
       const res = await fetch(`${API_BASE}/api/create-manual`, {
         method: "POST",
@@ -520,99 +581,203 @@ function setupWorkspaceDrawer() {
         body: JSON.stringify({
           problem_id: code,
           title: title,
-          time_limit: 1.0,
-          memory_limit: 128,
-          tests: []
+          time_limit: timeLimit,
+          memory_limit: memoryLimit,
+          tests: tests
         })
       });
-      if (res.ok) {
-        showToast(`Utworzono ${code.toUpperCase()}! Otwarto VS Code.`, "success");
-        manCode.value = "";
-        manTitle.value = "";
-        fetchProblemsList();
-        checkDaemonHealth();
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        try {
+          await fetch(`${API_BASE}/api/open-vscode/${code}`, { method: "POST" });
+        } catch (_) {}
+
+        showToast(`✓ Utworzono zadanie [${code.toUpperCase()}]! Uruchomiono VS Code.`, false);
+        btnSubmitManual.innerHTML = `<span>✓ Uruchomiono VS Code!</span>`;
+        setTimeout(() => window.close(), 700);
+      } else {
+        showToast(data.detail || "Błąd tworzenia zadania.", true);
+        btnSubmitManual.disabled = false;
+        btnSubmitManual.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code`;
       }
-    } catch (e) {
-      showToast("Błąd tworzenia zadania", "error");
-    } finally {
-      btnCreateManual.disabled = false;
+    } catch (err) {
+      showToast("Błąd połączenia z backendem AlgoDeck!", true);
+      btnSubmitManual.disabled = false;
+      btnSubmitManual.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code`;
     }
   });
-
-  if (btnRefreshGallery) {
-    btnRefreshGallery.addEventListener("click", fetchProblemsList);
-  }
-  if (gallerySearch) {
-    gallerySearch.addEventListener("input", filterGalleryList);
-  }
 }
 
-async function fetchProblemsList() {
-  if (!galleryList || !isDaemonOnline) return;
-  galleryList.innerHTML = `<div class="loading-state">Ładowanie zadań...</div>`;
+// ---------------- 7. Zakładka Zadania (Lista, Aktywacja, Testy ZIP, Usuwanie) ----------------
+function setupTasksGallery() {
+  btnRefreshTasks.addEventListener("click", loadTasks);
+  tasksSearch.addEventListener("input", filterTasks);
+}
+
+async function loadTasks() {
+  tasksList.innerHTML = `<div class="loading-state">Ładowanie zadań...</div>`;
   try {
     const res = await fetch(`${API_BASE}/api/problems`);
     if (res.ok) {
       const data = await res.json();
       allProblems = data.problems || [];
-      activeProblemId = data.active || "";
-      renderGallery();
+      activeProblemId = data.active || null;
+      renderTasks(allProblems);
+    } else {
+      tasksList.innerHTML = `<div class="empty-state">Błąd pobierania listy zadań</div>`;
     }
-  } catch (e) {
-    galleryList.innerHTML = `<div class="loading-state">Brak połączenia z daemonem</div>`;
+  } catch (err) {
+    tasksList.innerHTML = `<div class="empty-state">Brak połączenia z serwerem</div>`;
   }
 }
 
-function renderGallery() {
-  if (!galleryList) return;
-  if (allProblems.length === 0) {
-    galleryList.innerHTML = `<div class="loading-state">Brak zadań w workspace</div>`;
+function filterTasks() {
+  const query = tasksSearch.value.toLowerCase().trim();
+  if (!query) {
+    renderTasks(allProblems);
     return;
   }
-  galleryList.innerHTML = "";
-  allProblems.forEach(p => {
+  const filtered = allProblems.filter(p => {
+    const pid = (p.problem_id || "").toLowerCase();
+    const ptitle = (p.title || "").toLowerCase();
+    return pid.includes(query) || ptitle.includes(query);
+  });
+  renderTasks(filtered);
+}
+
+function renderTasks(problems) {
+  if (!problems || problems.length === 0) {
+    tasksList.innerHTML = `<div class="empty-state">Brak zapisanych zadań</div>`;
+    return;
+  }
+
+  tasksList.innerHTML = "";
+  problems.forEach(p => {
+    const pid = p.problem_id || "zad";
+    const title = p.title || pid.toUpperCase();
+    const testsCount = (p.tests || []).length;
+    const isActive = (pid.toLowerCase() === (activeProblemId || "").toLowerCase());
+
     const card = document.createElement("div");
-    card.className = "gallery-card" + (p.problem_id === activeProblemId ? " active" : "");
+    card.className = `task-card ${isActive ? "active-task-card" : ""}`;
     card.innerHTML = `
-      <div style="font-weight: 700; color: #38bdf8;">${escapeHtml(p.title)} [${escapeHtml(p.problem_id.toUpperCase())}]</div>
-      <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Testów: ${p.tests ? p.tests.length : 0}</div>
+      <div class="task-card-header">
+        <span class="task-code-badge">${escapeHtml(pid.toUpperCase())}</span>
+        <span class="task-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+        <span class="task-meta">${testsCount} testów</span>
+      </div>
+      <div class="task-actions">
+        <button type="button" class="btn-task-action btn-task-activate" title="Przełącz Stream Deck i otwórz w VS Code">Aktywuj</button>
+        <button type="button" class="btn-task-action btn-task-add-tests" title="Wgraj paczkę testów .zip">+ Testy (ZIP)</button>
+        <button type="button" class="btn-task-action btn-task-delete" title="Usuń zadanie">Usuń</button>
+      </div>
     `;
-    card.onclick = () => {
-      fetch(`${API_BASE}/api/set-active/${p.problem_id}`, { method: "POST" })
-        .then(() => fetchProblemsList());
-    };
-    galleryList.appendChild(card);
+
+    // Aktywuj zadanie (Stream Deck + VS Code)
+    card.querySelector(".btn-task-activate").addEventListener("click", async () => {
+      try {
+        await fetch(`${API_BASE}/api/set-active/${pid}`, { method: "POST" });
+        await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+        activeProblemId = pid;
+        showToast(`Aktywowano '${pid.toUpperCase()}' na Stream Decku i w VS Code!`, false);
+        loadTasks();
+      } catch (e) {
+        showToast("Błąd aktywacji zadania", true);
+      }
+    });
+
+    // Dodaj testy z pliku ZIP
+    card.querySelector(".btn-task-add-tests").addEventListener("click", () => {
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = ".zip";
+      fileInput.onchange = async () => {
+        if (!fileInput.files || fileInput.files.length === 0) return;
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+        showToast(`Wgrywanie testów dla '${pid.toUpperCase()}'...`, false);
+        try {
+          const res = await fetch(`${API_BASE}/api/problems/${pid}/add-tests`, {
+            method: "POST",
+            body: formData
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            showToast(`✓ Dodano ${data.tests_added} testów (łącznie: ${data.total_tests})!`, false);
+            loadTasks();
+          } else {
+            showToast(data.detail || "Błąd dodawania testów!", true);
+          }
+        } catch (err) {
+          showToast("Błąd połączenia z serwerem!", true);
+        }
+      };
+      fileInput.click();
+    });
+
+    // Usuń zadanie
+    card.querySelector(".btn-task-delete").addEventListener("click", async () => {
+      if (!confirm(`Czy na pewno usunąć zadanie '${pid.toUpperCase()}' z workspace?`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE}/api/problem/${pid}`, { method: "DELETE" });
+        if (res.ok) {
+          showToast(`Usunięto zadanie '${pid.toUpperCase()}'`, false);
+          loadTasks();
+        } else {
+          showToast("Błąd podczas usuwania zadania!", true);
+        }
+      } catch (err) {
+        showToast("Błąd połączenia z serwerem!", true);
+      }
+    });
+
+    tasksList.appendChild(card);
   });
 }
 
-function filterGalleryList() {
-  const q = (gallerySearch.value || "").toLowerCase();
-  const filtered = allProblems.filter(p => p.problem_id.includes(q) || p.title.toLowerCase().includes(q));
-  galleryList.innerHTML = "";
-  filtered.forEach(p => {
-    const card = document.createElement("div");
-    card.className = "gallery-card" + (p.problem_id === activeProblemId ? " active" : "");
-    card.innerHTML = `<div style="font-weight:700; color:#38bdf8;">${escapeHtml(p.title)} [${escapeHtml(p.problem_id.toUpperCase())}]</div>`;
-    card.onclick = () => {
-      fetch(`${API_BASE}/api/set-active/${p.problem_id}`, { method: "POST" }).then(() => fetchProblemsList());
-    };
-    galleryList.appendChild(card);
-  });
-}
-
-// ---------------- Toast i narzędzia ----------------
-function showToast(msg, type = "info") {
-  const container = document.getElementById("toast-container");
-  if (!container) return;
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${type}`;
-  toast.textContent = msg;
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 3500);
+function showToast(msg, isError = false) {
+  statusMsg.textContent = msg;
+  statusBar.className = `status-bar ${isError ? 'error' : 'success'}`;
+  statusBar.classList.remove("hidden");
+  setTimeout(() => {
+    statusBar.classList.add("hidden");
+  }, 3500);
 }
 
 function escapeHtml(str) {
-  return (str || "").replace(/[&<>"']/g, m => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[m]);
+  if (!str) return "";
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ---------------- 8. Zatrzymywanie AlgoDeck (Wyłącz) ----------------
+function setupShutdown() {
+  const btnStop = document.getElementById("btn-header-stop");
+  if (!btnStop) return;
+
+  btnStop.addEventListener("click", async () => {
+    btnStop.disabled = true;
+    btnStop.textContent = "Zatrzymywanie...";
+
+    // 1. Wyślij stop przez Native Messaging Host
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+        chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stop" }, () => {});
+      }
+    } catch (_) {}
+
+    // 2. Wyślij stop przez HTTP API
+    try {
+      await fetch(`${API_BASE}/api/shutdown`, { method: "POST" });
+    } catch (_) {}
+
+    // 3. Przełącz na ekran offline
+    viewMain.classList.add("hidden");
+    viewOffline.classList.remove("hidden");
+    btnStop.disabled = false;
+    btnStop.textContent = "Wyłącz";
+  });
 }

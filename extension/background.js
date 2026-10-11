@@ -1,9 +1,32 @@
 // AlgoDeck ⚡ Koło MAP - Background Service Worker
-// Niezawodne wykrywanie pobrań PDF i ZIP (Szkopuł, Koło MAP, OIJ, OI)
-// Oraz automatyczne uruchamianie okna powiadomienia i notyfikacji systemowej.
+// Niezawodne wykrywanie nowych pobrań PDF i ZIP (Szkopuł, Koło MAP, OIJ, OI)
+// Reaguje WYŁĄCZNIE na nowo pobrane pliki w bieżącej sesji!
 
 const API_BASE = "http://127.0.0.1:8080";
+const SERVICE_WORKER_START_TIME = Date.now();
 const handledDownloads = new Set();
+
+// Wczytaj wcześniej obsłużone identyfikatory z pamięci trwałej
+chrome.storage.local.get(["seen_downloads"], (res) => {
+  if (Array.isArray(res.seen_downloads)) {
+    for (const id of res.seen_downloads) {
+      handledDownloads.add(id);
+    }
+  }
+});
+
+function markHandled(id) {
+  handledDownloads.add(id);
+  chrome.storage.local.get(["seen_downloads"], (res) => {
+    const list = Array.isArray(res.seen_downloads) ? res.seen_downloads : [];
+    if (!list.includes(id)) {
+      list.push(id);
+      // Zachowaj maksymalnie 100 ostatnich id
+      const trimmed = list.slice(-100);
+      chrome.storage.local.set({ seen_downloads: trimmed });
+    }
+  });
+}
 
 // Pomocnicza funkcja sprawdzająca czy plik to zadanie olimpijskie (PDF lub ZIP z testami)
 function isOlympicTaskFile(item) {
@@ -30,6 +53,13 @@ async function processDownload(downloadId) {
   chrome.downloads.search({ id: downloadId }, async (items) => {
     if (!items || items.length === 0) return;
     const item = items[0];
+
+    // Ignorujemy pliki pobrane przed startem tej sesji rozszerzenia (np. po resecie komputera)
+    const startTime = item.startTime ? new Date(item.startTime).getTime() : 0;
+    if (startTime > 0 && startTime < (SERVICE_WORKER_START_TIME - 2000)) {
+      markHandled(downloadId);
+      return;
+    }
 
     // Jeśli jeszcze trwa pobieranie, ponów za chwilę (retry z backoffem)
     if (item.state !== "complete") {
@@ -66,9 +96,9 @@ async function processDownload(downloadId) {
     }
 
     if (handledDownloads.has(downloadId)) return;
-    handledDownloads.add(downloadId);
+    markHandled(downloadId);
 
-    console.log("[AlgoDeck] Wykryto pobrany plik zadania:", filename);
+    console.log("[AlgoDeck] Wykryto nowo pobrany plik zadania:", filename);
 
     // 1. Zapisz w pamięci podręcznej rozszerzenia
     try {
@@ -105,12 +135,12 @@ async function processDownload(downloadId) {
       }
     } catch (e) {}
 
-    // 4. Otwórz dedykowane okienko powiadomienia (tylko karta akcji bez domyślnego układu!)
+    // 4. Otwórz dedykowane okienko powiadomienia
     openDedicatedNotificationWindow(filename);
   });
 }
 
-// Otwieranie dedykowanego okienka powiadomienia (dokładnie wielkość ramki ze Screenshot 3)
+// Otwieranie dedykowanego okienka powiadomienia 1-kliknięcie
 function openDedicatedNotificationWindow(filename) {
   const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}`);
   
@@ -165,26 +195,6 @@ if (chrome.notifications && chrome.notifications.onClicked) {
     });
   });
 }
-
-// Skanowanie ostatnich pobrań przy starcie Service Workera
-function scanRecentDownloads() {
-  chrome.downloads.search({ limit: 10, orderBy: ["-startTime"] }, (items) => {
-    if (!items) return;
-    const now = Date.now();
-    for (const item of items) {
-      if (item.state === "complete" && isOlympicTaskFile(item)) {
-        const endTime = item.endTime ? new Date(item.endTime).getTime() : 0;
-        // Jeśli pobrano w ciągu ostatnich 45 sekund i jeszcze nie obsłużono
-        if (now - endTime < 45000 && !handledDownloads.has(item.id)) {
-          processDownload(item.id);
-          break;
-        }
-      }
-    }
-  });
-}
-
-scanRecentDownloads();
 
 // Auto-reload rozszerzenia w tle podczas aktualizacji kodu
 let currentBuildId = null;

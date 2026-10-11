@@ -36,12 +36,27 @@ ensure_streamcontroller() {
     fi
 }
 
+ensure_tray() {
+    if ! pgrep -f "algodeck-gui --tray" >/dev/null 2>&1; then
+        GUI_BIN=""
+        if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
+            GUI_BIN="$HOME/.local/bin/algodeck-gui"
+        elif [ -x "$REPO_DIR/gui/target/release/algodeck-gui" ]; then
+            GUI_BIN="$REPO_DIR/gui/target/release/algodeck-gui"
+        fi
+        if [ -n "$GUI_BIN" ]; then
+            nohup "$GUI_BIN" --tray >/dev/null 2>&1 &
+        fi
+    fi
+}
+
 start_daemon() {
     ensure_streamcontroller
 
     if is_running; then
         echo "⚡ AlgoDeck już działa w tle na porcie 8080."
         curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
+        ensure_tray
         notify-send "AlgoDeck ⚡" "AlgoDeck jest aktywny! Ekran zachęty na Stream Decku." 2>/dev/null || true
         return 0
     fi
@@ -77,6 +92,9 @@ start_daemon() {
 
     # Wywołaj aktywację ekranu zachęty
     curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
+
+    # Uruchom ikonę zasobnika systemowego
+    ensure_tray
 
     # Powiadomienie na pulpicie
     notify-send "AlgoDeck ⚡" "Środowisko olimpijskie uruchomione w tle! Ekran zachęty aktywny na Stream Decku." 2>/dev/null || true
@@ -140,6 +158,13 @@ case "$ACTION" in
     gui|settings)
         shift || true
         open_gui "$@"
+        ;;
+    --gui-launch|--app-launch|--desktop)
+        start_daemon
+        open_gui "--launcher-status"
+        ;;
+    tray|--tray)
+        ensure_tray
         ;;
     --tab=*)
         open_gui "$ACTION"

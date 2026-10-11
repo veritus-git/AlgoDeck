@@ -3,27 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlgoDeck ⚡ Koło MAP</title>
+  <title>AlgoDeck</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="app-container">
 
     <!-- =========================================================================
-         WIDOK 1: TYLKO POWIADOMIENIE (DOKŁADNIE JAK NA SCREENSHOCIE 3)
-         Wyświetlany WYŁĄCZNIE gdy pobrano PDF — BEZ ŻADNYCH INNYCH ELEMENTÓW!
+         STAN 1: OFFLINE (JEDYNIE ZIELONY PRZYCISK URUCHOMIENIA)
+         Gdy AlgoDeck jest wyłączony, wyświetla się dosłownie TYLKO ten przycisk.
+         ========================================================================= -->
+    <div id="view-offline" class="view-offline hidden">
+      <button type="button" id="btn-start-algodeck" class="btn-start-offline" title="Uruchom środowisko AlgoDeck">
+        <span class="btn-spinner hidden" id="offline-spinner"></span>
+        <span id="offline-btn-text">⚡ Uruchom AlgoDeck</span>
+      </button>
+    </div>
+
+    <!-- =========================================================================
+         STAN 2: WYKRYTO NOWE POBRANIE PDF (1-KLIKNIĘCIE)
+         Wyświetlane bezpośrednio w dedykowanym okienku po pobraniu zadania PDF.
          ========================================================================= -->
     <div id="view-detected" class="view-detected hidden">
       <div class="detected-box-card">
         <div class="det-top-row">
           <div class="det-title-group">
             <span class="det-bolt">⚡</span>
-            <span class="det-title-text" id="det-box-title">Wykryto zadanie PDF — 1 Kliknięcie</span>
+            <span class="det-title-text" id="det-box-title">Wykryto nowe zadanie PDF</span>
           </div>
           <button type="button" id="btn-det-close" class="det-btn-close" title="Zamknij">✕</button>
         </div>
         <div class="det-meta-row">
-          Plik: <strong id="det-filename-text">zadanie.pdf</strong> &bull; Zadanie: <strong id="det-code-text">ZAD</strong>
+          Plik: <strong id="det-filename-text">zadanie.pdf</strong> &bull; Kod: <strong id="det-code-text">ZAD</strong>
         </div>
         <button type="button" id="btn-det-oneclick" class="btn-det-oneclick">
           <span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)
@@ -31,150 +42,136 @@
       </div>
     </div>
 
-
     <!-- =========================================================================
-         WIDOK 2: STANDARDOWY START - ZIELONY OKRĄGŁY PRZYCISK "URUCHOM"
-         Pokazuje się po kliknięciu ikony rozszerzenia w przeglądarce!
+         STAN 3: GŁÓWNY WIDOK ROZSZERZENIA (ONLINE)
+         Czysty nagłówek "⚡ AlgoDeck", 3 czytelne zakładki: PDF/ZIP, Ręczne, Zadania.
          ========================================================================= -->
-    <div id="view-launcher" class="view-launcher is-offline">
-      <!-- Kompaktowy nagłówek -->
-      <header class="launcher-header">
-        <div class="brand-compact">
-          <span class="logo-badge-mini">⚡</span>
-          <span class="brand-title-mini">AlgoDeck</span>
+    <div id="view-main" class="view-main hidden">
+      <header class="app-header-clean">
+        <div class="brand">
+          <span class="logo-bolt">⚡</span>
+          <span class="brand-title">AlgoDeck</span>
         </div>
-        <div id="daemon-status" class="status-pill status-offline">
-          <span class="status-dot"></span>
-          <span id="status-text">OFFLINE</span>
-        </div>
+        <button type="button" id="btn-header-stop" class="btn-header-stop" title="Zatrzymaj AlgoDeck i wyłącz daemona">Wyłącz</button>
       </header>
 
-      <!-- Centrum: Duży, podświetlany zielony okrągły przycisk "URUCHOM" -->
-      <div class="launcher-center">
-        <div class="launch-button-wrapper">
-          <button type="button" id="btn-round-launch" class="btn-round-launch" title="Uruchom środowisko AlgoDeck">
-            <div class="launch-circle-glow"></div>
-            <div class="launch-circle-inner">
-              <span class="launch-play-icon">▶</span>
-              <span class="launch-title">URUCHOM</span>
+      <!-- Nawigacja zakładek -->
+      <nav class="nav-tabs">
+        <button type="button" class="tab-btn active" data-tab="tab-files">📄 Plik PDF / ZIP</button>
+        <button type="button" class="tab-btn" data-tab="tab-manual">Ręczne zadanie</button>
+        <button type="button" class="tab-btn" data-tab="tab-tasks">Zadania</button>
+      </nav>
+
+      <main class="tab-content-wrapper">
+        <!-- ZAKŁADKA 1: PLIKI (PDF / ZIP) -->
+        <section id="tab-files" class="tab-pane active">
+          <div class="staging-grid">
+            <!-- Dropzone PDF -->
+            <div class="drop-card" id="drop-pdf">
+              <div class="drop-card-body" id="drop-pdf-body">
+                <span class="card-icon">📄</span>
+                <span class="card-title">Treść zadania (.pdf)</span>
+                <p class="drop-hint">Przeciągnij plik PDF tutaj</p>
+                <button type="button" class="btn-file-select" id="btn-browse-pdf">Wybierz PDF</button>
+                <input type="file" id="file-input-pdf" accept=".pdf" class="hidden">
+              </div>
+              <div class="upload-progress-row hidden" id="progress-pdf">
+                <span class="mini-spinner"></span>
+                <span class="progress-text">Wczytywanie pliku PDF...</span>
+              </div>
+              <div class="staged-file-pill hidden" id="staged-pdf-pill">
+                <span class="staged-icon">✓</span>
+                <span class="staged-name" id="staged-pdf-name">plik.pdf</span>
+                <button type="button" class="btn-remove-file" id="btn-remove-pdf" title="Usuń plik">✕</button>
+              </div>
             </div>
+
+            <!-- Dropzone ZIP z testami -->
+            <div class="drop-card" id="drop-zip">
+              <div class="drop-card-body" id="drop-zip-body">
+                <span class="card-icon">📦</span>
+                <span class="card-title">Testy w archiwum (.zip)</span>
+                <p class="drop-hint">Przeciągnij archiwum ZIP tutaj</p>
+                <button type="button" class="btn-file-select" id="btn-browse-zip">Wybierz ZIP</button>
+                <input type="file" id="file-input-zip" accept=".zip" class="hidden">
+              </div>
+              <div class="upload-progress-row hidden" id="progress-zip">
+                <span class="mini-spinner"></span>
+                <span class="progress-text">Wczytywanie archiwum ZIP...</span>
+              </div>
+              <div class="staged-file-pill hidden" id="staged-zip-pill">
+                <span class="staged-icon">✓</span>
+                <span class="staged-name" id="staged-zip-name">testy.zip</span>
+                <button type="button" class="btn-remove-file" id="btn-remove-zip" title="Usuń plik">✕</button>
+              </div>
+            </div>
+          </div>
+
+          <button type="button" id="btn-submit-files" class="btn-primary w-full" disabled>
+            <span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code
           </button>
-        </div>
+        </section>
 
-        <div id="launch-hint" class="launch-hint">
-          Kliknij, aby aktywować Stream Deck i środowisko
-        </div>
-
-        <!-- Pasek aktywnego zadania (jeśli program już działa) -->
-        <div id="launcher-active-bar" class="launcher-active-bar hidden">
-          <span class="active-pulse-dot"></span>
-          <span class="active-label">Aktywne:</span>
-          <strong id="launcher-active-name">ALGO_IDLE</strong>
-        </div>
-      </div>
-
-      <!-- Szybkie akcje po uruchomieniu -->
-      <div class="launcher-actions-row">
-        <button type="button" id="btn-quick-settings" class="btn-action-pill" title="Otwórz panel ustawień w Rust">
-          <span>⚙️ Ustawienia</span>
-        </button>
-        <button type="button" id="btn-quick-idle" class="btn-action-pill" title="Pokaż ekran zachęty na Stream Decku">
-          <span>🏠 Ekran Zachęty</span>
-        </button>
-        <button type="button" id="btn-toggle-workspace" class="btn-action-pill" title="Zarządzaj zadaniami w workspace">
-          <span>📋 Zadania ▾</span>
-        </button>
-      </div>
-
-      <!-- Rozwijany panel pełnego workspace (opcjonalny dla zaawansowanych) -->
-      <div id="workspace-drawer" class="workspace-drawer hidden">
-        <nav class="nav-tabs">
-          <button class="tab-btn active" data-tab="tab-import">Import (PDF/ZIP)</button>
-          <button class="tab-btn" data-tab="tab-manual">Ręczny</button>
-          <button class="tab-btn" data-tab="tab-gallery">Lista zadań</button>
-        </nav>
-
-        <main class="tab-content-wrapper">
-          <!-- ZAKŁADKA 1: IMPORT -->
-          <section id="tab-import" class="tab-pane active">
-            <div class="staging-zones-grid">
-              <div class="stage-zone-wrapper">
-                <div class="zone-label">📄 PDF zadania</div>
-                <div class="stage-dropzone" id="drop-pdf">
-                  <div class="drop-body">
-                    <span class="drop-mini-icon">📄</span>
-                    <span class="drop-mini-text">Upuść plik <strong>.pdf</strong></span>
-                  </div>
-                  <button type="button" class="btn-picker" id="btn-browse-pdf">Wybierz</button>
-                  <input type="file" id="file-input-pdf" accept=".pdf" class="hidden">
-                </div>
-                <div class="stage-card hidden" id="staged-pdf-card">
-                  <span class="card-file-icon">📄</span>
-                  <div class="card-file-info">
-                    <div class="card-file-name" id="staged-pdf-name">zadanie.pdf</div>
-                  </div>
-                  <button type="button" class="btn-card-remove" id="btn-remove-pdf">✕</button>
-                </div>
+        <!-- ZAKŁADKA 2: RĘCZNE ZADANIE -->
+        <section id="tab-manual" class="tab-pane">
+          <div class="form-container">
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="man-code" class="form-label required">Kod zadania:</label>
+                <input type="text" id="man-code" class="form-input" placeholder="np. sil, chw" maxlength="8" spellcheck="false" required>
               </div>
-
-              <div class="stage-zone-wrapper">
-                <div class="zone-label">📦 Testy ZIP</div>
-                <div class="stage-dropzone" id="drop-zip">
-                  <div class="drop-body">
-                    <span class="drop-mini-icon">📦</span>
-                    <span class="drop-mini-text">Upuść <strong>.zip</strong></span>
-                  </div>
-                  <button type="button" class="btn-picker" id="btn-browse-zip">Wybierz</button>
-                  <input type="file" id="file-input-zip" accept=".zip" class="hidden">
-                </div>
-                <div class="stage-card hidden" id="staged-zip-card">
-                  <span class="card-file-icon">📦</span>
-                  <div class="card-file-info">
-                    <div class="card-file-name" id="staged-zip-name">testy.zip</div>
-                  </div>
-                  <button type="button" class="btn-card-remove" id="btn-remove-zip">✕</button>
-                </div>
+              <div class="form-group flex-2">
+                <label for="man-title" class="form-label">Tytuł zadania:</label>
+                <input type="text" id="man-title" class="form-input" placeholder="np. Siłownia" spellcheck="false">
               </div>
             </div>
 
-            <button type="button" id="btn-start-staged" class="btn-primary w-full hidden" style="margin-top: 10px;">
-              <span>⚡ Rozpocznij import</span>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="man-time" class="form-label">Limit czasu (s):</label>
+                <input type="number" id="man-time" class="form-input" value="1.0" min="0.1" max="60.0" step="0.5">
+              </div>
+              <div class="form-group flex-1">
+                <label for="man-mem" class="form-label">Pamięć (MB):</label>
+                <input type="number" id="man-mem" class="form-input" value="128" min="16" max="2048" step="16">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="man-cin" class="form-label">Przykładowe wejście cin (opcjonalne):</label>
+              <textarea id="man-cin" class="form-textarea" rows="2" placeholder="3&#10;1 2 3" spellcheck="false"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="man-cout" class="form-label">Oczekiwane wyjście cout (opcjonalne):</label>
+              <textarea id="man-cout" class="form-textarea" rows="2" placeholder="6" spellcheck="false"></textarea>
+            </div>
+
+            <button type="button" id="btn-submit-manual" class="btn-primary w-full">
+              <span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code
             </button>
-          </section>
+          </div>
+        </section>
 
-          <!-- ZAKŁADKA 2: RĘCZNY -->
-          <section id="tab-manual" class="tab-pane">
-            <div class="card-form">
-              <div class="form-group">
-                <label for="man-code" class="required">Kod zadania:</label>
-                <input type="text" id="man-code" placeholder="np. chw, kol" required spellcheck="false">
-              </div>
-              <div class="form-group">
-                <label for="man-title">Pełny tytuł:</label>
-                <input type="text" id="man-title" placeholder="np. Koleje" spellcheck="false">
-              </div>
-              <button type="button" id="btn-create-manual" class="btn-primary w-full" style="margin-top: 8px;">
-                <span>Utwórz i otwórz VS Code</span>
-              </button>
-            </div>
-          </section>
+        <!-- ZAKŁADKA 3: ZADANIA (LISTA, AKTYWACJA, DODAWANIE TESTÓW ZIP) -->
+        <section id="tab-tasks" class="tab-pane">
+          <div class="tasks-controls">
+            <input type="text" id="tasks-search" class="form-input" placeholder="Filtruj zadania..." spellcheck="false">
+            <button type="button" id="btn-refresh-tasks" class="btn-secondary" title="Odśwież listę">Odśwież</button>
+          </div>
 
-          <!-- ZAKŁADKA 3: GALERIA -->
-          <section id="tab-gallery" class="tab-pane">
-            <div class="gallery-controls">
-              <input type="text" id="gallery-search" placeholder="Filtruj zadania..." spellcheck="false">
-              <button id="btn-refresh-gallery" class="btn-secondary">Odśwież</button>
-            </div>
-            <div id="gallery-list" class="gallery-list">
-              <div class="loading-state">Ładowanie zadań...</div>
-            </div>
-          </section>
-        </main>
+          <div id="tasks-list" class="tasks-list">
+            <div class="loading-state">Ładowanie zadań...</div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Pasek powiadomień / Toast -->
+      <div id="status-bar" class="status-bar hidden">
+        <span id="status-msg"></span>
       </div>
     </div>
 
-    <!-- Kontener powiadomień Toast -->
-    <div id="toast-container" class="toast-container"></div>
   </div>
 
   <script src="popup.js"></script>

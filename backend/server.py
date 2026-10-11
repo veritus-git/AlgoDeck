@@ -178,7 +178,7 @@ def sanitize_problem_id(raw_id: str) -> str:
 
 STAGING_DIR = Path("/tmp/algodeck_staging")
 
-def _compute_staged_state() -> Dict[str, Any]:
+def _compute_staged_state(include_tests: bool = True) -> Dict[str, Any]:
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
     pdf_path = STAGING_DIR / "staged_pdf.pdf"
     zip_path = STAGING_DIR / "staged_zip.zip"
@@ -247,21 +247,18 @@ def _compute_staged_state() -> Dict[str, Any]:
         "title": final_title,
         "time_limit_sec": final_time,
         "memory_limit_mb": final_mem,
-        "tests_count": tests_count,
-        "tests": tests
+        "tests_count": tests_count
     }
 
-    try:
-        meta_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    if include_tests:
+        result["tests"] = tests
 
     return result
 
 @app.get("/api/staged-state")
 def get_staged_state():
-    """Zwraca stan aktualnie wgranych plików (PDF/ZIP) w poczekalni (staging)."""
-    return _compute_staged_state()
+    """Zwraca stan aktualnie wgranych plików (PDF/ZIP) w poczekalni (staging) bez zbędnego transferu testów."""
+    return _compute_staged_state(include_tests=False)
 
 @app.post("/api/stage-file")
 async def stage_file(
@@ -293,7 +290,17 @@ async def stage_file(
         raise HTTPException(status_code=400, detail="Nieobsługiwany typ pliku (wymagany pdf lub zip).")
 
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    return _compute_staged_state()
+    return _compute_staged_state(include_tests=False)
+
+@app.post("/api/upload-staging")
+async def upload_staging(
+    file: UploadFile = File(...),
+    file_type: Optional[str] = Form(None)
+):
+    """Elastyczny endpoint stagingu dla rozszerzenia przeglądarki."""
+    ft = file_type or ("pdf" if file.filename.lower().endswith(".pdf") else "zip")
+    res = await stage_file(file=file, file_type=ft)
+    return {"success": True, **res}
 
 @app.post("/api/clear-staged")
 def clear_staged(payload: Dict[str, Any] = Body(default={})):
@@ -322,7 +329,7 @@ def clear_staged(payload: Dict[str, Any] = Body(default={})):
     else:
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    return _compute_staged_state()
+    return _compute_staged_state(include_tests=False)
 
 @app.post("/api/start-staged")
 async def start_staged(payload: Dict[str, Any] = Body(default={})):
@@ -361,6 +368,10 @@ async def start_staged(payload: Dict[str, Any] = Body(default={})):
     # Wyczyść staging
     clear_staged({"file_type": "all"})
 
+    # Otwórz workspace i plik roboczy C++ w VS Code
+    main_cpp = problem_dir / f"{pid}.cpp"
+    workspace_builder.open_in_vscode(problem_dir, main_cpp)
+
     await ws_manager.broadcast({
         "type": "PIPELINE_STEP",
         "step": "COMPLETE",
@@ -376,6 +387,11 @@ async def start_staged(payload: Dict[str, Any] = Body(default={})):
         "workspace_path": str(problem_dir.resolve()),
         "keys": streamdeck_controller.keys_state
     }
+
+@app.post("/api/create-from-staging")
+async def create_from_staging(payload: Dict[str, Any] = Body(default={})):
+    """Alias dla start_staged dla kompatybilności z rozszerzeniem przeglądarki."""
+    return await start_staged(payload)
 
 # ----------------- Import Zadania (PDF + ZIP) -----------------
 
@@ -509,6 +525,10 @@ async def import_task(
     streamcontroller_bridge.sync_all_problems()
     streamcontroller_bridge.switch_to_page(final_id)
 
+    # 6. Otwórz workspace w VS Code
+    main_cpp = problem_dir / f"{final_id}.cpp"
+    workspace_builder.open_in_vscode(problem_dir, main_cpp)
+
     await ws_manager.broadcast({
         "type": "PIPELINE_STEP",
         "step": "COMPLETE",
@@ -578,6 +598,10 @@ async def create_manual(payload: Dict[str, Any] = Body(...)):
     streamcontroller_bridge.sync_all_problems()
     streamcontroller_bridge.switch_to_page(problem_id)
 
+    # Otwórz workspace w VS Code
+    main_cpp = problem_dir / f"{problem_id}.cpp"
+    workspace_builder.open_in_vscode(problem_dir, main_cpp)
+
     await ws_manager.broadcast({
         "type": "PIPELINE_STEP",
         "step": "COMPLETE",
@@ -639,6 +663,7 @@ def get_problem(problem_id: str):
     }
 
 @app.delete("/api/problem/{problem_id}")
+@app.delete("/api/problems/{problem_id}")
 def delete_problem(problem_id: str):
     """Usuwa zadanie z dysku, czyści jego stronę ze StreamControllera i aktualizuje menu."""
     pid = problem_id.lower().strip()
@@ -814,6 +839,10 @@ async def auto_import_pdf(payload: Dict[str, Any] = Body(...)):
         streamcontroller_bridge.sync_all_problems()
         streamcontroller_bridge.switch_to_page(pid)
 
+        # Otwórz workspace w VS Code
+        main_cpp = problem_dir / f"{pid}.cpp"
+        workspace_builder.open_in_vscode(problem_dir, main_cpp)
+
         # Wyczyść staging
         staged_pdf.unlink(missing_ok=True)
         (STAGING_DIR / "staged_zip.zip").unlink(missing_ok=True)
@@ -916,6 +945,20 @@ def exit_algodeck():
     threading.Thread(target=_delayed_stop, daemon=True).start()
     return {"success": True, "message": "AlgoDeck wyłączony, profile usunięte ze Stream Decka."}
 
+@app.post("/api/launch-gui")
+def launch_gui(tab: str = "tasks"):
+    """Uruchamia natywne Rust GUI (Centrum Kontroli)."""
+    import os, subprocess
+    gui_bin = Path(os.path.expanduser("~/.local/bin/algodeck-gui"))
+    if gui_bin.exists():
+        subprocess.Popen([str(gui_bin), f"--tab={tab}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"success": True, "launched": "algodeck-gui"}
+    panel_sh = Path(os.path.expanduser("~/.local/bin/sd_algo_panel.sh"))
+    if panel_sh.exists():
+        subprocess.Popen([str(panel_sh), f"--tab={tab}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"success": True, "launched": "sd_algo_panel.sh"}
+    return {"success": False, "error": "Brak pliku wykonywalnego GUI"}
+
 @app.post("/api/streamdeck/sync")
 def sync_streamdeck_profiles():
     """Wymusza ponowne wygenerowanie i synchronizację wszystkich profili Stream Decka."""
@@ -950,6 +993,20 @@ def kill_process(problem_id: str):
         import subprocess
         subprocess.run(["bash", str(kill_sh)], timeout=3)
     return {"success": True, "stopped": stopped}
+
+@app.post("/api/shutdown")
+async def shutdown_algodeck():
+    """Całkowite wyłączenie AlgoDeck (usługi w tle, GUI, i powrót Stream Decka)."""
+    logger.info("Żądanie wyłączenia AlgoDeck...")
+    import subprocess
+    import asyncio
+
+    async def _do_stop():
+        await asyncio.sleep(0.4)
+        subprocess.run(["bash", "-c", "$HOME/.local/bin/algodeck stop || true"], timeout=5)
+
+    asyncio.create_task(_do_stop())
+    return {"success": True, "message": "AlgoDeck jest wyłączany..."}
 
 @app.post("/api/streamdeck/press/{key_index}")
 async def press_streamdeck_key(key_index: int):

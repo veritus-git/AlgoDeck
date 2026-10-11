@@ -14,3 +14,4 @@ ureq = { version = "2.10", features = ["json"] }
 rfd = "0.14"
 dirs = "5.0"
 open = "5.3"
+ksni = { version = "0.3", features = ["blocking"] }

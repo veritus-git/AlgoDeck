@@ -298,6 +298,107 @@ impl ApiClient {
             .call();
     }
 
+    pub fn open_in_vscode(problem_id: &str, workspace_dir: &str) {
+        let _ = ureq::post(&format!("{}/api/open-vscode/{}", API_BASE, problem_id))
+            .timeout(std::time::Duration::from_millis(800))
+            .call();
+
+        let target_dir = PathBuf::from(workspace_dir).join(problem_id);
+        let target_file = target_dir.join(format!("{}.cpp", problem_id));
+
+        if let Some(home) = dirs::home_dir() {
+            let script = home.join(".local/bin/sd_algo_code.sh");
+            if script.exists() {
+                let _ = std::process::Command::new("bash")
+                    .arg(&script)
+                    .arg(&target_dir)
+                    .arg(&target_file)
+                    .spawn();
+                return;
+            }
+        }
+
+        let _ = std::process::Command::new("code")
+            .arg("--reuse-window")
+            .arg(workspace_dir)
+            .arg(&target_file)
+            .spawn();
+    }
+
+    pub fn run_code(problem_id: &str, workspace_dir: &str) {
+        let pdir = PathBuf::from(workspace_dir).join(problem_id);
+        if let Some(home) = dirs::home_dir() {
+            let script = home.join(".local/bin/sd_algo_run_vscode.sh");
+            if script.exists() {
+                let _ = std::process::Command::new("bash")
+                    .arg(&script)
+                    .arg(&pdir)
+                    .arg(problem_id)
+                    .spawn();
+                return;
+            }
+        }
+        let _ = ureq::post(&format!("{}/api/run/{}", API_BASE, problem_id))
+            .timeout(std::time::Duration::from_millis(800))
+            .call();
+    }
+
+    pub fn test_code(problem_id: &str, workspace_dir: &str) {
+        let pdir = PathBuf::from(workspace_dir).join(problem_id);
+        if let Some(home) = dirs::home_dir() {
+            let script = home.join(".local/bin/sd_algo_test_vscode.sh");
+            if script.exists() {
+                let _ = std::process::Command::new("bash")
+                    .arg(&script)
+                    .arg(&pdir)
+                    .arg(problem_id)
+                    .spawn();
+                return;
+            }
+        }
+        let _ = ureq::post(&format!("{}/api/test/{}", API_BASE, problem_id))
+            .timeout(std::time::Duration::from_millis(800))
+            .call();
+    }
+
+    pub fn add_tests_zip(problem_id: &str, zip_path: &Path) -> Result<usize, String> {
+        let file_bytes = fs::read(zip_path).map_err(|e| e.to_string())?;
+        let filename = zip_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+
+        let boundary = "------------------------algodeckboundary123";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+        body.extend_from_slice(format!("Content-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n", filename).as_bytes());
+        body.extend_from_slice(b"Content-Type: application/zip\r\n\r\n");
+        body.extend_from_slice(&file_bytes);
+        body.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
+
+        let res = ureq::post(&format!("{}/api/problems/{}/add-tests", API_BASE, problem_id))
+            .set("Content-Type", &format!("multipart/form-data; boundary={}", boundary))
+            .timeout(std::time::Duration::from_secs(30))
+            .send_bytes(&body)
+            .map_err(|e| e.to_string())?;
+
+        let json: serde_json::Value = res.into_json().map_err(|e| e.to_string())?;
+        Ok(json.get("tests_added").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
+    }
+
+    pub fn exit_algodeck() {
+        let _ = ureq::post(&format!("{}/api/exit", API_BASE))
+            .timeout(std::time::Duration::from_millis(800))
+            .call();
+    }
+
+    pub fn shutdown() {
+        let _ = ureq::post(&format!("{}/api/shutdown", API_BASE))
+            .timeout(std::time::Duration::from_millis(800))
+            .call();
+        let _ = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("$HOME/.local/bin/algodeck stop || true")
+            .spawn();
+    }
+
     pub fn update_backend_settings(settings: &crate::settings::AppSettings) {
         let payload = serde_json::json!({
             "workspace_dir": settings.workspace_dir,

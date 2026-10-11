@@ -368,8 +368,9 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
                     start_new_session=True
                 )
             elif shutil.which("code"):
+                open_folder = str(self.base_dir if getattr(settings, "vscode_mode", "single_window") == "single_window" else problem_dir)
                 subprocess.Popen(
-                    ["code", "--maximized", str(problem_dir), str(source_file)],
+                    ["code", "--reuse-window", "--maximized", open_folder, str(source_file)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True

@@ -18,7 +18,30 @@ function activate(context) {
 
             if (parsed.pathname === '/test') {
                 try {
-                    await vscode.commands.executeCommand('workbench.action.tasks.runTask', 'AlgoDeck: TESTUJ');
+                    let executed = false;
+                    try {
+                        const allTasks = await vscode.tasks.fetchTasks();
+                        const match = allTasks.find(t => t.name === 'AlgoDeck: TESTUJ' || (t.name && t.name.includes('TESTUJ')));
+                        if (match) {
+                            await vscode.tasks.executeTask(match);
+                            executed = true;
+                        }
+                    } catch (e) {
+                        console.error('[AlgoDeck Bridge] fetchTasks error:', e);
+                    }
+
+                    if (!executed) {
+                        // Bezpośrednie uruchomienie przez wbudowany terminal VS Code
+                        const pdir = parsed.searchParams.get('pdir');
+                        const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck') || vscode.window.createTerminal('AlgoDeck');
+                        term.show(true);
+                        if (pdir) {
+                            term.sendText(`cd "${pdir}" && bash .algo/test.sh`);
+                        } else {
+                            await vscode.commands.executeCommand('workbench.action.tasks.test');
+                        }
+                    }
+
                     res.writeHead(200);
                     res.end(JSON.stringify({ status: 'ok', action: 'test' }));
                 } catch (err) {
@@ -30,7 +53,30 @@ function activate(context) {
 
             if (parsed.pathname === '/run') {
                 try {
-                    await vscode.commands.executeCommand('workbench.action.tasks.runTask', 'AlgoDeck: ODPAL');
+                    let executed = false;
+                    try {
+                        const allTasks = await vscode.tasks.fetchTasks();
+                        const match = allTasks.find(t => t.name === 'AlgoDeck: ODPAL' || (t.name && t.name.includes('ODPAL')));
+                        if (match) {
+                            await vscode.tasks.executeTask(match);
+                            executed = true;
+                        }
+                    } catch (e) {
+                        console.error('[AlgoDeck Bridge] fetchTasks error:', e);
+                    }
+
+                    if (!executed) {
+                        // Bezpośrednie uruchomienie przez wbudowany terminal VS Code
+                        const pdir = parsed.searchParams.get('pdir');
+                        const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck') || vscode.window.createTerminal('AlgoDeck');
+                        term.show(true);
+                        if (pdir) {
+                            term.sendText(`cd "${pdir}" && bash .algo/run.sh`);
+                        } else {
+                            await vscode.commands.executeCommand('workbench.action.tasks.build');
+                        }
+                    }
+
                     res.writeHead(200);
                     res.end(JSON.stringify({ status: 'ok', action: 'run' }));
                 } catch (err) {
