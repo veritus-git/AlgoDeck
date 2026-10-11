@@ -18,11 +18,57 @@ class StreamControllerBridge:
     def __init__(self, workspace_dir: Path = settings.workspace_dir):
         self.workspace_dir = workspace_dir
 
+    def get_ordered_problem_ids(self) -> List[str]:
+        """
+        Zwraca listę identyfikatorów zadań posortowanych ściśle chronologicznie
+        (od najstarszego do najnowszego - pierwsze utworzone zadanie ma indeks 1).
+        """
+        if not self.workspace_dir.exists():
+            return []
+
+        entries = []
+        for p in self.workspace_dir.iterdir():
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            pid = p.name.lower()
+            if pid in ("tests",):
+                continue
+            if not ((p / f"{pid}.cpp").exists() or (p / ".algo").exists()):
+                continue
+
+            created_at = None
+            mfile = p / ".algo" / "problem.json"
+            if not mfile.exists():
+                mfile = p / "problem.json"
+            if mfile.exists():
+                try:
+                    m = json.loads(mfile.read_text(encoding="utf-8"))
+                    if "created_at" in m and isinstance(m["created_at"], (int, float)):
+                        created_at = float(m["created_at"])
+                except Exception:
+                    pass
+
+            if created_at is None:
+                try:
+                    st = p.stat()
+                    created_at = min(st.st_mtime, st.st_ctime)
+                except Exception:
+                    created_at = 0.0
+
+            entries.append((created_at, pid))
+
+        # Sortuj rosnąco według daty utworzenia: najstarsze zadanie = indeks 0 (zadanie #1)
+        entries.sort(key=lambda x: (x[0], x[1]))
+        return [pid for _, pid in entries]
+
     def ensure_vector_icons(self):
         """Upewnia się, że geometryczne ikony na czarnym tle istnieją."""
         STREAMCONTROLLER_ICONS.mkdir(parents=True, exist_ok=True)
-        from backend.streamdeck.icons_generator import generate_all_base_icons
-        generate_all_base_icons()
+        try:
+            from backend.streamdeck.icons_generator import generate_all_base_icons
+            generate_all_base_icons()
+        except Exception as e:
+            logger.warning(f"Błąd podczas sprawdzania ikon: {e}")
 
     def sync_page_to_streamcontroller(self, page_name: str, page_data: Dict[str, Any]):
         """
@@ -99,12 +145,7 @@ class StreamControllerBridge:
             }
 
         # Sprawdź czy są jakiekolwiek zadania w workspace
-        has_any_tasks = False
-        if self.workspace_dir.exists():
-            for p in self.workspace_dir.iterdir():
-                if p.is_dir() and not p.name.startswith(".") and p.name.lower() != "tests":
-                    has_any_tasks = True
-                    break
+        has_any_tasks = len(self.get_ordered_problem_ids()) > 0
 
         page_data = {
             "screensaver": {},
@@ -153,12 +194,8 @@ class StreamControllerBridge:
             generate_letter_icon, generate_settings_icon, generate_task_number_icon
         )
 
-        # Pobierz wszystkie zadania w kolejności alfabetycznej i określ numer aktualnego zadania
-        projects = []
-        if self.workspace_dir.exists():
-            for p in sorted(self.workspace_dir.iterdir()):
-                if p.is_dir() and not p.name.startswith(".") and p.name.lower() != "tests":
-                    projects.append(p.name.lower())
+        # Pobierz wszystkie zadania w ścisłej kolejności chronologicznej utworzenia (najstarsze = 1/N)
+        projects = self.get_ordered_problem_ids()
         total_projects = len(projects)
         current_idx = 1
         if problem_id.lower() in projects:
@@ -336,18 +373,12 @@ class StreamControllerBridge:
                 except Exception:
                     pass
 
-        count = 0
-        first_prob_id = ""
-        for p in sorted(self.workspace_dir.iterdir()):
-            if not p.is_dir() or p.name.startswith("."):
-                continue
-            pid = p.name.lower()
-            if pid in ("tests",):
-                continue
-            
-            if not first_prob_id:
-                first_prob_id = pid.upper()
+        ordered_pids = self.get_ordered_problem_ids()
+        count = len(ordered_pids)
+        first_prob_id = ordered_pids[0].upper() if ordered_pids else ""
 
+        for pid in ordered_pids:
+            p = self.workspace_dir / pid
             mfile = p / ".algo" / "problem.json"
             if not mfile.exists():
                 mfile = p / "problem.json"
@@ -360,7 +391,6 @@ class StreamControllerBridge:
                     pass
             
             self.generate_page_for_problem(pid, analysis, switch_now=False)
-            count += 1
         
         self.generate_menu_page()
         self.generate_idle_page(switch_now=(count == 0))
@@ -386,27 +416,22 @@ class StreamControllerBridge:
         icon_next = STREAMCONTROLLER_ICONS / "icon_arrow_right.png"
         icon_prev = STREAMCONTROLLER_ICONS / "icon_arrow_left.png"
 
-        # Zbierz wszystkie zadania
+        # Zbierz wszystkie zadania w ścisłej kolejności chronologicznej utworzenia
+        ordered_pids = self.get_ordered_problem_ids()
         projects: List[Dict[str, str]] = []
-        if self.workspace_dir.exists():
-            for p in sorted(self.workspace_dir.iterdir()):
-                if not p.is_dir() or p.name.startswith("."):
-                    continue
-                pid = p.name.lower()
-                if pid in ("tests",):
-                    continue
-                
-                title = pid.upper()
-                mfile = p / ".algo" / "problem.json"
-                if not mfile.exists():
-                    mfile = p / "problem.json"
-                if mfile.exists():
-                    try:
-                        m = json.loads(mfile.read_text(encoding="utf-8"))
-                        title = m.get("title", title)
-                    except Exception:
-                        pass
-                projects.append({"id": pid, "title": title})
+        for pid in ordered_pids:
+            p = self.workspace_dir / pid
+            title = pid.upper()
+            mfile = p / ".algo" / "problem.json"
+            if not mfile.exists():
+                mfile = p / "problem.json"
+            if mfile.exists():
+                try:
+                    m = json.loads(mfile.read_text(encoding="utf-8"))
+                    title = m.get("title", title)
+                except Exception:
+                    pass
+            projects.append({"id": pid, "title": title})
 
         # Pozycje dla 10 zadań (2 górne rzędy)
         slot_positions = [

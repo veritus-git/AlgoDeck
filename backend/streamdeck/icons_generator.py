@@ -2,22 +2,43 @@ import os
 import shutil
 import textwrap
 from pathlib import Path
-import cairo
+try:
+    import cairo
+except ImportError:
+    cairo = None
 from PIL import Image, ImageDraw, ImageFont
 
 ICONS_DIR = Path.home() / ".var/app/com.core447.StreamController/data/custom_icons"
 WORKSPACE_FRONTEND = Path(__file__).resolve().parent.parent.parent / "frontend" / "icons"
 
-def _save_cairo_surf(surf: cairo.ImageSurface, filename: str) -> Path:
+def _ensure_base_icon(filename: str) -> Path:
+    ICONS_DIR.mkdir(parents=True, exist_ok=True)
+    p1 = ICONS_DIR / filename
+    p2 = WORKSPACE_FRONTEND / filename
+    if not p1.exists() and p2.exists():
+        try:
+            shutil.copy2(p2, p1)
+        except Exception:
+            pass
+    return p1
+
+def _save_cairo_surf(surf, filename: str) -> Path:
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
     p1 = ICONS_DIR / filename
     p2 = WORKSPACE_FRONTEND / filename
-    surf.write_to_png(str(p1))
-    surf.write_to_png(str(p2))
-    return p1
+    if surf is not None:
+        try:
+            surf.write_to_png(str(p1))
+            surf.write_to_png(str(p2))
+            return p1
+        except Exception:
+            pass
+    return _ensure_base_icon(filename)
 
 def _new_cairo_surface():
+    if cairo is None:
+        return None, None
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 144, 144)
     cr = cairo.Context(surf)
     cr.set_source_rgb(0, 0, 0)
@@ -91,6 +112,8 @@ def generate_equals_icon() -> Path:
     Subtelny akcent '=': lekko przyciemniony szary (#64748b),
     mniejszy rozmiar i ostre krawędzie 90°.
     """
+    if cairo is None:
+        return _ensure_base_icon("icon_equals.png")
     surf, cr = _new_cairo_surface()
     cr.set_source_rgb(100/255, 116/255, 139/255)  # #64748b slate-500
     cr.rectangle(53, 60, 38, 6)
@@ -103,6 +126,8 @@ def generate_plus_icon() -> Path:
     Duży, geometryczny i idealnie wyśrodkowany '+' w jasnoszarym odcieniu (#e2e8f0).
     Wielkość (56x56 px) jest ujednolicona z pozostałymi ikonami środkowego rzędu.
     """
+    if cairo is None:
+        return _ensure_base_icon("icon_plus.png")
     surf, cr = _new_cairo_surface()
     cr.set_source_rgb(226/255, 232/255, 240/255)  # #e2e8f0 jasny szary
     cr.rectangle(44, 67, 56, 10)
@@ -115,6 +140,8 @@ def generate_test_icon() -> Path:
     Wektorowy zielony tick ✓ z ostrym wierzchołkiem (miter join)
     oraz prostokątnymi końcówkami (square cap).
     """
+    if cairo is None:
+        return _ensure_base_icon("icon_test_sec.png")
     surf, cr = _new_cairo_surface()
     cr.set_line_width(13.0)
     cr.set_line_cap(cairo.LINE_CAP_SQUARE)
@@ -129,6 +156,8 @@ def generate_test_icon() -> Path:
 
 def generate_play_icon() -> Path:
     """Czysty geometryczny zielony trójkąt Play ▶ (54x54 px) z ostrymi rogami."""
+    if cairo is None:
+        return _ensure_base_icon("icon_play_sec.png")
     surf, cr = _new_cairo_surface()
     cr.set_source_rgb(34/255, 197/255, 94/255)  # Green #22c55e
     cr.set_line_join(cairo.LINE_JOIN_MITER)
@@ -142,6 +171,8 @@ def generate_play_icon() -> Path:
 
 def generate_kill_icon() -> Path:
     """Czysty geometryczny czerwony kwadrat Stop ⏹ (54x54 px) z ostrymi kątami."""
+    if cairo is None:
+        return _ensure_base_icon("icon_kill_sec.png")
     surf, cr = _new_cairo_surface()
     cr.set_source_rgb(239/255, 68/255, 68/255)  # Red #ef4444
     cr.rectangle(45, 45, 54, 54)
@@ -150,6 +181,8 @@ def generate_kill_icon() -> Path:
 
 def generate_menu_icon() -> Path:
     """Czyste, geometryczne 4 kwadraty ⊞ (54x54 px) z ostrymi rogami."""
+    if cairo is None:
+        return _ensure_base_icon("icon_task_sec.png")
     surf, cr = _new_cairo_surface()
     cr.set_source_rgb(129/255, 140/255, 248/255)  # Indigo #818cf8
     cr.rectangle(45, 45, 23, 23)
@@ -161,6 +194,9 @@ def generate_menu_icon() -> Path:
 
 def generate_arrow_left_icon(disabled: bool = False) -> Path:
     """Kompaktowy szewron ‹ (~30 px) dopasowany do skali znaku '='."""
+    filename = "icon_arrow_left_disabled.png" if disabled else "icon_arrow_left.png"
+    if cairo is None:
+        return _ensure_base_icon(filename)
     surf, cr = _new_cairo_surface()
     cr.set_line_width(7.0)
     cr.set_line_cap(cairo.LINE_CAP_SQUARE)
@@ -168,10 +204,8 @@ def generate_arrow_left_icon(disabled: bool = False) -> Path:
     cr.set_miter_limit(10.0)
     if disabled:
         cr.set_source_rgb(51/255, 65/255, 85/255)  # #334155
-        filename = "icon_arrow_left_disabled.png"
     else:
         cr.set_source_rgb(1.0, 1.0, 1.0)  # #ffffff
-        filename = "icon_arrow_left.png"
     cr.move_to(79, 57)
     cr.line_to(64, 72)
     cr.line_to(79, 87)
@@ -180,6 +214,9 @@ def generate_arrow_left_icon(disabled: bool = False) -> Path:
 
 def generate_arrow_right_icon(disabled: bool = False) -> Path:
     """Kompaktowy szewron › (~30 px) dopasowany do skali znaku '='."""
+    filename = "icon_arrow_right_disabled.png" if disabled else "icon_arrow_right.png"
+    if cairo is None:
+        return _ensure_base_icon(filename)
     surf, cr = _new_cairo_surface()
     cr.set_line_width(7.0)
     cr.set_line_cap(cairo.LINE_CAP_SQUARE)
@@ -187,10 +224,8 @@ def generate_arrow_right_icon(disabled: bool = False) -> Path:
     cr.set_miter_limit(10.0)
     if disabled:
         cr.set_source_rgb(51/255, 65/255, 85/255)  # #334155
-        filename = "icon_arrow_right_disabled.png"
     else:
         cr.set_source_rgb(1.0, 1.0, 1.0)  # #ffffff
-        filename = "icon_arrow_right.png"
     cr.move_to(65, 57)
     cr.line_to(80, 72)
     cr.line_to(65, 87)
@@ -199,6 +234,8 @@ def generate_arrow_right_icon(disabled: bool = False) -> Path:
 
 def generate_arrow_back_icon() -> Path:
     """Geometryczna strzałka ← z ostrym grotem miter dla widoku menu."""
+    if cairo is None:
+        return _ensure_base_icon("icon_arrow_back.png")
     surf, cr = _new_cairo_surface()
     cr.set_line_width(11.0)
     cr.set_line_cap(cairo.LINE_CAP_SQUARE)
@@ -219,6 +256,8 @@ def generate_settings_icon() -> Path:
     Dyskretny, pomniejszony trybik / ustawienia ⚙ na czarnym tle.
     Kolor stonowany szary (#475569 - slate-600), nie rzuca się w oczy.
     """
+    if cairo is None:
+        return _ensure_base_icon("icon_settings.png")
     import math
     surf, cr = _new_cairo_surface()
     cx, cy = 72, 72
@@ -252,6 +291,12 @@ def generate_idle_logo_icons():
     - [  ⚡  ] (środkowy kafel z geometrycznym piorunem)
     - [ DECK ] (prawy kafel)
     """
+    if cairo is None:
+        _ensure_base_icon("idle_logo_algo.png")
+        _ensure_base_icon("idle_logo_bolt.png")
+        _ensure_base_icon("idle_logo_deck.png")
+        return
+
     # 1. ALGO
     surf1, cr1 = _new_cairo_surface()
     cr1.select_font_face("DejaVu Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
@@ -328,6 +373,8 @@ def generate_task_number_icon(index: int, total: int) -> Path:
 
 def generate_vscode_icon() -> Path:
     """Ikona kodu zachowana dla wstecznej kompatybilności."""
+    if cairo is None:
+        return _ensure_base_icon("icon_vscode_sec.png")
     surf, cr = _new_cairo_surface()
     cr.set_line_width(9.0)
     cr.set_line_cap(cairo.LINE_CAP_SQUARE)
@@ -389,26 +436,46 @@ def generate_task_button_icon(problem_id: str, title: str, is_active: bool = Fal
     return png_target
 
 def generate_all_base_icons():
-    """Generuje komplet czystych ostrych wektorowych ikon akcji oraz alfabet."""
+    """Generuje lub kopiuje komplet czystych ostrych wektorowych ikon akcji oraz alfabet."""
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     WORKSPACE_FRONTEND.mkdir(parents=True, exist_ok=True)
 
-    generate_test_icon()
-    generate_play_icon()
-    generate_kill_icon()
-    generate_menu_icon()
-    generate_equals_icon()
-    generate_plus_icon()
-    generate_settings_icon()
-    generate_idle_logo_icons()
-    generate_idle_start_icon()
-    generate_arrow_left_icon(disabled=False)
-    generate_arrow_left_icon(disabled=True)
-    generate_arrow_right_icon(disabled=False)
-    generate_arrow_right_icon(disabled=True)
-    generate_arrow_back_icon()
-    generate_vscode_icon()
-    generate_all_alphabet_letters()
+    # 1. Kopiuj wszystkie pre-renderowane ikony z folderu projektu (błyskawiczne i bez cairo)
+    if WORKSPACE_FRONTEND.exists():
+        for f in WORKSPACE_FRONTEND.glob("*.png"):
+            target = ICONS_DIR / f.name
+            if not target.exists():
+                try:
+                    shutil.copy2(f, target)
+                except Exception:
+                    pass
+
+    # 2. Jeśli cairo jest zainstalowane, można odświeżyć wektory
+    if cairo is not None:
+        try:
+            generate_test_icon()
+            generate_play_icon()
+            generate_kill_icon()
+            generate_menu_icon()
+            generate_equals_icon()
+            generate_plus_icon()
+            generate_settings_icon()
+            generate_idle_logo_icons()
+            generate_arrow_left_icon(disabled=False)
+            generate_arrow_left_icon(disabled=True)
+            generate_arrow_right_icon(disabled=False)
+            generate_arrow_right_icon(disabled=True)
+            generate_arrow_back_icon()
+            generate_vscode_icon()
+        except Exception:
+            pass
+
+    # 3. Pillow generuje ekran zachęty i litery alfabetu bez potrzeby cairo
+    try:
+        generate_idle_start_icon()
+        generate_all_alphabet_letters()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     generate_all_base_icons()

@@ -66,6 +66,10 @@ if command -v dnf &> /dev/null; then
         python3 \
         python3-devel \
         python3-pip \
+        cairo-devel \
+        pkgconf-pkg-config \
+        pkgconfig \
+        gobject-introspection-devel \
         libusb1-devel \
         hidapi-devel \
         systemd-devel \
@@ -93,6 +97,8 @@ elif command -v apt-get &> /dev/null; then
         python3-dev \
         python3-pip \
         python3-venv \
+        libcairo2-dev \
+        pkg-config \
         libusb-1.0-0-dev \
         libhidapi-dev \
         wl-clipboard \
@@ -184,6 +190,12 @@ if [ -f "$INSTALL_DIR/requirements.txt" ]; then
     "$VENV_DIR/bin/pip" install --no-input -r "$INSTALL_DIR/requirements.txt"
 else
     "$VENV_DIR/bin/pip" install --no-input fastapi uvicorn pydantic python-multipart pypdf pillow websockets psutil streamdeck
+fi
+
+# Przygotowanie katalogu i skopiowanie pre-renderowanych ikon
+mkdir -p "$HOME/.var/app/com.core447.StreamController/data/custom_icons"
+if [ -d "$INSTALL_DIR/frontend/icons" ]; then
+    cp -n "$INSTALL_DIR/frontend/icons/"*.png "$HOME/.var/app/com.core447.StreamController/data/custom_icons/" 2>/dev/null || true
 fi
 
 # Generowanie minimalistycznych ikon symbolicznych
@@ -359,7 +371,7 @@ fi
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
 
-# 7f. Skrypt sd_algo_switch.sh (Przełączanie zadań i galerii)
+# 7f. Skrypt sd_algo_switch.sh (Przełączanie zadań i galerii w kolejności chronologicznej)
 cat > "$HOME/.local/bin/sd_algo_switch.sh" << 'EOF'
 #!/usr/bin/env bash
 set -e
@@ -369,26 +381,32 @@ CURRENT="${2:-}"
 WORKSPACE="$HOME/algodeck-workspace"
 SERIAL="A00SA6042JGA63"
 
-# Zbierz listę wszystkich zadań
+# 1. Pobierz kolejność zadań z API AlgoDeck (ścisła kolejność chronologiczna utworzenia)
 PROJECTS=()
-for dir in "$WORKSPACE"/*; do
-    [ -d "$dir" ] || continue
-    bname=$(basename "$dir")
-    [ "$bname" = "tests" ] && continue
-    if [ -f "$dir/$bname.cpp" ] || [ -d "$dir/.algo" ]; then
-        PROJECTS+=("$bname")
+API_RES=$(curl -s --max-time 1 http://127.0.0.1:8080/api/problems 2>/dev/null || true)
+if [ -n "$API_RES" ]; then
+    P_LIST=$(python3 -c "import sys, json; data=json.loads(sys.stdin.read()); print(' '.join(p['problem_id'] for p in data.get('problems', [])))" <<< "$API_RES" 2>/dev/null || true)
+    if [ -n "$P_LIST" ]; then
+        PROJECTS=($P_LIST)
     fi
-done
+fi
+
+# 2. Fallback gdy serwer jest wyłączony: sortuj według czasu utworzenia katalogu (najstarsze pierwsze)
+if [ ${#PROJECTS[@]} -eq 0 ]; then
+    while IFS= read -r dir; do
+        [ -d "$dir" ] || continue
+        bname=$(basename "$dir")
+        [ "$bname" = "tests" ] && continue
+        if [ -f "$dir/$bname.cpp" ] || [ -d "$dir/.algo" ]; then
+            PROJECTS+=("$bname")
+        fi
+    done < <(ls -1v -tr "$WORKSPACE" 2>/dev/null)
+fi
 
 if [ ${#PROJECTS[@]} -eq 0 ]; then
     gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
-    notify-send "AlgoDeck" "Brak zadań w workspace. Przełączono na ekran zachęty." 2>/dev/null || true
     exit 0
 fi
-
-# Posortuj alfabetycznie
-IFS=$'\n' PROJECTS=($(sort <<<"${PROJECTS[*]}"))
-unset IFS
 
 if [ "$ACTION" = "menu" ]; then
     if [ -n "$CURRENT" ]; then
@@ -433,8 +451,6 @@ curl -s -X POST "http://127.0.0.1:8080/api/set-active/$TARGET" >/dev/null 2>&1 |
 if [ -f "$HOME/.local/bin/sd_algo_code.sh" ]; then
     "$HOME/.local/bin/sd_algo_code.sh" "$WORKSPACE/$TARGET" "$WORKSPACE/$TARGET/$TARGET.cpp" >/dev/null 2>&1 || true
 fi
-
-notify-send -u low "AlgoDeck" "📂 Zadanie: $TARGET_UPPER" 2>/dev/null || true
 EOF
 chmod +x "$HOME/.local/bin/sd_algo_switch.sh"
 

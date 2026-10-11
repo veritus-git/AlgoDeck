@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -204,12 +205,24 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
             ]
         }, indent=4), encoding="utf-8")
 
-        # 9. Manifest problem.json
+        # 9. Manifest problem.json (zapisz lub zachowaj datę utworzenia)
+        existing_created_at = None
+        old_mfile = algo_hidden_dir / "problem.json"
+        if old_mfile.exists():
+            try:
+                old_data = json.loads(old_mfile.read_text(encoding="utf-8"))
+                existing_created_at = old_data.get("created_at")
+            except Exception:
+                pass
+
+        created_at = analysis.get("created_at") or existing_created_at or time.time()
+
         manifest = {
             "problem_id": problem_id,
             "title": title,
             "time_limit_sec": time_limit,
             "memory_limit_mb": memory_limit,
+            "created_at": created_at,
             "tests": saved_tests,
             "workspace_path": str(problem_dir.resolve())
         }

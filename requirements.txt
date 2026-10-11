@@ -7,4 +7,3 @@ pillow>=10.2.0
 websockets>=12.0
 psutil>=5.9.0
 streamdeck>=0.9.5
-pycairo>=1.26.0

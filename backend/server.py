@@ -573,33 +573,30 @@ async def create_manual(payload: Dict[str, Any] = Body(...)):
 
 @app.get("/api/problems")
 def list_problems():
-    """Zwraca listę wszystkich zapisanych zadań z metadanymi."""
+    """Zwraca listę wszystkich zapisanych zadań z metadanymi w kolejności chronologicznej utworzenia."""
     wdir = settings.workspace_dir
     problems = []
     if wdir.exists():
-        for p in sorted(wdir.iterdir()):
-            if not p.is_dir() or p.name.startswith("."):
-                continue
-            pid = p.name.lower()
-            if pid in ("tests",):
-                continue
+        ordered_pids = streamcontroller_bridge.get_ordered_problem_ids()
+        for pid in ordered_pids:
+            p = wdir / pid
             mfile = p / ".algo" / "problem.json"
             if not mfile.exists():
                 mfile = p / "problem.json"
+            manifest = None
             if mfile.exists():
                 try:
                     manifest = json.loads(mfile.read_text(encoding="utf-8"))
-                    problems.append(manifest)
                 except Exception:
                     pass
-            elif (p / f"{pid}.cpp").exists():
-                # Workspace bez manifestu
-                problems.append({
+            if not manifest:
+                manifest = {
                     "problem_id": pid,
                     "title": pid.upper(),
                     "tests": [],
                     "workspace_path": str(p.resolve())
-                })
+                }
+            problems.append(manifest)
     return {"problems": problems, "active": streamdeck_controller.active_problem_id}
 
 @app.get("/api/problem/{problem_id}")
