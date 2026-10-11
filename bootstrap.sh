@@ -272,6 +272,14 @@ cat > "$HOME/.local/bin/sd_algo_run_vscode.sh" << 'EOF'
 PDIR="$1"
 PROB="$2"
 
+if [ -n "$PROB" ]; then
+    echo "${PROB^^}" > /tmp/algodeck_active_task.txt
+fi
+
+if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
+    code --reuse-window "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+fi
+
 WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB" | awk '{print $1}' | head -n 1)
 if [ -z "$WID" ]; then
     WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
@@ -296,6 +304,14 @@ cat > "$HOME/.local/bin/sd_algo_test_vscode.sh" << 'EOF'
 #!/usr/bin/env bash
 PDIR="$1"
 PROB="$2"
+
+if [ -n "$PROB" ]; then
+    echo "${PROB^^}" > /tmp/algodeck_active_task.txt
+fi
+
+if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
+    code --reuse-window "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
+fi
 
 WID=$(DISPLAY=:0 wmctrl -lx 2>/dev/null | grep -i "code\.code" | grep -i "$PROB" | awk '{print $1}' | head -n 1)
 if [ -z "$WID" ]; then

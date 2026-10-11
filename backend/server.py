@@ -330,7 +330,8 @@ async def start_staged(payload: Dict[str, Any] = Body(default={})):
 
     # Konfiguracja Stream Decka
     streamdeck_controller.set_active_problem(pid)
-    streamcontroller_bridge.generate_page_for_problem(pid, analysis, switch_now=True)
+    streamcontroller_bridge.sync_all_problems()
+    streamcontroller_bridge.switch_to_page(pid)
 
     # Wyczyść staging
     clear_staged({"file_type": "all"})

@@ -215,10 +215,61 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
         }
         (algo_hidden_dir / "problem.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        # 10. Otwórz VS Code
+        # 10. Upewnij się, że główny workspace ma plik .vscode/tasks.json do trybu jednego okna
+        self.ensure_root_workspace_tasks()
+
+        # 11. Otwórz VS Code
         self.open_in_vscode(problem_dir, main_cpp)
 
         return problem_dir
+
+    def ensure_root_workspace_tasks(self):
+        """
+        Upewnia się, że główny katalog algodeck-workspace posiada plik .vscode/tasks.json.
+        Dzięki temu w trybie jednego okna VS Code klawisze F6 i Ctrl+Shift+B oraz przyciski
+        ze Stream Decka natychmiast uruchamiają testy i kompilację aktywnego zadania.
+        """
+        root_vscode = self.base_dir / ".vscode"
+        root_vscode.mkdir(parents=True, exist_ok=True)
+        tasks_file = root_vscode / "tasks.json"
+        tasks_content = {
+            "version": "2.0.0",
+            "tasks": [
+                {
+                    "label": "AlgoDeck: ODPAL",
+                    "type": "shell",
+                    "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/run.sh\" || bash \"${fileDirname}/.algo/run.sh\"",
+                    "problemMatcher": [],
+                    "presentation": {
+                        "reveal": "always",
+                        "panel": "shared",
+                        "focus": True,
+                        "clear": True
+                    },
+                    "group": {
+                        "kind": "build",
+                        "isDefault": True
+                    }
+                },
+                {
+                    "label": "AlgoDeck: TESTUJ",
+                    "type": "shell",
+                    "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/test.sh\" || bash \"${fileDirname}/.algo/test.sh\"",
+                    "problemMatcher": [],
+                    "presentation": {
+                        "reveal": "always",
+                        "panel": "shared",
+                        "focus": True,
+                        "clear": True
+                    },
+                    "group": {
+                        "kind": "test",
+                        "isDefault": True
+                    }
+                }
+            ]
+        }
+        tasks_file.write_text(json.dumps(tasks_content, indent=4), encoding="utf-8")
 
     def open_in_vscode(self, problem_dir: Path, source_file: Path):
         try:
@@ -242,7 +293,7 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
 
     @staticmethod
     def generate_test_script(problem_dir: Path, problem_id: str, title: str = "", time_limit: float = 1.0) -> Path:
-        """Generuje czytelny, estetyczny skrypt .algo/test.sh z podsumowaniem i kolorami ANSI."""
+        """Generuje czytelny, estetyczny skrypt .algo/test.sh z idealnie dopasowaną tabelą Unicode."""
         time_limit_ms = int(time_limit * 1000)
         algo_hidden_dir = problem_dir / ".algo"
         algo_hidden_dir.mkdir(parents=True, exist_ok=True)
@@ -278,9 +329,54 @@ C_MAGENTA="\\e[1;35m"
 C_WHITE="\\e[1;37m"
 C_GRAY="\\e[0;90m"
 
-echo -e "${{C_CYAN}}${{C_BOLD}}================================================================${{C_RESET}}"
+# Funkcje pomocnicze do wyrównywania kolumn znak po znaku (obsługa znaków polskich i Unicode)
+pad_left() {{
+    local text="$1"
+    local target_width="$2"
+    local len=${{#text}}
+    local pad_len=$(( target_width - len ))
+    if [ $pad_len -gt 0 ]; then
+        printf "%*s%s" "$pad_len" "" "$text"
+    else
+        printf "%s" "$text"
+    fi
+}}
+
+pad_right() {{
+    local text="$1"
+    local target_width="$2"
+    local len=${{#text}}
+    local extra=0
+    [[ "$text" =~ "✨" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "❌" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "⚠️" ]] && extra=$((extra + 1))
+    local visual_len=$(( len + extra ))
+    local pad_len=$(( target_width - visual_len ))
+    if [ $pad_len -gt 0 ]; then
+        printf "%s%*s" "$text" "$pad_len" ""
+    else
+        printf "%s" "$text"
+    fi
+}}
+
+box_line() {{
+    local text="$1"
+    local total_inner_width=78
+    local char_len=${{#text}}
+    local extra=0
+    [[ "$text" =~ "✨" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "❌" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "⚠️" ]] && extra=$((extra + 1))
+    local visual_len=$(( char_len + extra ))
+    local pad=$(( total_inner_width - visual_len ))
+    [ $pad -lt 0 ] && pad=0
+    printf "║%s%*s║\\n" "$text" "$pad" ""
+}}
+
+DIVIDER="$(printf "=%.0s" {{1..80}})"
+echo -e "${{C_CYAN}}${{C_BOLD}}${{DIVIDER}}${{C_RESET}}"
 echo -e "${{C_CYAN}}${{C_BOLD}}       ⚡ AlgoDeck Test Runner — ${{PROB_UPPER}} (${{PROB_TITLE}})${{C_RESET}}"
-echo -e "${{C_CYAN}}${{C_BOLD}}================================================================${{C_RESET}}"
+echo -e "${{C_CYAN}}${{C_BOLD}}${{DIVIDER}}${{C_RESET}}"
 
 echo -ne "${{C_YELLOW}}⚡ Kompilacja ${{PROB}}.cpp (g++ -O3 -std=c++20)...${{C_RESET}} "
 mkdir -p .algo
@@ -310,9 +406,10 @@ if [ "$TOTAL" -eq 0 ]; then
     exit 0
 fi
 
-printf "${{C_GRAY}}┌───────┬──────────────────────────────┬────────────┬────────────────────────┐${{C_RESET}}\\n"
-printf "${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}NR${{C_RESET}}    ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}TEST${{C_RESET}}                         ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}CZAS${{C_RESET}}       ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}STATUS${{C_RESET}}                 ${{C_GRAY}}│${{C_RESET}}\\n"
-printf "${{C_GRAY}}├───────┼──────────────────────────────┼────────────┼────────────────────────┤${{C_RESET}}\\n"
+# Tabela o łącznej szerokości 80 znaków
+printf "${{C_GRAY}}┌───────┬────────────────────────────────┬────────────┬────────────────────────┐${{C_RESET}}\\n"
+printf "${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%-5s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%-30s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%10s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%-22s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}}\\n" "NR" "TEST" "CZAS" "STATUS"
+printf "${{C_GRAY}}├───────┼────────────────────────────────┼────────────┼────────────────────────┤${{C_RESET}}\\n"
 
 IDX=0
 for in_file in "${{TEST_FILES[@]}}"; do
@@ -327,8 +424,8 @@ for in_file in "${{TEST_FILES[@]}}"; do
     if [ -n "$tag_text" ]; then
         display_name="$base ($tag_text)"
     fi
-    if [ ${{#display_name}} -gt 28 ]; then
-        display_name="${{display_name:0:25}}..."
+    if [ ${{#display_name}} -gt 30 ]; then
+        display_name="${{display_name:0:27}}..."
     fi
 
     start=$(date +%s%N)
@@ -337,25 +434,31 @@ for in_file in "${{TEST_FILES[@]}}"; do
     end=$(date +%s%N)
     diff_ms=$(( (end - start) / 1000000 ))
 
-    status_str=""
+    raw_status=""
+    status_color=""
     is_ok=false
 
     if [ $ret -ne 0 ]; then
-        status_str="${{C_MAGENTA}}${{C_BOLD}}💥 RTE (kod $ret)${{C_RESET}}"
+        raw_status="💥 RTE (kod $ret)"
+        status_color="${{C_MAGENTA}}${{C_BOLD}}"
         ERRORS+=("$base|RTE|Kod błędu: $ret (program uległ awarii)")
     elif [ "$diff_ms" -gt "$TIME_LIMIT_MS" ] && [ "$TIME_LIMIT_MS" -gt 0 ]; then
-        status_str="${{C_YELLOW}}${{C_BOLD}}⏱️  TLE (>${{TIME_LIMIT_MS}}ms)${{C_RESET}}"
+        raw_status="⏱️  TLE (>${{TIME_LIMIT_MS}}ms)"
+        status_color="${{C_YELLOW}}${{C_BOLD}}"
         ERRORS+=("$base|TLE|Przekroczono limit czasu (${{diff_ms}} ms > ${{TIME_LIMIT_MS}} ms)")
     elif [ -f "$out_file" ] && [ -s "$out_file" ]; then
         if diff -q -w -B "$out_file" "$my_out" >/dev/null 2>&1; then
-            status_str="${{C_GREEN}}${{C_BOLD}}✓ OK${{C_RESET}}"
+            raw_status="✓ OK"
+            status_color="${{C_GREEN}}${{C_BOLD}}"
             is_ok=true
         else
-            status_str="${{C_RED}}${{C_BOLD}}❌ WA (Zły wynik)${{C_RESET}}"
+            raw_status="❌ WA (Zły wynik)"
+            status_color="${{C_RED}}${{C_BOLD}}"
             ERRORS+=("$base|WA|diff")
         fi
     else
-        status_str="${{C_GREEN}}${{C_BOLD}}✓ OK (brak out)${{C_RESET}}"
+        raw_status="✓ OK (brak out)"
+        status_color="${{C_GREEN}}${{C_BOLD}}"
         is_ok=true
     fi
 
@@ -365,8 +468,14 @@ for in_file in "${{TEST_FILES[@]}}"; do
         FAILED=$((FAILED + 1))
     fi
 
-    time_display=$(printf "%4d ms" "$diff_ms")
-    printf "${{C_GRAY}}│${{C_RESET}} %-5d ${{C_GRAY}}│${{C_RESET}} %-28s ${{C_GRAY}}│${{C_RESET}} %-10s ${{C_GRAY}}│${{C_RESET}} %-32b ${{C_GRAY}}│${{C_RESET}}\\n" "$IDX" "$display_name" "$time_display" "$status_str"
+    time_str="${{diff_ms}} ms"
+
+    c1=$(pad_right "$IDX" 5)
+    c2=$(pad_right "$display_name" 30)
+    c3=$(pad_left "$time_str" 10)
+    c4=$(pad_right "$raw_status" 22)
+
+    printf "${{C_GRAY}}│${{C_RESET}} %s ${{C_GRAY}}│${{C_RESET}} %s ${{C_GRAY}}│${{C_RESET}} %s ${{C_GRAY}}│${{C_RESET}} ${{status_color}}%s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}}\\n" "$c1" "$c2" "$c3" "$c4"
 
     if [ "$VERBOSE" = true ]; then
         echo -e "${{C_DIM}}--- Wejście ($base.in): ---${{C_RESET}}"
@@ -381,7 +490,7 @@ for in_file in "${{TEST_FILES[@]}}"; do
     fi
 done
 
-printf "${{C_GRAY}}└───────┴──────────────────────────────┴────────────┴────────────────────────┘${{C_RESET}}\\n"
+printf "${{C_GRAY}}└───────┴────────────────────────────────┴────────────┴────────────────────────┘${{C_RESET}}\\n"
 echo ""
 
 PCT=0
@@ -389,20 +498,26 @@ if [ "$TOTAL" -gt 0 ]; then
     PCT=$(( PASSED * 100 / TOTAL ))
 fi
 
+BOX_TOP="╔$(printf "═%.0s" {{1..78}})╗"
+BOX_BOT="╚$(printf "═%.0s" {{1..78}})╝"
+
 if [ "$PASSED" -eq "$TOTAL" ]; then
-    echo -e "${{C_GREEN}}${{C_BOLD}}╔════════════════════════════════════════════════════════════════╗${{C_RESET}}"
-    echo -e "${{C_GREEN}}${{C_BOLD}}║  ✨ 100% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WSZYSTKO POPRAWNIE!       ║${{C_RESET}}"
-    echo -e "${{C_GREEN}}${{C_BOLD}}╚════════════════════════════════════════════════════════════════╝${{C_RESET}}"
+    echo -e "${{C_GREEN}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
+    echo -ne "${{C_GREEN}}${{C_BOLD}}"
+    box_line "  ✨ 100% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WSZYSTKO POPRAWNIE!"
+    echo -e "${{C_GREEN}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
     notify-send "AlgoDeck (${{PROB_UPPER}})" "✨ 100% ZALICZONE ($PASSED/$TOTAL)" 2>/dev/null || true
 elif [ "$PASSED" -eq 0 ]; then
-    echo -e "${{C_RED}}${{C_BOLD}}╔════════════════════════════════════════════════════════════════╗${{C_RESET}}"
-    echo -e "${{C_RED}}${{C_BOLD}}║  ❌ 0% TESTÓW ZALICZONYCH (0/$TOTAL) — WSZYSTKIE TESTY OBLANE!     ║${{C_RESET}}"
-    echo -e "${{C_RED}}${{C_BOLD}}╚════════════════════════════════════════════════════════════════╝${{C_RESET}}"
+    echo -e "${{C_RED}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
+    echo -ne "${{C_RED}}${{C_BOLD}}"
+    box_line "  ❌ 0% TESTÓW ZALICZONYCH (0/$TOTAL) — WSZYSTKIE TESTY OBLANE!"
+    echo -e "${{C_RED}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
     notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ 0% ZALICZONE (0/$TOTAL)" 2>/dev/null || true
 else
-    echo -e "${{C_YELLOW}}${{C_BOLD}}╔════════════════════════════════════════════════════════════════╗${{C_RESET}}"
-    printf "${{C_YELLOW}}${{C_BOLD}}║  ⚠️  %2d%% TESTÓW ZALICZONYCH (%d/%d) — WYKRYTO BŁĘDY (%d OBLANE)    ║${{C_RESET}}\\n" "$PCT" "$PASSED" "$TOTAL" "$FAILED"
-    echo -e "${{C_YELLOW}}${{C_BOLD}}╚════════════════════════════════════════════════════════════════╝${{C_RESET}}"
+    echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
+    echo -ne "${{C_YELLOW}}${{C_BOLD}}"
+    box_line "  ⚠️  $PCT% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WYKRYTO BŁĘDY ($FAILED OBLANE)"
+    echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
     notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "⚠️  $PCT% ZALICZONE ($PASSED/$TOTAL)" 2>/dev/null || true
 fi
 
@@ -411,7 +526,7 @@ if [ "${{#ERRORS[@]}}" -gt 0 ] && [ "$VERBOSE" = false ]; then
     echo -e "${{C_RED}}${{C_BOLD}}🔍 SZCZEGÓŁY OBLANYCH TESTÓW:${{C_RESET}}"
     for err in "${{ERRORS[@]}}"; do
         IFS='|' read -r t_name t_type t_info <<< "$err"
-        echo -e "${{C_RED}}----------------------------------------------------------------${{C_RESET}}"
+        echo -e "${{C_RED}}--------------------------------------------------------------------------------${{C_RESET}}"
         echo -e "${{C_WHITE}}${{C_BOLD}}Test: $t_name [Typ: $t_type]${{C_RESET}}"
         if [ "$t_type" = "WA" ]; then
             out_file=".algo/tests/$t_name.out"
@@ -424,7 +539,7 @@ if [ "${{#ERRORS[@]}}" -gt 0 ] && [ "$VERBOSE" = false ]; then
             echo -e "  $t_info"
         fi
     done
-    echo -e "${{C_RED}}----------------------------------------------------------------${{C_RESET}}"
+    echo -e "${{C_RED}}--------------------------------------------------------------------------------${{C_RESET}}"
 fi
 
 echo ""
