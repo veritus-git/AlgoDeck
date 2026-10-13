@@ -6,8 +6,8 @@
   "URL": "https://github.com/veritus-git/AlgoDeck",
   "Version": "2.0.0",
   "CodePath": "plugin.py",
-  "CodePathMac": "plugin.py",
-  "CodePathWin": "plugin.py",
+  "CodePathMac": "plugin.sh",
+  "CodePathWin": "plugin.bat",
   "Category": "AlgoDeck",
   "CategoryIcon": "category_icon",
   "Actions": [

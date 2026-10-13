@@ -399,6 +399,13 @@ impl ApiClient {
             .spawn();
     }
 
+    pub fn start_daemon() {
+        let _ = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("$HOME/.local/bin/algodeck start || true")
+            .spawn();
+    }
+
     pub fn update_backend_settings(settings: &crate::settings::AppSettings) {
         let payload = serde_json::json!({
             "workspace_dir": settings.workspace_dir,

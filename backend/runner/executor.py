@@ -2,7 +2,6 @@ import difflib
 import json
 import logging
 import os
-import resource
 import shutil
 import subprocess
 import time
@@ -39,7 +38,8 @@ class TestExecutor:
         if not src_file.exists():
             return {"success": False, "error": f"Plik źródłowy {src_file.name} nie istnieje."}
 
-        target_name = f"{problem_id}_debug" if debug_mode else problem_id
+        target_suffix = ".exe" if os.name == "nt" else ""
+        target_name = f"{problem_id}_debug{target_suffix}" if debug_mode else f"{problem_id}{target_suffix}"
         target_path = pdir / target_name
 
         flags = settings.cxx_debug_flags if debug_mode else settings.cxx_release_flags
@@ -85,8 +85,11 @@ class TestExecutor:
         manifest = self.get_manifest(problem_id)
         time_limit = manifest.get("time_limit_sec", 1.0)
         
-        target_name = f"{problem_id}_debug" if is_debug else problem_id
+        target_suffix = ".exe" if os.name == "nt" else ""
+        target_name = f"{problem_id}_debug{target_suffix}" if is_debug else f"{problem_id}{target_suffix}"
         binary = pdir / target_name
+        if not binary.exists() and (pdir / f"{problem_id}{target_suffix}").exists() and not is_debug:
+            binary = pdir / f"{problem_id}{target_suffix}"
 
         # Auto-compile if binary doesn't exist
         if not binary.exists():
@@ -117,8 +120,9 @@ class TestExecutor:
 
         start_time = time.perf_counter()
         try:
+            exec_cmd = [str(binary.resolve())] if os.name == "nt" else [f"./{binary.name}"]
             proc = subprocess.Popen(
-                [f"./{target_name}"],
+                exec_cmd,
                 cwd=str(pdir),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -253,8 +257,26 @@ class TestExecutor:
         }
 
     def copy_to_clipboard(self, text: str) -> bool:
-        """Copies text to system clipboard (Wayland wl-copy first, then xclip/xsel)."""
-        # 1. Try wl-copy (Fedora KDE Plasma Wayland)
+        """Copies text to system clipboard (Wayland wl-copy, xclip, Windows clip, macOS pbcopy)."""
+        # 1. Windows clip.exe
+        if os.name == "nt" or shutil.which("clip.exe") or shutil.which("clip"):
+            try:
+                proc = subprocess.run(["clip"], input=text, text=True, timeout=2, shell=True)
+                if proc.returncode == 0:
+                    return True
+            except Exception:
+                pass
+
+        # 2. macOS pbcopy
+        if shutil.which("pbcopy"):
+            try:
+                proc = subprocess.run(["pbcopy"], input=text, text=True, timeout=2)
+                if proc.returncode == 0:
+                    return True
+            except Exception:
+                pass
+
+        # 3. Linux Wayland wl-copy
         if shutil.which("wl-copy"):
             try:
                 proc = subprocess.run(["wl-copy"], input=text, text=True, timeout=2)
@@ -263,7 +285,7 @@ class TestExecutor:
             except Exception:
                 pass
 
-        # 2. Try xclip
+        # 4. Linux X11 xclip
         if shutil.which("xclip"):
             try:
                 proc = subprocess.run(["xclip", "-selection", "clipboard"], input=text, text=True, timeout=2)

@@ -45,7 +45,7 @@ ensure_tray() {
             GUI_BIN="$REPO_DIR/gui/target/release/algodeck-gui"
         fi
         if [ -n "$GUI_BIN" ]; then
-            nohup "$GUI_BIN" --tray >/dev/null 2>&1 &
+            (nohup "$GUI_BIN" --tray </dev/null >/dev/null 2>&1 &)
         fi
     fi
 }
@@ -113,13 +113,14 @@ stop_daemon() {
     PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c "from backend.streamdeck.streamcontroller_bridge import StreamControllerBridge; StreamControllerBridge().cleanup_and_exit()" 2>/dev/null || true
     systemctl --user stop algodeck.service >/dev/null 2>&1 || true
     pkill -f "uvicorn backend.server:app" >/dev/null 2>&1 || true
-    pkill -f "algodeck-gui" >/dev/null 2>&1 || true
+    pkill -f "algodeck-gui --tray" >/dev/null 2>&1 || true
+    rm -f /tmp/algodeck_tray.pid
     notify-send "AlgoDeck ⚡" "Środowisko AlgoDeck wyłączone. Profile usunięte ze Stream Decka." 2>/dev/null || true
     echo "✓ AlgoDeck zatrzymany, profile usunięte."
 }
 
 open_gui() {
-    TAB="${1:---tab=settings}"
+    TAB="${1:---tab=new}"
     GUI_BIN=""
     if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
         GUI_BIN="$HOME/.local/bin/algodeck-gui"

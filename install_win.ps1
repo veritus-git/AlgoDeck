@@ -101,9 +101,9 @@ if (-not (Test-Path "$VenvDir")) {
 $PipExe = "$VenvDir\Scripts\pip.exe"
 $PythonVenv = "$VenvDir\Scripts\python.exe"
 
-& $PipExe install --upgrade pip --quiet
-& $PipExe install -r "$InstallDir\requirements.txt" --quiet
-& $PipExe install websockets --quiet
+& $PythonVenv -m pip install --upgrade pip --quiet
+& $PythonVenv -m pip install -r "$InstallDir\requirements.txt" --quiet
+& $PythonVenv -m pip install websockets --quiet
 
 # 6. Oficjalny plugin Elgato Stream Deck na Windows
 Write-Host "`n[6/6] Konfiguracja Elgato Stream Deck (Program i plugin Windows)..." -ForegroundColor Cyan
@@ -165,6 +165,7 @@ if (-not (Test-Path "$GuiExeDest")) {
 $CmdContent = @"
 @echo off
 set "INSTALL_DIR=$InstallDir"
+set "BIN_DIR=$BinDir"
 set "PYTHON_EXE=$VenvDir\Scripts\python.exe"
 
 if "%~1"=="stop" (
@@ -178,6 +179,15 @@ if "%~1"=="status" (
     exit /b 0
 )
 
+if "%~1"=="gui" (
+    if exist "$BinDir\algodeck-gui.exe" (
+        start "" "$BinDir\algodeck-gui.exe" %2 %3 %4
+    ) else (
+        echo [AlgoDeck] algodeck-gui.exe nie zostal znaleziony w $BinDir
+    )
+    exit /b 0
+)
+
 :: Sprawdz czy dziala
 powershell -NoProfile -Command "try { `$r = Invoke-RestMethod 'http://127.0.0.1:8080/api/status' -TimeoutSec 1; exit 0 } catch { exit 1 }" >nul 2>&1
 if %ERRORLEVEL% equ 0 (
@@ -186,8 +196,8 @@ if %ERRORLEVEL% equ 0 (
     exit /b 0
 )
 
-:: Uruchom w tle (ciche okno ukryte)
-start "" /B "%PYTHON_EXE%" -m uvicorn backend.server:app --app-dir "%INSTALL_DIR%" --host 127.0.0.1 --port 8080
+:: Uruchom w tle (ciche okno ukryte z tytulem AlgoDeckDaemon)
+start "AlgoDeckDaemon" /B "%PYTHON_EXE%" -m uvicorn backend.server:app --app-dir "%INSTALL_DIR%" --host 127.0.0.1 --port 8080
 timeout /t 1 /nobreak >nul
 powershell -NoProfile -Command "Invoke-RestMethod -Method Post 'http://127.0.0.1:8080/api/launch' | Out-Null" >nul 2>&1
 

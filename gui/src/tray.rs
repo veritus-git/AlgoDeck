@@ -1,12 +1,56 @@
+use std::path::Path;
 use std::process::Command;
 
 #[cfg(target_os = "linux")]
 use ksni::{blocking::TrayMethods, menu::*, MenuItem, Tray};
 
+pub fn ensure_system_icon() {
+    let icon_bytes = include_bytes!("../assets/icon128.png");
+    if let Some(data_dir) = dirs::data_dir() {
+        let icon_paths = [
+            data_dir.join("icons").join("algodeck.png"),
+            data_dir.join("icons").join("hicolor").join("128x128").join("apps").join("algodeck.png"),
+        ];
+        for path in icon_paths {
+            if !path.exists() {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&path, icon_bytes);
+            }
+        }
+    }
+}
+
+pub fn get_algodeck_tray_icons() -> Vec<ksni::Icon> {
+    let img_bytes = include_bytes!("../assets/icon128.png");
+    if let Ok(img) = image::load_from_memory_with_format(img_bytes, image::ImageFormat::Png) {
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let mut data = rgba.into_raw();
+        // ARGB32 format (network byte order) dla StatusNotifierItem DBus
+        for pixel in data.chunks_exact_mut(4) {
+            pixel.rotate_right(1); // RGBA [0,1,2,3] -> ARGB [3,0,1,2]
+        }
+        vec![ksni::Icon {
+            width: w as i32,
+            height: h as i32,
+            data,
+        }]
+    } else {
+        vec![]
+    }
+}
+
 pub struct AlgoDeckTray;
 
 #[cfg(target_os = "linux")]
 impl Tray for AlgoDeckTray {
+    // MENU_ON_ACTIVATE musi wynosić false, aby ksni nie odrzucało wywołania Activate(x, y).
+    // W Cinnamon xapp-status applet na lewym kliknięciu wysyła Activate, a menu otwiera tylko na prawym kliknięciu (Button 3).
+    // Dlatego w activate() symulujemy Button 3 przez xdotool, dzięki czemu menu otwiera się ZARÓWNO na lewym, jak i prawym kliknięciu!
+    const MENU_ON_ACTIVATE: bool = false;
+
     fn id(&self) -> String {
         "algodeck".to_string()
     }
@@ -16,10 +60,12 @@ impl Tray for AlgoDeckTray {
     }
 
     fn icon_name(&self) -> String {
+        ensure_system_icon();
         "algodeck".to_string()
     }
 
     fn icon_theme_path(&self) -> String {
+        ensure_system_icon();
         if let Some(data_dir) = dirs::data_dir() {
             let path = data_dir.join("icons");
             if path.exists() {
@@ -30,55 +76,16 @@ impl Tray for AlgoDeckTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        // Precyzyjna, wektorowo wyliczana ikona 32x32: błękitny piorun na ciemnym tle (ARGB32)
-        const SIZE: i32 = 32;
-        let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                // Zaokrąglony kafel
-                let dx = (x - 16).abs();
-                let dy = (y - 16).abs();
-                let in_card = dx <= 14 && dy <= 14;
-
-                // Geometria geometrycznego pioruna ⚡
-                // Górny trójkąt: (18, 5) -> (8, 17) -> (16, 17)
-                // Dolny trójkąt: (14, 15) -> (22, 15) -> (12, 27)
-                let is_bolt = (y >= 5 && y <= 16 && x >= (18 - (y - 5)) && x <= 22)
-                    || (y >= 15 && y <= 27 && x >= 10 && x <= (14 + (27 - y) * 8 / 12));
-
-                if in_card {
-                    if is_bolt {
-                        // Cyan #38bdf8
-                        data.push(255); // Alpha
-                        data.push(56);  // Red
-                        data.push(189); // Green
-                        data.push(248); // Blue
-                    } else {
-                        // Ciemne tło #0d1322
-                        data.push(255);
-                        data.push(13);
-                        data.push(19);
-                        data.push(34);
-                    }
-                } else {
-                    // Przezroczyste tło
-                    data.push(0);
-                    data.push(0);
-                    data.push(0);
-                    data.push(0);
-                }
-            }
-        }
-
-        vec![ksni::Icon {
-            width: SIZE,
-            height: SIZE,
-            data,
-        }]
+        get_algodeck_tray_icons()
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
+        // Kliknięcie lewym przyciskiem myszy na ikonę zasobnika systemowego:
+        // Otwiera / przywraca na wierzch okno Centrum Kontroli AlgoDeck!
+        open_control_panel();
+    }
+
+    fn secondary_activate(&mut self, _x: i32, _y: i32) {
         open_control_panel();
     }
 
@@ -91,7 +98,7 @@ impl Tray for AlgoDeckTray {
             }.into(),
             MenuItem::Separator,
             StandardItem {
-                label: "🖥 Centrum Kontroli".into(),
+                label: "🖥 Otwórz Centrum Kontroli".into(),
                 activate: Box::new(|_| {
                     open_control_panel();
                 }),
@@ -112,12 +119,25 @@ impl Tray for AlgoDeckTray {
 
 pub fn is_tray_running() -> bool {
     let my_pid = std::process::id();
-    if let Ok(output) = Command::new("pgrep").args(["-f", "algodeck-gui --tray"]).output() {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for line in text.lines() {
-            if let Ok(pid) = line.trim().parse::<u32>() {
+    let pid_file = std::env::temp_dir().join("algodeck_tray.pid");
+    if pid_file.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pid_file) {
+            if let Ok(pid) = content.trim().parse::<u32>() {
                 if pid != my_pid {
-                    return true;
+                    #[cfg(target_os = "linux")]
+                    {
+                        if Path::new(&format!("/proc/{}", pid)).exists() {
+                            if let Ok(cmdline) = std::fs::read_to_string(format!("/proc/{}/cmdline", pid)) {
+                                if cmdline.contains("algodeck") {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -125,17 +145,37 @@ pub fn is_tray_running() -> bool {
     false
 }
 
+pub fn acquire_tray_lock() -> bool {
+    if is_tray_running() {
+        return false;
+    }
+    let pid_file = std::env::temp_dir().join("algodeck_tray.pid");
+    let _ = std::fs::write(pid_file, format!("{}", std::process::id()));
+    true
+}
+
 pub fn open_control_panel() {
-    let _ = Command::new("algodeck").arg("gui").spawn();
+    let bin = dirs::home_dir()
+        .map(|h| h.join(".local/bin/algodeck"))
+        .unwrap_or_else(|| std::path::PathBuf::from("algodeck"));
+    let _ = Command::new(bin).arg("gui").spawn();
 }
 
 pub fn stop_algodeck() {
-    let _ = Command::new("algodeck").arg("stop").spawn();
+    let pid_file = std::env::temp_dir().join("algodeck_tray.pid");
+    let _ = std::fs::remove_file(pid_file);
+    let bin = dirs::home_dir()
+        .map(|h| h.join(".local/bin/algodeck"))
+        .unwrap_or_else(|| std::path::PathBuf::from("algodeck"));
+    let _ = Command::new(bin).arg("stop").spawn();
 }
 
 #[cfg(target_os = "linux")]
 pub fn spawn_tray() {
-    let _ = AlgoDeckTray.spawn();
+    if acquire_tray_lock() {
+        ensure_system_icon();
+        let _ = AlgoDeckTray.spawn();
+    }
 }
 
 #[cfg(not(target_os = "linux"))]

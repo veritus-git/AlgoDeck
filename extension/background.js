@@ -1,31 +1,80 @@
 // AlgoDeck ⚡ Koło MAP - Background Service Worker
-// Niezawodne wykrywanie nowych pobrań PDF i ZIP (Szkopuł, Koło MAP, OIJ, OI)
-// Reaguje WYŁĄCZNIE na nowo pobrane pliki w bieżącej sesji!
+// Niezawodne wykrywanie NOWO pobranych zadań PDF i ZIP (Szkopuł, Koło MAP, OIJ, OI)
+// - Ścisłe śledzenie wcześniej pobranych plików (nie dubluje powiadomień po restarcie)
+// - Zabezpieczenie przed otwieraniem wielu okienek popupa (dokładnie 1 instancja powiadomienia)
 
 const API_BASE = "http://127.0.0.1:8080";
-const SERVICE_WORKER_START_TIME = Date.now();
+const SESSION_START_TIME = Date.now();
 const handledDownloads = new Set();
+let seenFilesMap = {};
+let activeNotificationWindowId = null;
 
-// Wczytaj wcześniej obsłużone identyfikatory z pamięci trwałej
-chrome.storage.local.get(["seen_downloads"], (res) => {
-  if (Array.isArray(res.seen_downloads)) {
-    for (const id of res.seen_downloads) {
-      handledDownloads.add(id);
+// 1. Inicjalizacja: Wczytaj historię z chrome.storage i zindeksuj istniejące pliki
+async function initSession() {
+  try {
+    const res = await chrome.storage.local.get(["seen_files", "seen_downloads"]);
+    if (res.seen_files && typeof res.seen_files === "object") {
+      seenFilesMap = res.seen_files;
     }
+    if (Array.isArray(res.seen_downloads)) {
+      for (const id of res.seen_downloads) {
+        handledDownloads.add(id);
+      }
+    }
+
+    // Zindeksuj WSZYSTKIE istniejące już pobrania w historii przeglądarki,
+    // aby po restarcie komputera lub ponownym uruchomieniu przeglądarki
+    // pliki sprzed restartu NIE były traktowane jako nowe!
+    const existing = await chrome.downloads.search({});
+    let updated = false;
+    for (const item of existing) {
+      if (item.id) handledDownloads.add(item.id);
+      if (item.filename) {
+        const normKey = item.filename.toLowerCase();
+        if (!seenFilesMap[normKey]) {
+          seenFilesMap[normKey] = {
+            startTime: item.startTime || 0,
+            endTime: item.endTime || 0,
+            url: item.url || "",
+            initial: true
+          };
+          updated = true;
+        }
+      }
+    }
+    if (updated) {
+      // Zachowaj maksymalnie 300 ostatnich wpisów
+      const entries = Object.entries(seenFilesMap).slice(-300);
+      seenFilesMap = Object.fromEntries(entries);
+      await chrome.storage.local.set({ seen_files: seenFilesMap });
+    }
+  } catch (err) {
+    console.warn("[AlgoDeck] Błąd inicjalizacji sesji pobrań:", err);
   }
-});
+}
+initSession();
 
-function markHandled(id) {
-  handledDownloads.add(id);
-  chrome.storage.local.get(["seen_downloads"], (res) => {
-    const list = Array.isArray(res.seen_downloads) ? res.seen_downloads : [];
-    if (!list.includes(id)) {
-      list.push(id);
-      // Zachowaj maksymalnie 100 ostatnich id
-      const trimmed = list.slice(-100);
-      chrome.storage.local.set({ seen_downloads: trimmed });
-    }
-  });
+async function markHandled(downloadId, filename, url) {
+  handledDownloads.add(downloadId);
+  if (filename) {
+    const normKey = filename.toLowerCase();
+    seenFilesMap[normKey] = {
+      downloadId: downloadId,
+      time: Date.now(),
+      url: url || "",
+      handled: true
+    };
+  }
+
+  try {
+    const dList = Array.from(handledDownloads).slice(-200);
+    const entries = Object.entries(seenFilesMap).slice(-300);
+    seenFilesMap = Object.fromEntries(entries);
+    await chrome.storage.local.set({
+      seen_downloads: dList,
+      seen_files: seenFilesMap
+    });
+  } catch (e) {}
 }
 
 // Pomocnicza funkcja sprawdzająca czy plik to zadanie olimpijskie (PDF lub ZIP z testami)
@@ -46,6 +95,25 @@ function isOlympicTaskFile(item) {
   return isPdf || isZip;
 }
 
+// Sprawdź czy zadanie o danym kodzie nie istnieje już w workspace AlgoDeck
+async function isProblemAlreadyInWorkspace(filename) {
+  try {
+    const base = filename.replace(/^.*[\\\/]/, '').replace(/\.(pdf|zip)$/i, '').toLowerCase();
+    const res = await fetch(`${API_BASE}/api/problems`, { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      const list = Array.isArray(data.problems) ? data.problems : (Array.isArray(data) ? data : []);
+      for (const p of list) {
+        const pid = (p.problem_id || "").toLowerCase();
+        if (pid && (pid === base || base.startsWith(pid))) {
+          return true;
+        }
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+
 // Główna funkcja przetwarzania zakończonego pobierania
 async function processDownload(downloadId) {
   if (handledDownloads.has(downloadId)) return;
@@ -54,14 +122,23 @@ async function processDownload(downloadId) {
     if (!items || items.length === 0) return;
     const item = items[0];
 
-    // Ignorujemy pliki pobrane przed startem tej sesji rozszerzenia (np. po resecie komputera)
-    const startTime = item.startTime ? new Date(item.startTime).getTime() : 0;
-    if (startTime > 0 && startTime < (SERVICE_WORKER_START_TIME - 2000)) {
-      markHandled(downloadId);
+    let filename = item.filename || "";
+    const normKey = filename.toLowerCase();
+
+    // 1. Sprawdź czy plik był już wcześniej widziany
+    if (seenFilesMap[normKey]) {
+      markHandled(downloadId, filename, item.url);
       return;
     }
 
-    // Jeśli jeszcze trwa pobieranie, ponów za chwilę (retry z backoffem)
+    // 2. Ignorujemy pliki pobrane przed startem tej sesji przeglądarki
+    const startTime = item.startTime ? new Date(item.startTime).getTime() : 0;
+    if (startTime > 0 && startTime < (SESSION_START_TIME - 3000)) {
+      markHandled(downloadId, filename, item.url);
+      return;
+    }
+
+    // 3. Jeśli jeszcze trwa pobieranie, ponów za chwilę
     if (item.state !== "complete") {
       setTimeout(() => {
         if (!handledDownloads.has(downloadId)) {
@@ -71,7 +148,6 @@ async function processDownload(downloadId) {
       return;
     }
 
-    let filename = item.filename || "";
     if (filename.endsWith(".crdownload") || filename.endsWith(".tmp")) {
       setTimeout(() => processDownload(downloadId), 400);
       return;
@@ -81,7 +157,7 @@ async function processDownload(downloadId) {
       return;
     }
 
-    // Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w ustawieniach
+    // 4. Sprawdź czy automatyczne wykrywanie nie zostało wyłączone
     let autoDetect = true;
     try {
       const stored = await chrome.storage.local.get(["auto_detect_downloads"]);
@@ -91,16 +167,24 @@ async function processDownload(downloadId) {
     } catch (e) {}
 
     if (!autoDetect) {
-      console.log("[AlgoDeck] Automatyczne wykrywanie pobrań wyłączone w ustawieniach.");
+      console.log("[AlgoDeck] Automatyczne wykrywanie pobrań wyłączone.");
       return;
     }
 
-    if (handledDownloads.has(downloadId)) return;
-    markHandled(downloadId);
+    // 5. Sprawdź czy zadanie już nie istnieje w workspace
+    const alreadyExists = await isProblemAlreadyInWorkspace(filename);
+    if (alreadyExists) {
+      console.log("[AlgoDeck] Zadanie z pliku", filename, "już istnieje w workspace. Pomijam modal.");
+      markHandled(downloadId, filename, item.url);
+      return;
+    }
+
+    if (handledDownloads.has(downloadId) || seenFilesMap[normKey]) return;
+    await markHandled(downloadId, filename, item.url);
 
     console.log("[AlgoDeck] Wykryto nowo pobrany plik zadania:", filename);
 
-    // 1. Zapisz w pamięci podręcznej rozszerzenia
+    // Zapisz w pamięci podręcznej rozszerzenia
     try {
       await chrome.storage.local.set({
         auto_pdf: filename,
@@ -109,7 +193,7 @@ async function processDownload(downloadId) {
       });
     } catch (e) {}
 
-    // 2. Wyślij do stagingu na backendzie (jeśli serwer działa)
+    // Wyślij do stagingu na backendzie
     try {
       await fetch(`${API_BASE}/api/auto-import-pdf`, {
         method: "POST",
@@ -120,7 +204,7 @@ async function processDownload(downloadId) {
       console.warn("[AlgoDeck] Serwer nie odpowiada jeszcze na staging:", err);
     }
 
-    // 3. Pokaż powiadomienie systemowe Chrome (Native OS Toast)
+    // Powiadomienie systemowe Chrome (Native OS Toast)
     const baseName = filename.replace(/^.*[\\\/]/, '');
     try {
       if (chrome.notifications && chrome.notifications.create) {
@@ -135,25 +219,51 @@ async function processDownload(downloadId) {
       }
     } catch (e) {}
 
-    // 4. Otwórz dedykowane okienko powiadomienia
-    openDedicatedNotificationWindow(filename);
+    // Otwórz DOKŁADNIE JEDNO dedykowane okienko powiadomienia (singleton)
+    await openDedicatedNotificationWindow(filename);
   });
 }
 
-// Otwieranie dedykowanego okienka powiadomienia 1-kliknięcie
-function openDedicatedNotificationWindow(filename) {
+// Otwieranie dedykowanego okienka powiadomienia 1-kliknięcie (Ściśle JEDNA instancja okna)
+async function openDedicatedNotificationWindow(filename) {
   const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}`);
-  
-  chrome.windows.create({
-    url: targetUrl,
-    type: "popup",
-    width: 380,
-    height: 165,
-    focused: true
-  }).catch((err) => {
+
+  if (activeNotificationWindowId !== null) {
+    try {
+      const existingWin = await chrome.windows.get(activeNotificationWindowId);
+      if (existingWin) {
+        const tabs = await chrome.tabs.query({ windowId: activeNotificationWindowId });
+        if (tabs && tabs.length > 0) {
+          await chrome.tabs.update(tabs[0].id, { url: targetUrl });
+          await chrome.windows.update(activeNotificationWindowId, { focused: true });
+          return;
+        }
+      }
+    } catch (_) {
+      activeNotificationWindowId = null;
+    }
+  }
+
+  try {
+    const newWin = await chrome.windows.create({
+      url: targetUrl,
+      type: "popup",
+      width: 380,
+      height: 165,
+      focused: true
+    });
+    activeNotificationWindowId = newWin.id;
+  } catch (err) {
     console.warn("[AlgoDeck] Błąd otwierania okna popupa:", err);
-  });
+  }
 }
+
+// Czyszczenie referencji okna po jego zamknięciu
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === activeNotificationWindowId) {
+    activeNotificationWindowId = null;
+  }
+});
 
 // Synchronizacja ustawień z backendem
 async function syncSettingsFromBackend() {
@@ -170,7 +280,7 @@ async function syncSettingsFromBackend() {
 syncSettingsFromBackend();
 setInterval(syncSettingsFromBackend, 15000);
 
-// Nasłuchiwanie zmian w pobieraniach
+// Nasłuchiwanie zdarzeń pobierania
 chrome.downloads.onChanged.addListener((delta) => {
   if (delta.state && delta.state.current === "complete") {
     processDownload(delta.id);

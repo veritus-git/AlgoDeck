@@ -6,8 +6,12 @@ import os
 import re
 import shutil
 from pathlib import Path
+import tempfile
 import time
+import sys
 from typing import Dict, Any, List, Optional
+
+SYSTEM_TMP = Path(tempfile.gettempdir())
 
 from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,20 +89,36 @@ EXTENSION_BUILD_ID = int(time.time())
 def get_extension_reload_id():
     return {"build_id": EXTENSION_BUILD_ID}
 
+async def streamdeck_watchdog_loop():
+    """Tło: czuwa, by na Stream Decku ZAWSZE wyświetlały się wyłącznie strony AlgoDeck."""
+    while True:
+        await asyncio.sleep(2.0)
+        try:
+            streamcontroller_bridge.enforce_algodeck_page()
+        except Exception:
+            pass
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("Uruchamianie AlgoDeck v2.0.0 (Koło MAP)...")
     loop = asyncio.get_running_loop()
     hardware_driver.start(loop)
-    try:
-        streamcontroller_bridge.ensure_vector_icons()
-        streamcontroller_bridge.sync_all_problems(default_to_idle=True)
-    except Exception as e:
-        logger.warning(f"Ostrzeżenie startowe Stream Deck: {e}")
+    if sys.platform == "linux":
+        try:
+            streamcontroller_bridge.ensure_vector_icons()
+            streamcontroller_bridge.sync_all_problems(default_to_idle=True)
+            asyncio.create_task(streamdeck_watchdog_loop())
+        except Exception as e:
+            logger.warning(f"Ostrzeżenie startowe Stream Deck: {e}")
 
 @app.on_event("shutdown")
 def shutdown_event():
     hardware_driver.close()
+    if sys.platform == "linux":
+        try:
+            streamcontroller_bridge.cleanup_and_exit()
+        except Exception as e:
+            logger.warning(f"Błąd podczas shutdown_event cleanup: {e}")
 
 # ----------------- Ustawienia Aplikacji -----------------
 
@@ -447,7 +467,7 @@ async def preview_import(
     pdf_data: Dict[str, Any] = {}
     zip_data: Dict[str, Any] = {}
 
-    temp_dir = Path("/tmp/algodeck_previews")
+    temp_dir = SYSTEM_TMP / "algodeck_previews"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     if pdf and pdf.filename:
@@ -498,7 +518,7 @@ async def import_task(
     Importuje zadanie na podstawie pliku PDF, archiwum ZIP lub lokalnego folderu z testami.
     W 100% deterministyczny (bez AI), błyskawicznie tworzy katalog, testy, konfiguruje Stream Deck i odpala VS Code.
     """
-    temp_dir = Path("/tmp/algodeck_uploads")
+    temp_dir = SYSTEM_TMP / "algodeck_uploads"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     saved_pdf_path: Optional[Path] = None
@@ -946,7 +966,9 @@ def switch_task(direction: str = "next"):
 @app.post("/api/streamdeck/menu")
 def open_streamdeck_menu():
     active_pid = ""
-    active_file = Path("/tmp/algodeck_active_task.txt")
+    active_file = SYSTEM_TMP / "algodeck_active_task.txt"
+    if not active_file.exists() and Path("/tmp/algodeck_active_task.txt").exists():
+        active_file = Path("/tmp/algodeck_active_task.txt")
     if active_file.exists():
         try:
             active_pid = active_file.read_text(encoding="utf-8").strip().lower()

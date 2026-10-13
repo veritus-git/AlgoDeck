@@ -59,9 +59,10 @@ fn main() -> eframe::Result<()> {
 
     // 1. Tryb dedykowanego daemona zasobnika systemowego (bez okna GUI)
     if args.iter().any(|a| a == "--tray") {
-        if !tray::is_tray_running() {
-            tray::spawn_tray();
+        if tray::is_tray_running() {
+            return Ok(());
         }
+        tray::spawn_tray();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3600));
         }
@@ -69,9 +70,23 @@ fn main() -> eframe::Result<()> {
 
     let is_launcher_launch = args.iter().any(|a| a == "--launcher-status" || a == "--app-launch");
 
-    // 2. Włącz ikonę zasobnika systemowego w tle TYLKO jeśli daemon nie jest jeszcze aktywny
+    // Jeśli okno GUI jest już aktywne, przenieś na wierzch zamiast otwierać drugą instancję
+    #[cfg(target_os = "linux")]
+    if !is_launcher_launch {
+        if let Ok(out) = std::process::Command::new("wmctrl").arg("-lx").output() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                if (line.contains("algodeck") || line.contains("AlgoDeck")) && line.contains("Centrum") {
+                    let _ = std::process::Command::new("wmctrl").args(["-a", "Centrum Kontroli"]).spawn();
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    // Upewnij się, że ikona tray działa w tle jeśli nie jest jeszcze aktywna
     if !tray::is_tray_running() {
-        tray::spawn_tray();
+        let _ = std::process::Command::new("algodeck").arg("tray").spawn();
     }
 
     let mut initial_tab = ActiveTab::NewTask;
@@ -109,11 +124,26 @@ fn main() -> eframe::Result<()> {
     app.current_tab = initial_tab;
     app.is_launcher_status = is_launcher_launch;
 
-    // Nowoczesne, węższe i wyższe proporcje: 520x680 dla pełnego panelu lub 480x240 dla launchera
+    // Wymiary okna: 340 szerokości x 580 wysokości (format boczny bez zbędnej pustej przestrzeni)
     let (win_size, min_size) = if is_launcher_launch {
-        (vec2(480.0, 240.0), vec2(420.0, 220.0))
+        (vec2(340.0, 580.0), vec2(300.0, 480.0))
     } else {
-        (vec2(520.0, 680.0), vec2(460.0, 580.0))
+        (vec2(340.0, 580.0), vec2(300.0, 480.0))
+    };
+
+    let icon_data = {
+        let img_bytes = include_bytes!("../assets/icon128.png");
+        if let Ok(img) = image::load_from_memory_with_format(img_bytes, image::ImageFormat::Png) {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            Some(egui::IconData {
+                rgba: rgba.into_raw(),
+                width: w,
+                height: h,
+            })
+        } else {
+            None
+        }
     };
 
     let mut viewport = ViewportBuilder::default()
@@ -123,6 +153,10 @@ fn main() -> eframe::Result<()> {
         .with_resizable(true)
         .with_decorations(false)
         .with_transparent(false);
+
+    if let Some(icon) = icon_data {
+        viewport = viewport.with_icon(icon);
+    }
 
     if let Some(pos) = get_primary_screen_pos(win_size.x, win_size.y) {
         viewport = viewport.with_position(pos);

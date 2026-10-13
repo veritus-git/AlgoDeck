@@ -1,7 +1,10 @@
 import json
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -170,38 +173,18 @@ class StreamControllerBridge:
         Nigdy nie pomija DBus, aby zapobiec rozsynchronizowaniu pamięci procesu z plikami na dysku.
         """
         prob_id = page_name.upper()
+        if "settings" not in page_data:
+            page_data["settings"] = {}
+        page_data["settings"]["auto-change"] = {
+            "enable": False,
+            "stay-on-page": True
+        }
         json_str = json.dumps(page_data, indent=4)
         target_page_path = STREAMCONTROLLER_PAGES / f"{prob_id}.json"
 
         try:
-            # 1. Zawsze usuń starą stronę z pamięci StreamControllera
-            try:
-                subprocess.run([
-                    "gdbus", "call", "--session",
-                    "--dest", "com.core447.StreamController",
-                    "--object-path", "/com/core447/StreamController",
-                    "--method", "com.core447.StreamController.RemovePage",
-                    prob_id
-                ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
-
-            # 2. Zapisz zaktualizowany plik na dysku
             target_page_path.write_text(json_str, encoding="utf-8")
             logger.info(f"Pomyślnie zapisano stronę {prob_id} dla StreamControllera.")
-
-            # 3. Załaduj definicję do pamięci StreamControllera przez AddPage
-            try:
-                gvariant_str = json.dumps(json_str)
-                subprocess.run([
-                    "gdbus", "call", "--session",
-                    "--dest", "com.core447.StreamController",
-                    "--object-path", "/com/core447/StreamController",
-                    "--method", "com.core447.StreamController.AddPage",
-                    prob_id, gvariant_str
-                ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
         except Exception as e:
             logger.error(f"Nie udało się zapisać pliku {target_page_path}: {e}")
 
@@ -405,8 +388,8 @@ class StreamControllerBridge:
         }
 
         self.sync_page_to_streamcontroller(prob_id, page_data)
-        self.generate_menu_page(active_id=problem_id.lower())
         if switch_now:
+            self.generate_menu_page(active_id=problem_id.lower())
             self.switch_to_page(prob_id)
         return True
 
@@ -450,6 +433,7 @@ class StreamControllerBridge:
     def sync_all_problems(self, default_to_idle: bool = True):
         """Automatycznie generuje i synchronizuje czyste profile dla wszystkich zadań w workspace."""
         self.ensure_vector_icons()
+        self.stash_user_pages()
         if not self.workspace_dir.exists():
             self.generate_idle_page(switch_now=True)
             return
@@ -678,127 +662,266 @@ class StreamControllerBridge:
             except Exception:
                 pass
 
-    def cleanup_and_exit(self):
+    def stash_user_pages(self):
         """
-        Całkowite wyłączenie AlgoDeck:
-        1. Odczytuje domyślną stronę użytkownika (np. 'Main') i natychmiast przełącza StreamController z powrotem na nią.
-        2. Pobiera listę stron ze StreamControllera przez DBus oraz katalogu workspace.
-        3. Usuwa wszystkie profile zadań i menu ze StreamControllera przez DBus RemovePage oraz z dysku.
-        4. Czyści plik /tmp/algodeck_active_task.txt.
+        Zabezpiecza strony użytkownika:
+        1. Tworzy kopię zapasową profili użytkownika w permanent_user_pages_backup.
+        2. Zapamiętuje poprzednią domyślną stronę w prev_default_pages.json.
+        3. Ustawia default-page w StreamControllerze na ALGO_IDLE.
+        UWAGA: NIGDY nie usuwamy plików użytkownika ani nie wyrejestrowujemy ich w locie,
+        ponieważ powoduje to miganie, gubienie stron i zapętlanie przełączania w StreamControllerze!
         """
-        default_page = "Main"
+        if os.name != "posix" or not STREAMCONTROLLER_DATA.exists():
+            return
+
+        perm_backup = Path(os.path.expanduser("~/.config/algodeck/permanent_user_pages_backup"))
+        perm_backup.mkdir(parents=True, exist_ok=True)
+
+        ws_problems = {p.upper() for p in self.get_ordered_problem_ids()}
+
+        # 1. Zapisz bieżącą stronę użytkownika
+        prev_file = Path(os.path.expanduser("~/.config/algodeck/prev_page.txt"))
+        current_page = self.get_active_page_name()
+        if current_page and not current_page.upper().startswith("ALGO_") and current_page.upper() not in ws_problems:
+            prev_file.parent.mkdir(parents=True, exist_ok=True)
+            prev_file.write_text(current_page, encoding="utf-8")
+
+        # 2. Zabezpiecz plik pages.json
         pages_settings = STREAMCONTROLLER_DATA / "settings/pages.json"
-        if pages_settings.exists():
+        backup_file = Path(os.path.expanduser("~/.config/algodeck/prev_default_pages.json"))
+        if pages_settings.exists() and not backup_file.exists():
             try:
                 pdata = json.loads(pages_settings.read_text(encoding="utf-8"))
                 defs = pdata.get("default-pages", {})
-                if SERIAL in defs:
-                    default_page = Path(defs[SERIAL]).stem
-                elif defs:
-                    default_page = Path(next(iter(defs.values()))).stem
+                cur_def = defs.get(SERIAL, "")
+                if cur_def and not any(algo_tag in cur_def.upper() for algo_tag in ["ALGO_", *ws_problems]):
+                    backup_file.parent.mkdir(parents=True, exist_ok=True)
+                    backup_file.write_text(json.dumps(pdata, indent=4), encoding="utf-8")
             except Exception:
                 pass
 
-        # 1. Przełącz na poprzednią stronę użytkownika (lub domyślną)
-        prev_file = Path(os.path.expanduser("~/.config/algodeck/prev_page.txt"))
-        target_restore = default_page
-        if prev_file.exists():
-            try:
-                saved = prev_file.read_text().strip()
-                if saved and not saved.startswith("ALGO_"):
-                    target_restore = saved
-            except Exception:
-                pass
+        # 3. Kopiuj strony użytkownika do bezpiecznego backupu permanentnego (bez usuwania z profilu!)
+        if STREAMCONTROLLER_PAGES.exists():
+            for pfile in STREAMCONTROLLER_PAGES.glob("*.json"):
+                stem_u = pfile.stem.upper()
+                if stem_u.startswith("ALGO_") or stem_u in ws_problems:
+                    continue
+                try:
+                    dest = perm_backup / pfile.name
+                    if not dest.exists():
+                        shutil.copy2(pfile, dest)
+                except Exception:
+                    pass
+
+        # Ustaw domyślną stronę na ALGO_IDLE (ale tylko jeśli jeszcze nie ustawiona)
+        self.lock_default_page_to_algodeck("ALGO_IDLE")
+
+    def lock_default_page_to_algodeck(self, target_page_name: str = "ALGO_IDLE"):
+        """
+        Zabezpiecza konfigurację default-pages StreamControllera:
+        Ustawia default-page w StreamControllerze na aktywną stronę AlgoDeck (np. ALGO_IDLE.json),
+        ale TYLKO jeśli wartość jest inna, aby NIE wywoływać zbędnych przeładowań przez file watchera!
+        """
+        if os.name != "posix" or not STREAMCONTROLLER_DATA.exists():
+            return
+
+        pages_settings = STREAMCONTROLLER_DATA / "settings/pages.json"
+        target_path = str((STREAMCONTROLLER_PAGES / f"{target_page_name.upper()}.json").resolve())
 
         try:
-            subprocess.run([
-                "gdbus", "call", "--session",
-                "--dest", "com.core447.StreamController",
-                "--object-path", "/com/core447/StreamController",
-                "--method", "com.core447.StreamController.ChangePage",
-                SERIAL, target_restore
-            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+            if pages_settings.exists():
+                pdata = json.loads(pages_settings.read_text(encoding="utf-8"))
+                defs = pdata.get("default-pages", {})
+                if defs.get(SERIAL) == target_path:
+                    return  # Już ustawione - nie dotykaj pliku, by nie restartować kontrolera!
+                defs[SERIAL] = target_path
+                pdata["default-pages"] = defs
+                pages_settings.write_text(json.dumps(pdata, indent=4), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Błąd zabezpieczania default-pages: {e}")
 
-        # 2. Zbierz WYŁĄCZNIE strony AlgoDeck do usunięcia (nigdy stron użytkownika!)
-        ws_problems = set()
-        ws_dir = settings.workspace_dir
-        if ws_dir.exists():
-            for p in ws_dir.iterdir():
-                if p.is_dir() and not p.name.startswith("."):
-                    ws_problems.add(p.name.upper())
+    def enforce_algodeck_page(self):
+        """
+        Czuwa, by na Stream Decku wyświetlała się strona AlgoDeck.
+        Jeśli użytkownik lub błąd przełączył na inną stronę, przywraca widok AlgoDeck.
+        """
+        if os.name != "posix":
+            return
 
-        pages_to_remove = ["ALGO_IDLE", "ALGO_MENU"]
-        # Dodaj problem pages
-        pages_to_remove.extend(list(ws_problems))
+        active_page = self.get_active_page_name()
+        if not active_page:
+            return
 
-        # Sprawdź strony ze StreamControllera przez właściwość DBus Pages
-        try:
-            import re
-            res = subprocess.run([
-                "gdbus", "call", "--session",
-                "--dest", "com.core447.StreamController",
-                "--object-path", "/com/core447/StreamController",
-                "--method", "org.freedesktop.DBus.Properties.Get",
-                "com.core447.StreamController", "Pages"
-            ], timeout=2, capture_output=True, text=True)
-            if res.returncode == 0:
-                found_pages = re.findall(r"'([^']+)'", res.stdout)
-                for p in found_pages:
-                    # Tylko i wyłącznie strony AlgoDeck!
-                    if p.startswith("ALGO_") or p in ws_problems:
-                        pages_to_remove.append(p)
-        except Exception:
-            pass
+        # Zbierz dozwolone strony AlgoDeck
+        allowed = {"ALGO_IDLE", "ALGO_MENU"}
+        for i in range(2, 20):
+            allowed.add(f"ALGO_MENU_{i}")
+        for pid in self.get_ordered_problem_ids():
+            allowed.add(pid.upper())
 
+        if active_page.upper() not in allowed:
+            target = "ALGO_IDLE"
+            active_file = Path(tempfile.gettempdir()) / "algodeck_active_task.txt"
+            if not active_file.exists():
+                active_file = Path("/tmp/algodeck_active_task.txt")
+            if active_file.exists():
+                try:
+                    saved = active_file.read_text(encoding="utf-8").strip().upper()
+                    if saved in allowed:
+                        target = saved
+                except Exception:
+                    pass
+            logger.debug(f"[AlgoDeck Enforcer] Wykryto stronę '{active_page}'. Przywracanie AlgoDeck '{target}'...")
+            self.switch_to_page(target)
+
+    def cleanup_and_exit(self):
+        """
+        Całkowite wyłączenie AlgoDeck i przywrócenie Stream Decka:
+        1. Usuwa wszystkie strony AlgoDeck (ALGO_IDLE, ALGO_MENU*, problem IDs) z dysku oraz z pamięci StreamControllera przez DBus RemovePage.
+        2. Przywraca oryginalny plik settings/pages.json (default-pages -> Main.json).
+        3. Przełącza StreamController na stronę domyślną użytkownika (np. Main).
+        4. Czyści pliki tymczasowe.
+        """
+        if os.name != "posix" or not STREAMCONTROLLER_DATA.exists():
+            return
+
+        logger.info("Rozpoczynanie pełnego czyszczenia AlgoDeck ze Stream Decka...")
+        ws_problems = {p.upper() for p in self.get_ordered_problem_ids()}
+
+        # 1. Zbierz i usuń WSZYSTKIE strony AlgoDeck
+        algo_pages_to_remove = set()
+        algo_pages_to_remove.add("ALGO_IDLE")
+        algo_pages_to_remove.add("ALGO_MENU")
+        for i in range(2, 20):
+            algo_pages_to_remove.add(f"ALGO_MENU_{i}")
+        algo_pages_to_remove.update(ws_problems)
+
+        # Znajdź też wszystkie pliki AlgoDeck w STREAMCONTROLLER_PAGES
         if STREAMCONTROLLER_PAGES.exists():
             for pf in STREAMCONTROLLER_PAGES.glob("*.json"):
-                stem = pf.stem
-                if stem.startswith("ALGO_") or stem in ws_problems:
-                    pages_to_remove.append(stem)
+                stem_u = pf.stem.upper()
+                if stem_u.startswith("ALGO_") or stem_u in ws_problems:
+                    algo_pages_to_remove.add(pf.stem)
 
-        # Wyklucz prywatne profile użytkownika
-        protected_pages = {"MAIN", "DEFAULT", "DEV & SECRETS", "PULPIT 1 - DEV", "PULPIT 2 - PERSONAL"}
-        pages_to_remove = [p for p in set(pages_to_remove) if p.upper() not in protected_pages]
-
-        # 3. Usuń każdą stronę AlgoDeck przez DBus i usuń plik JSON
-        for p in pages_to_remove:
+        # Usuń strony AlgoDeck z pamięci StreamControllera przez DBus oraz skasuj pliki
+        for page_name in algo_pages_to_remove:
             try:
                 subprocess.run([
                     "gdbus", "call", "--session",
                     "--dest", "com.core447.StreamController",
                     "--object-path", "/com/core447/StreamController",
                     "--method", "com.core447.StreamController.RemovePage",
-                    p
+                    page_name
                 ], timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
-
-            json_file = STREAMCONTROLLER_PAGES / f"{p}.json"
-            if json_file.exists():
+            pfile = STREAMCONTROLLER_PAGES / f"{page_name}.json"
+            if pfile.exists():
                 try:
-                    json_file.unlink()
+                    pfile.unlink()
                 except Exception:
                     pass
 
+        # 2. Upewnij się, że strony użytkownika istnieją (jeśli cokolwiek brakowało, przywróć z perm backupu)
+        perm_backup = Path(os.path.expanduser("~/.config/algodeck/permanent_user_pages_backup"))
+        if perm_backup.exists():
+            for sf in perm_backup.glob("*.json"):
+                stem_u = sf.stem.upper()
+                if stem_u.startswith("ALGO_") or stem_u in ws_problems:
+                    continue
+                dest = STREAMCONTROLLER_PAGES / sf.name
+                if not dest.exists():
+                    try:
+                        shutil.copy2(sf, dest)
+                        content_str = sf.read_text(encoding="utf-8")
+                        gvariant_str = json.dumps(content_str)
+                        subprocess.run([
+                            "gdbus", "call", "--session",
+                            "--dest", "com.core447.StreamController",
+                            "--object-path", "/com/core447/StreamController",
+                            "--method", "com.core447.StreamController.AddPage",
+                            sf.stem, gvariant_str
+                        ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+
+        # 3. Przywróć plik settings/pages.json
+        default_target = "Main"
+        pages_settings = STREAMCONTROLLER_DATA / "settings/pages.json"
+        backup_file = Path(os.path.expanduser("~/.config/algodeck/prev_default_pages.json"))
+        if backup_file.exists():
+            try:
+                bdata = json.loads(backup_file.read_text(encoding="utf-8"))
+                defs = bdata.get("default-pages", {})
+                if SERIAL in defs:
+                    default_target = Path(defs[SERIAL]).stem
+                shutil.copy2(backup_file, pages_settings)
+                backup_file.unlink()
+            except Exception as e:
+                logger.warning(f"Błąd przywracania pages.json: {e}")
+        elif pages_settings.exists():
+            try:
+                pdata = json.loads(pages_settings.read_text(encoding="utf-8"))
+                defs = pdata.get("default-pages", {})
+                main_path = str((STREAMCONTROLLER_PAGES / "Main.json").resolve())
+                defs[SERIAL] = main_path
+                pdata["default-pages"] = defs
+                pages_settings.write_text(json.dumps(pdata, indent=4), encoding="utf-8")
+            except Exception:
+                pass
+
+        # 4. Sprawdź czy użytkownik miał zapamiętaną stronę przed AlgoDeck
+        prev_page_file = Path(os.path.expanduser("~/.config/algodeck/prev_page.txt"))
+        if prev_page_file.exists():
+            try:
+                saved = prev_page_file.read_text(encoding="utf-8").strip()
+                if saved and not saved.upper().startswith("ALGO_") and saved.upper() not in ws_problems:
+                    default_target = saved
+                prev_page_file.unlink()
+            except Exception:
+                pass
+
+        # 5. Przełącz fizyczny Stream Deck na stronę użytkownika (np. Main)
         try:
-            if Path("/tmp/algodeck_active_task.txt").exists():
-                Path("/tmp/algodeck_active_task.txt").unlink()
+            subprocess.run([
+                "gdbus", "call", "--session",
+                "--dest", "com.core447.StreamController",
+                "--object-path", "/com/core447/StreamController",
+                "--method", "com.core447.StreamController.ChangePage",
+                SERIAL, default_target
+            ], timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
-        logger.info(f"Usunięto profile AlgoDeck ({pages_to_remove}) ze StreamControllera i przywrócono stronę {default_page}.")
+        # 6. Wyczyść pliki tymczasowe
+        for tf in [Path("/tmp/algodeck_active_task.txt"), Path(tempfile.gettempdir()) / "algodeck_active_task.txt"]:
+            if tf.exists():
+                try:
+                    tf.unlink()
+                except Exception:
+                    pass
+
+        logger.info(f"Pomyślnie wyczyszczono AlgoDeck i przywrócono stronę '{default_target}'.")
 
     def switch_to_page(self, page_name: str) -> bool:
         """Wysyła sygnał DBus do StreamControllera, by natychmiast wyświetlić stronę na fizycznym Stream Decku."""
+        if os.name != "posix":
+            return True
+
         self.ensure_streamcontroller_running()
         prob_id = page_name.upper()
+
+        # Jeśli już jesteśmy na tej stronie, nie wysyłaj zbędnych wywołań
+        if self.get_active_page_name().upper() == prob_id:
+            return True
+
         if prob_id != "ALGO_IDLE" and not prob_id.startswith("ALGO_MENU"):
-            try:
-                Path("/tmp/algodeck_active_task.txt").write_text(prob_id, encoding="utf-8")
-            except Exception:
-                pass
+            for active_p in [Path(tempfile.gettempdir()) / "algodeck_active_task.txt", Path("/tmp/algodeck_active_task.txt")]:
+                try:
+                    active_p.write_text(prob_id, encoding="utf-8")
+                except Exception:
+                    pass
+
         try:
             res = subprocess.run([
                 "gdbus", "call", "--session",
