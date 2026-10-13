@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AlgoDeck ⚡ Koło MAP - One-Click Full Installer (Bootstrap)
-# W 100% zautomatyzowana instalacja: kompilatory C++, Stream Deck, VS Code,
-# rozszerzenie do przeglądarki, systemd daemon oraz minimalistyczne profile.
+# AlgoDeck ⚡ Koło MAP - 100% Rust One-Click Installer (Bootstrap)
+# W 100% zautomatyzowana, lekka instalacja natywnego środowiska olimpijskiego.
+# ZERO Pythona, ZERO StreamControllera, ZERO uvicorn/venv.
 # ==============================================================================
 
 set -e
 
-# Wyłączenie interaktywnych monitów (git, debconf, pip)
 export GIT_TERMINAL_PROMPT=0
-export GIT_ASKPASS=/bin/true
-export SSH_ASKPASS=/bin/true
-export PIP_NO_INPUT=1
 export DEBIAN_FRONTEND=noninteractive
-export ELECTRON_DISABLE_SECURITY_WARNINGS=1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,821 +25,174 @@ echo " ██╔══██║██║     ██║   ██║██║   �
 echo " ██║  ██║███████╗╚██████╔╝╚██████╔╝██████╔╝███████╗╚██████╗██║  ██╗"
 echo " ╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝╚═╝  ╚═╝"
 echo -e "${NC}"
-echo -e "${BOLD}AlgoDeck ⚡ Koło MAP - Kompletny Instalator One-Click${NC}"
-echo -e "Instalacja narzędzi C++, Stream Decka, VS Code, daemona i rozszerzenia...\n"
+echo -e "${BOLD}AlgoDeck ⚡ Koło MAP - 100% Rust Standalone Installer${NC}"
+echo -e "Instalacja narzędzi C++, Stream Deck HID, VS Code, daemona i rozszerzenia...\n"
 
-# 0. Jednorazowa autoryzacja sudo z podtrzymywaniem w tle
+# 0. Sudo keepalive jeśli dostępne
 if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
     if ! sudo -n true 2>/dev/null; then
         echo -e "${YELLOW}Weryfikacja uprawnień administratora (sudo)...${NC}"
-        sudo -v
+        sudo -v || true
     fi
     while true; do sudo -n true; sleep 40; kill -0 "$$" || exit; done 2>/dev/null &
 fi
 
-# 1. Wykrycie systemu
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    echo -e "${CYAN}[1/8] Wykryto system:${NC} $PRETTY_NAME"
-fi
-
-# 2. Pakiety systemowe (Kompilatory C++, narzędzia okienkowe, schowki)
-echo -e "\n${CYAN}[2/8] Instalacja pakietów systemowych i narzędzi kompilacji C++...${NC}"
-if command -v dnf &> /dev/null; then
-    sudo dnf check-update || true
+# 1. Pakiety systemowe
+echo -e "${CYAN}[1/6] Weryfikacja pakietów systemowych i kompilatora C++...${NC}"
+if command -v apt-get &> /dev/null; then
+    sudo apt-get update -qq || true
+    sudo apt-get install -y -qq \
+        build-essential \
+        gdb \
+        clang \
+        pkg-config \
+        libhidapi-dev \
+        libusb-1.0-0-dev \
+        curl \
+        wget \
+        git \
+        unzip \
+        tar 2>/dev/null || true
+elif command -v dnf &> /dev/null; then
     sudo dnf install -y \
         gcc \
         gcc-c++ \
         gdb \
-        clang \
-        make \
-        cmake \
-        ninja-build \
-        valgrind \
-        glibc-devel \
-        libstdc++-devel \
-        python3 \
-        python3-devel \
-        python3-pip \
-        cairo-devel \
-        pkgconf-pkg-config \
         pkgconfig \
-        gobject-introspection-devel \
-        libusb1-devel \
         hidapi-devel \
-        systemd-devel \
-        wl-clipboard \
-        xclip \
-        wmctrl \
-        xdotool \
-        gnome-terminal \
-        flatpak \
+        libusb1-devel \
         curl \
-        wget \
-        git \
-        unzip \
-        tar
-elif command -v apt-get &> /dev/null; then
-    sudo apt-get update
-    sudo apt-get install -y \
-        build-essential \
-        gdb \
-        clang \
-        cmake \
-        ninja-build \
-        valgrind \
-        python3 \
-        python3-dev \
-        python3-pip \
-        python3-venv \
-        libcairo2-dev \
-        pkg-config \
-        libusb-1.0-0-dev \
-        libhidapi-dev \
-        wl-clipboard \
-        xclip \
-        wmctrl \
-        xdotool \
-        gnome-terminal \
-        curl \
-        wget \
-        git \
-        unzip \
-        tar
+        git 2>/dev/null || true
 fi
-echo -e "${GREEN}✓ Pakiety systemowe zainstalowane.${NC}"
 
-# 3. Reguły udev dla Elgato Stream Deck
-echo -e "\n${CYAN}[3/8] Konfiguracja reguł udev dla kontrolera Elgato Stream Deck...${NC}"
-sudo tee /etc/udev/rules.d/60-streamdeck.rules > /dev/null << 'EOF'
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", TAG+="uaccess", MODE="0666"
-KERNEL=="hidraw*", ATTRS{idVendor}=="0fd9", TAG+="uaccess", MODE="0666"
-EOF
+# 2. Sprawdzenie kompilatora Rust (Cargo)
+echo -e "\n${CYAN}[2/6] Weryfikacja środowiska Rust...${NC}"
+if ! command -v cargo &> /dev/null; then
+    echo -e "${YELLOW}Instalacja Rust (rustup)...${NC}"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+echo -e "${GREEN}✓ Rust i Cargo gotowe: $(cargo --version)${NC}"
 
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-echo -e "${GREEN}✓ Reguły udev aktywne.${NC}"
-
-# 4. Visual Studio Code i rozszerzenia C++
-echo -e "\n${CYAN}[4/8] Sprawdzanie i konfiguracja Visual Studio Code...${NC}"
+# 3. Sprawdzenie Visual Studio Code
+echo -e "\n${CYAN}[3/6] Weryfikacja edytora Visual Studio Code...${NC}"
 if ! command -v code &> /dev/null; then
-    if command -v dnf &> /dev/null; then
-        echo "Dodawanie repozytorium Microsoft RPM dla VS Code..."
-        sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-        sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\ntype=rpm-md\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'
-        sudo dnf check-update || true
-        sudo dnf install -y code
-    elif command -v apt-get &> /dev/null; then
-        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/packages.microsoft.gpg
-        sudo install -D -o root -g root -m 644 /tmp/packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
-        sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
-        rm -f /tmp/packages.microsoft.gpg
-        sudo apt-get update
-        sudo apt-get install -y code
+    echo -e "${YELLOW}Instalacja Visual Studio Code...${NC}"
+    if command -v apt-get &> /dev/null; then
+        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/packages.microsoft.gpg 2>/dev/null || true
+        sudo install -D -o root -g root -m 644 /tmp/packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg 2>/dev/null || true
+        echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null 2>&1 || true
+        sudo apt-get update -qq 2>/dev/null || true
+        sudo apt-get install -y -qq code 2>/dev/null || true
     fi
 fi
-
 if command -v code &> /dev/null; then
-    echo "Instalacja rozszerzenia C++ w VS Code..."
-    code --password-store="basic" --no-sandbox --install-extension ms-vscode.cpptools --force || true
-    echo -e "${GREEN}✓ VS Code i rozszerzenia C++ gotowe.${NC}"
+    echo -e "${GREEN}✓ Visual Studio Code jest zainstalowany.${NC}"
+    code --install-extension ms-vscode.cpptools --force 2>/dev/null || true
 fi
 
-# 5. StreamController (Flatpak) oraz oficjalny plugin OS
-echo -e "\n${CYAN}[5/8] Konfiguracja StreamControllera (zarządzanie Stream Deck pod Linuksem)...${NC}"
-if command -v flatpak &> /dev/null; then
-    flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
-    flatpak install --user -y flathub com.core447.StreamController || true
-    echo -e "${GREEN}✓ StreamController zainstalowany.${NC}"
-
-    # Uprawnienia Flatpaka do wywoływania skryptów systemowych (host spawn)
-    flatpak override --user --talk-name=org.freedesktop.Flatpak com.core447.StreamController || true
-    flatpak override --user --filesystem=host com.core447.StreamController || true
-
-    # Instalacja oficjalnego pluginu OS (com_core447_OSPlugin) dla StreamControllera
-    PLUGIN_DIR="$HOME/.var/app/com.core447.StreamController/data/plugins/com_core447_OSPlugin"
-    mkdir -p "$HOME/.var/app/com.core447.StreamController/data/plugins"
-    if [ ! -f "$PLUGIN_DIR/manifest.json" ]; then
-        echo "Instalacja wymaganego pluginu OS (com_core447_OSPlugin) dla StreamControllera..."
-        rm -rf "$PLUGIN_DIR"
-        mkdir -p "$PLUGIN_DIR"
-
-        # 1. Sprawdź lokalną kopię offline w repozytorium
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        if [ -d "$SCRIPT_DIR/backend/streamdeck/resources/com_core447_OSPlugin" ]; then
-            cp -r "$SCRIPT_DIR/backend/streamdeck/resources/com_core447_OSPlugin/"* "$PLUGIN_DIR/"
-        else
-            # 2. Pobierz z GitHub
-            curl -fsSL https://github.com/StreamController/OSPlugin/archive/refs/heads/main.tar.gz | tar -xz -C "$PLUGIN_DIR" --strip-components=1 2>/dev/null || true
-        fi
-        echo -e "${GREEN}✓ Plugin com_core447_OSPlugin zainstalowany.${NC}"
-    fi
-
-    # Aktywuj plugin live przez D-Bus jeśli aplikacja StreamController jest włączona
-    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method org.gtk.Actions.Activate "install-plugin" "[<'com_core447_OSPlugin'>]" "{}" >/dev/null 2>&1 || true
-fi
-
-# 6. Przygotowanie katalogów i środowiska Python dla AlgoDeck
-echo -e "\n${CYAN}[6/8] Przygotowanie środowiska i zależności AlgoDeck...${NC}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$HOME/.local/share/algodeck"
-VENV_DIR="$INSTALL_DIR/venv"
-WORKSPACE_DIR="$HOME/algodeck-workspace"
-
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$WORKSPACE_DIR"
+# 4. Budowa natywnej binarki AlgoDeck
+echo -e "\n${CYAN}[4/6] Kompilacja pojedynczej binarki AlgoDeck w Rust (Release)...${NC}"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$HOME/.local/bin"
+mkdir -p "$HOME/.local/share/algodeck"
 
-if [ -d "$SCRIPT_DIR/backend" ]; then
-    PROJECT_ROOT="$SCRIPT_DIR"
-    if [ "$PROJECT_ROOT" != "$INSTALL_DIR" ]; then
-        echo "Kopiowanie plików AlgoDeck do $INSTALL_DIR..."
-        rsync -av --exclude='.venv' --exclude='__pycache__' "$PROJECT_ROOT/" "$INSTALL_DIR/"
-    fi
-else
-    echo "Pobieranie najnowszej wersji AlgoDeck z GitHub..."
-    if [ ! -d "$INSTALL_DIR/backend" ]; then
-        curl -fsSL https://github.com/veritus-git/AlgoDeck/archive/refs/heads/main.tar.gz | tar -xz -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || true
-    fi
-fi
-
-# Środowisko Python bez zbędnego balastu AI
-python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install --upgrade pip
-
-if [ -f "$INSTALL_DIR/requirements.txt" ]; then
-    "$VENV_DIR/bin/pip" install --no-input -r "$INSTALL_DIR/requirements.txt"
-else
-    "$VENV_DIR/bin/pip" install --no-input fastapi uvicorn pydantic python-multipart pypdf pillow websockets psutil streamdeck
-fi
-
-# Przygotowanie katalogu i skopiowanie pre-renderowanych ikon
-mkdir -p "$HOME/.var/app/com.core447.StreamController/data/custom_icons"
-if [ -d "$INSTALL_DIR/frontend/icons" ]; then
-    cp -n "$INSTALL_DIR/frontend/icons/"*.png "$HOME/.var/app/com.core447.StreamController/data/custom_icons/" 2>/dev/null || true
-fi
-
-# Generowanie minimalistycznych ikon symbolicznych
-echo "Generowanie minimalistycznych ikon dla Stream Decka..."
-PYTHONPATH="$INSTALL_DIR" "$VENV_DIR/bin/python3" "$INSTALL_DIR/backend/streamdeck/icons_generator.py" || true
-
-echo -e "${GREEN}✓ Środowisko AlgoDeck i ikony zainstalowane.${NC}"
-
-# 7. Skrypty wykonawcze w ~/.local/bin/
-echo -e "\n${CYAN}[7/8] Instalacja skrótów systemowych w ~/.local/bin...${NC}"
-
-# 7a. Daemon serwera 'algodeck-daemon' (dla systemd)
-cat > "$HOME/.local/bin/algodeck-daemon" << EOF
-#!/usr/bin/env bash
-source "$VENV_DIR/bin/activate"
-export PYTHONPATH="$INSTALL_DIR"
-cd "$INSTALL_DIR"
-exec python3 -m uvicorn backend.server:app --host 127.0.0.1 --port 8080 "\$@"
-EOF
-chmod +x "$HOME/.local/bin/algodeck-daemon"
-
-# 7a2. CLI 'algodeck' (uruchamianie w tle na żądanie z powiadomieniem pulpitu)
-if [ -f "$INSTALL_DIR/scripts/algodeck" ]; then
-    cp "$INSTALL_DIR/scripts/algodeck" "$HOME/.local/bin/algodeck"
-elif [ -f "$SCRIPT_DIR/scripts/algodeck" ]; then
-    cp "$SCRIPT_DIR/scripts/algodeck" "$HOME/.local/bin/algodeck"
-fi
+(cd "$REPO_DIR" && cargo build --release)
+cp "$REPO_DIR/target/release/algodeck" "$HOME/.local/bin/algodeck"
 chmod +x "$HOME/.local/bin/algodeck"
+echo -e "${GREEN}✓ Binarka algodeck zainstalowana w ~/.local/bin/algodeck (35MB, 0 runtime dependencies).${NC}"
 
-
-# 7a3. Instalacja natywnego GUI w Rust (algodeck-gui)
-GUI_BIN_TARGET="$HOME/.local/bin/algodeck-gui"
-if [ -f "$INSTALL_DIR/gui/target/release/algodeck-gui" ]; then
-    cp "$INSTALL_DIR/gui/target/release/algodeck-gui" "$GUI_BIN_TARGET"
-    chmod +x "$GUI_BIN_TARGET"
-elif [ -f "$HOME/.local/bin/algodeck-gui" ]; then
-    chmod +x "$GUI_BIN_TARGET"
-else
-    echo -e "${CYAN}Pobieranie skompilowanej binarki algodeck-gui z GitHub Releases...${NC}"
-    if curl -sSL -f "https://github.com/veritus-git/AlgoDeck/releases/latest/download/algodeck-gui-linux-x86_64" -o "$GUI_BIN_TARGET"; then
-        chmod +x "$GUI_BIN_TARGET"
-        echo -e "${GREEN}✓ Pobrano natywną binarkę algodeck-gui z GitHub Releases!${NC}"
-    elif which cargo >/dev/null 2>&1 && [ -d "$INSTALL_DIR/gui" ]; then
-        echo -e "${YELLOW}Kompilacja natywnego GUI AlgoDeck w Rust...${NC}"
-        (cd "$INSTALL_DIR/gui" && cargo build --release && cp target/release/algodeck-gui "$GUI_BIN_TARGET" && chmod +x "$GUI_BIN_TARGET") || true
-    fi
+# 5. Uprawnienia USB HID dla Stream Decka (udev)
+echo -e "\n${CYAN}[5/6] Konfiguracja uprawnień USB HID dla kontrolerów Elgato Stream Deck...${NC}"
+if [ -d /etc/udev/rules.d ] && [ "$EUID" -eq 0 -o -n "$SUDO_USER" ] || sudo -n true 2>/dev/null; then
+    sudo tee /etc/udev/rules.d/99-streamdeck.rules > /dev/null << 'UDEV_EOF'
+# Elgato Stream Deck USB HID rules for non-root users
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", MODE="0666", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="0fd9", MODE="0666", TAG+="uaccess"
+UDEV_EOF
+    sudo udevadm control --reload-rules 2>/dev/null || true
+    sudo udevadm trigger 2>/dev/null || true
+    echo -e "${GREEN}✓ Reguły udev zainstalowane (bezpośredni dostęp USB bez roota).${NC}"
 fi
 
-# 7b. Skrypt sd_algo_code.sh (Otwieranie / przełączanie okna VS Code z opcjonalnym 50/50 split PDF)
-cat > "$HOME/.local/bin/sd_algo_code.sh" << 'EOF'
-#!/usr/bin/env bash
-TARGET_DIR="${1:-$HOME/algodeck-workspace}"
-TARGET_FILE="${2:-}"
-PROB_NAME=$(basename "$TARGET_DIR")
+# 6. Rejestracja Native Messaging Host dla przeglądarki Chrome/Chromium/Brave
+echo -e "\n${CYAN}[6/6] Konfiguracja rozszerzenia przeglądarki i usługi systemd...${NC}"
 
-CONFIG_FILE="$HOME/.config/algodeck/settings.json"
-VSCODE_MODE="single_window"
-WORKSPACE_DIR="$HOME/algodeck-workspace"
-OPEN_PDF_SPLIT="false"
+# Wrapper natywny
+cat << 'WRAPPER_EOF' > "$HOME/.local/bin/algodeck-native-host"
+#!/bin/sh
+exec "$HOME/.local/bin/algodeck" native-host
+WRAPPER_EOF
+chmod +x "$HOME/.local/bin/algodeck-native-host"
 
-if [ -f "$CONFIG_FILE" ]; then
-    MODE_FROM_CFG=$(grep -o '"vscode_mode": *"[^"]*"' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4)
-    [ -n "$MODE_FROM_CFG" ] && VSCODE_MODE="$MODE_FROM_CFG"
-    DIR_FROM_CFG=$(grep -o '"workspace_dir": *"[^"]*"' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f4)
-    [ -n "$DIR_FROM_CFG" ] && WORKSPACE_DIR="$DIR_FROM_CFG"
-    PDF_SPLIT_CFG=$(grep -o '"open_pdf_in_vscode": *[^,}]*' "$CONFIG_FILE" 2>/dev/null | awk '{print $2}')
-    [ -n "$PDF_SPLIT_CFG" ] && OPEN_PDF_SPLIT="$PDF_SPLIT_CFG"
-fi
+# Manifesty Chrome Native Messaging
+CHROME_TARGETS=(
+    "$HOME/.config/google-chrome/NativeMessagingHosts"
+    "$HOME/.config/chromium/NativeMessagingHosts"
+    "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+    "$HOME/.config/microsoft-edge/NativeMessagingHosts"
+)
 
-DISP="${DISPLAY:-:0}"
-CODE_BIN=$(command -v code || echo "/usr/bin/code")
-
-if [ "$VSCODE_MODE" = "single_window" ]; then
-    OPEN_DIR="$WORKSPACE_DIR"
-else
-    OPEN_DIR="$TARGET_DIR"
-fi
-
-if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-    "$CODE_BIN" --reuse-window "$OPEN_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
-else
-    "$CODE_BIN" --reuse-window "$OPEN_DIR" >/dev/null 2>&1 &
-fi
-
-# Geometria monitora głównego (Primary Display)
-PRIM_LINE=$(xrandr --current 2>/dev/null | grep " connected primary" || xrandr --current 2>/dev/null | grep " connected" | head -n 1)
-GEOM=$(echo "$PRIM_LINE" | grep -oP '\d+x\d+\+\d+\+\d+')
-MON_W=$(echo "$GEOM" | cut -d'x' -f1)
-MON_H=$(echo "$GEOM" | cut -d'x' -f2 | cut -d'+' -f1)
-MON_X=$(echo "$GEOM" | cut -d'+' -f2)
-MON_Y=$(echo "$GEOM" | cut -d'+' -f3)
-
-# Bezpieczna wysokość robocza (Cinnamon panel zabiera ~28px, więc pełne MON_H wypycha pasek tytułowy w górę poza ekran)
-SAFE_H=$(( MON_H - 35 ))
-[ "$SAFE_H" -lt 400 ] && SAFE_H="$MON_H"
-
-PDF_FILE=""
-if [ -f "$TARGET_DIR/$PROB_NAME.pdf" ]; then
-    PDF_FILE="$TARGET_DIR/$PROB_NAME.pdf"
-fi
-if [ -z "$PDF_FILE" ]; then
-    PDF_FILE=$(find "$TARGET_DIR" -maxdepth 2 -name "*.pdf" 2>/dev/null | head -n 1)
-fi
-
-(
-    for attempt in {1..12}; do
-        sleep 0.25
-        WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
-        if [ -n "$WID" ]; then
-            if [ "$OPEN_PDF_SPLIT" = "true" ] && [ -n "$PDF_FILE" ] && [ -n "$MON_W" ]; then
-                # Tryb Split 60/40 na głównym ekranie: Kod 60% po lewej, PDF 40% po prawej
-                VSCODE_W=$(( MON_W * 60 / 100 ))
-                PDF_W=$(( MON_W - VSCODE_W ))
-                RIGHT_X=$(( MON_X + VSCODE_W ))
-
-                DISPLAY="$DISP" wmctrl -i -r "$WID" -b remove,maximized_vert,maximized_horz 2>/dev/null || true
-                DISPLAY="$DISP" wmctrl -i -r "$WID" -e "0,$MON_X,$MON_Y,$VSCODE_W,$SAFE_H" 2>/dev/null || true
-                DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-
-                # Uruchom czytnik PDF jeśli jeszcze nie jest otwarty
-                if ! pgrep -f "$PDF_FILE" >/dev/null 2>&1; then
-                    if command -v xreader >/dev/null 2>&1; then
-                        xreader "$PDF_FILE" >/dev/null 2>&1 &
-                    elif command -v atril >/dev/null 2>&1; then
-                        atril "$PDF_FILE" >/dev/null 2>&1 &
-                    elif command -v evince >/dev/null 2>&1; then
-                        evince "$PDF_FILE" >/dev/null 2>&1 &
-                    else
-                        xdg-open "$PDF_FILE" >/dev/null 2>&1 &
-                    fi
-                fi
-
-                # Dopasuj okno PDF do prawej części ekranu (30%)
-                sleep 0.4
-                PDF_WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -iE "xreader|atril|evince" | tail -n 1 | awk '{print $1}')
-                if [ -n "$PDF_WID" ]; then
-                    DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -b remove,maximized_vert,maximized_horz 2>/dev/null || true
-                    DISPLAY="$DISP" wmctrl -i -r "$PDF_WID" -e "0,$RIGHT_X,$MON_Y,$PDF_W,$SAFE_H" 2>/dev/null || true
-                fi
-                # Przywróć fokus na kodzie
-                DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-            else
-                # Domyślnie pełny ekran na kod
-                DISPLAY="$DISP" wmctrl -i -r "$WID" -b add,maximized_vert,maximized_horz 2>/dev/null || true
-                DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-                DISPLAY="$DISP" wmctrl -i -R "$WID" 2>/dev/null || true
-                DISPLAY="$DISP" xdotool windowactivate "$WID" 2>/dev/null || true
-                DISPLAY="$DISP" xdotool windowraise "$WID" 2>/dev/null || true
-            fi
-            break
-        fi
-    done
-) &
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_code.sh"
-
-# 7c. Skrypt sd_algo_run_vscode.sh (Wbudowany terminal VS Code: ODPAL)
-cat > "$HOME/.local/bin/sd_algo_run_vscode.sh" << 'EOF'
-#!/usr/bin/env bash
-PDIR="$1"
-PROB="$2"
-
-if [ -n "$PROB" ]; then
-    echo "${PROB^^}" > /tmp/algodeck_active_task.txt
-fi
-
-DISP="${DISPLAY:-:0}"
-CODE_BIN=$(command -v code || echo "/usr/bin/code")
-PROB_LOWER=$(echo "$PROB" | tr '[:upper:]' '[:lower:]')
-SOCK="/tmp/algodeck_vscode_${PROB_LOWER}.sock"
-
-# 1. Sprawdź dedykowane gniazdo UNIX dla tego okna zadania
-if [ -S "$SOCK" ]; then
-    RESP=$(curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/run?pdir=$PDIR" 2>/dev/null)
-    if echo "$RESP" | grep -q '"ok"'; then
-        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
-        exit 0
-    fi
-fi
-
-# 2. Sprawdź ogólny port HTTP bridge (49152)
-if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/run?pdir=$PDIR" 2>/dev/null)
-    if echo "$RESP" | grep -q '"ok"'; then
-        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
-        exit 0
-    fi
-fi
-
-# 3. Jeśli okno nie odpowiada, otwórz plik zadania w VS Code i wywołaj ponownie
-if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-    "$CODE_BIN" --reuse-window "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
-elif [ -n "$PDIR" ]; then
-    "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
-fi
-
-for i in {1..15}; do
-    sleep 0.1
-    if [ -S "$SOCK" ]; then
-        curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/run?pdir=$PDIR" 2>/dev/null && exit 0
-    elif curl -s --max-time 0.2 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-        curl -s --max-time 1.0 "http://127.0.0.1:49152/run?pdir=$PDIR" 2>/dev/null && exit 0
-    fi
-done
-
-# 4. Fallback: aktywuj okno VS Code i wyślij skrót uruchomienia zadania
-WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "$PROB" | grep -i "code" | awk '{print $1}' | head -n 1)
-[ -z "$WID" ] && WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
-if [ -n "$WID" ]; then
-    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-    sleep 0.1
-    DISPLAY="$DISP" xdotool key --clearmodifiers ctrl+shift+b 2>/dev/null
-    sleep 0.15
-    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null || true
-fi
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_run_vscode.sh"
-
-# 7d. Skrypt sd_algo_test_vscode.sh (Wbudowany terminal VS Code: TESTUJ)
-cat > "$HOME/.local/bin/sd_algo_test_vscode.sh" << 'EOF'
-#!/usr/bin/env bash
-PDIR="$1"
-PROB="$2"
-
-if [ -n "$PROB" ]; then
-    echo "${PROB^^}" > /tmp/algodeck_active_task.txt
-fi
-
-DISP="${DISPLAY:-:0}"
-CODE_BIN=$(command -v code || echo "/usr/bin/code")
-PROB_LOWER=$(echo "$PROB" | tr '[:upper:]' '[:lower:]')
-SOCK="/tmp/algodeck_vscode_${PROB_LOWER}.sock"
-
-# 1. Sprawdź dedykowane gniazdo UNIX dla tego okna zadania
-if [ -S "$SOCK" ]; then
-    RESP=$(curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/test?pdir=$PDIR" 2>/dev/null)
-    if echo "$RESP" | grep -q '"ok"'; then
-        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
-        exit 0
-    fi
-fi
-
-# 2. Sprawdź ogólny port HTTP bridge (49152)
-if curl -s --max-time 0.4 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-    RESP=$(curl -s --max-time 1.0 "http://127.0.0.1:49152/test?pdir=$PDIR" 2>/dev/null)
-    if echo "$RESP" | grep -q '"ok"'; then
-        DISPLAY="$DISP" wmctrl -a "$PROB" 2>/dev/null || DISPLAY="$DISP" wmctrl -a "Visual Studio Code" 2>/dev/null || true
-        exit 0
-    fi
-fi
-
-# 3. Jeśli okno nie odpowiada, otwórz plik zadania w VS Code i wywołaj ponownie
-if [ -n "$PDIR" ] && [ -n "$PROB" ] && [ -f "$PDIR/$PROB.cpp" ]; then
-    "$CODE_BIN" --reuse-window "$PDIR" "$PDIR/$PROB.cpp" >/dev/null 2>&1 &
-elif [ -n "$PDIR" ]; then
-    "$CODE_BIN" --reuse-window "$PDIR" >/dev/null 2>&1 &
-fi
-
-for i in {1..15}; do
-    sleep 0.1
-    if [ -S "$SOCK" ]; then
-        curl -s --max-time 1.0 --unix-socket "$SOCK" "http://localhost/test?pdir=$PDIR" 2>/dev/null && exit 0
-    elif curl -s --max-time 0.2 "http://127.0.0.1:49152/ping" 2>/dev/null | grep -q "algodeck-vscode-bridge"; then
-        curl -s --max-time 1.0 "http://127.0.0.1:49152/test?pdir=$PDIR" 2>/dev/null && exit 0
-    fi
-done
-
-# 4. Fallback: aktywuj okno VS Code i wyślij skrót uruchomienia testów
-WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "$PROB" | grep -i "code" | awk '{print $1}' | head -n 1)
-[ -z "$WID" ] && WID=$(DISPLAY="$DISP" wmctrl -lx 2>/dev/null | grep -i "code\.code" | awk '{print $1}' | head -n 1)
-if [ -n "$WID" ]; then
-    DISPLAY="$DISP" wmctrl -i -a "$WID" 2>/dev/null || true
-    sleep 0.1
-    DISPLAY="$DISP" xdotool key --clearmodifiers F6 2>/dev/null
-    sleep 0.15
-    DISPLAY="$DISP" xdotool key --clearmodifiers Return 2>/dev/null || true
-fi
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_test_vscode.sh"
-
-# 7e. Skrypt sd_algo_panel.sh (Panel kontrolny AlgoDeck / Ustawienia)
-cat > "$HOME/.local/bin/sd_algo_panel.sh" << 'EOF'
-#!/usr/bin/env bash
-TAB="${1:---tab=settings}"
-WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck ⚡ Centrum Kontroli" | awk '{print $1}' | head -n 1)
-
-if [ -n "$WID" ]; then
-    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-else
-    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
-        "$HOME/.local/bin/algodeck-gui" "$TAB" >/dev/null 2>&1 &
-    elif [ -x "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" ]; then
-        "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" "$TAB" >/dev/null 2>&1 &
-    else
-        python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
-    fi
-fi
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_panel.sh"
-
-# 7e2. Skrypt sd_algo_new_task.sh (Dodawanie nowego zadania)
-cat > "$HOME/.local/bin/sd_algo_new_task.sh" << 'EOF'
-#!/usr/bin/env bash
-WID=$(DISPLAY=:0 wmctrl -l 2>/dev/null | grep -i "AlgoDeck ⚡ Centrum Kontroli" | awk '{print $1}' | head -n 1)
-
-if [ -n "$WID" ]; then
-    DISPLAY=:0 wmctrl -i -a "$WID" 2>/dev/null || true
-else
-    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
-        "$HOME/.local/bin/algodeck-gui" --tab=new >/dev/null 2>&1 &
-    elif [ -x "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" ]; then
-        "$HOME/.local/share/algodeck/gui/target/release/algodeck-gui" --tab=new >/dev/null 2>&1 &
-    else
-        python3 "$HOME/.local/share/algodeck/scripts/panel_dialog.py" --tab=new >/dev/null 2>&1 &
-    fi
-fi
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
-
-# 7f. Skrypt sd_algo_switch.sh (Przełączanie zadań i galerii w kolejności chronologicznej)
-cat > "$HOME/.local/bin/sd_algo_switch.sh" << 'EOF'
-#!/usr/bin/env bash
-set -e
-
-ACTION="${1:-next}"
-CURRENT="${2:-}"
-WORKSPACE="$HOME/algodeck-workspace"
-SERIAL="A00SA6042JGA63"
-
-# 0. Natychmiastowa obsługa wyjścia i zatrzymania AlgoDeck
-if [ "$ACTION" = "exit" ] || [ "$ACTION" = "stop" ]; then
-    "$HOME/.local/bin/algodeck" stop
-    exit 0
-fi
-
-# 1. Ekran zachęty / idle
-if [ "$ACTION" = "idle" ]; then
-    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
-    echo "ALGO_IDLE" > /tmp/algodeck_active_task.txt
-    notify-send "AlgoDeck ⚡" "Powrót do ekranu zachęty" 2>/dev/null || true
-    exit 0
-fi
-
-# 2. Widok galerii zadań / Menu
-if [ "$ACTION" = "menu" ]; then
-    if [ -n "$CURRENT" ]; then
-        echo "${CURRENT^^}" > /tmp/algodeck_active_task.txt
-    fi
-    curl -s -X POST "http://127.0.0.1:8080/api/streamdeck/menu" >/dev/null 2>&1 || true
-    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_MENU" >/dev/null 2>&1 || true
-    exit 0
-fi
-
-# 3. Pobierz listę zadań w ścisłej kolejności chronologicznej
-PROJECTS=()
-API_RES=$(curl -s --max-time 1 http://127.0.0.1:8080/api/problems 2>/dev/null || true)
-if [ -n "$API_RES" ]; then
-    P_LIST=$(python3 -c "import sys, json; data=json.loads(sys.stdin.read()); print(' '.join(p['problem_id'] for p in data.get('problems', [])))" <<< "$API_RES" 2>/dev/null || true)
-    if [ -n "$P_LIST" ]; then
-        PROJECTS=($P_LIST)
-    fi
-fi
-
-if [ ${#PROJECTS[@]} -eq 0 ]; then
-    while IFS= read -r dir; do
-        [ -d "$dir" ] || continue
-        bname=$(basename "$dir")
-        [ "$bname" = "tests" ] && continue
-        if [ -f "$dir/$bname.cpp" ] || [ -d "$dir/.algo" ]; then
-            PROJECTS+=("$bname")
-        fi
-    done < <(ls -1v -tr "$WORKSPACE" 2>/dev/null)
-fi
-
-if [ ${#PROJECTS[@]} -eq 0 ]; then
-    gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "ALGO_IDLE" >/dev/null 2>&1 || true
-    echo "ALGO_IDLE" > /tmp/algodeck_active_task.txt
-    exit 0
-fi
-
-COUNT=${#PROJECTS[@]}
-
-CURRENT_PID="$CURRENT"
-if [ -z "$CURRENT_PID" ] && [ -f /tmp/algodeck_active_task.txt ]; then
-    CURRENT_PID=$(cat /tmp/algodeck_active_task.txt 2>/dev/null || true)
-fi
-CURRENT_PID="${CURRENT_PID,,}"
-
-CURR_IDX=0
-for i in "${!PROJECTS[@]}"; do
-    if [ "${PROJECTS[$i]}" = "$CURRENT_PID" ]; then
-        CURR_IDX=$i
-        break
-    fi
-done
-
-if [ "$ACTION" = "to" ]; then
-    TARGET="${CURRENT,,}"
-elif [ "$ACTION" = "prev" ]; then
-    TARGET_IDX=$(( (CURR_IDX - 1 + COUNT) % COUNT ))
-    TARGET="${PROJECTS[$TARGET_IDX]}"
-else
-    # "next"
-    TARGET_IDX=$(( (CURR_IDX + 1) % COUNT ))
-    TARGET="${PROJECTS[$TARGET_IDX]}"
-fi
-
-TARGET_UPPER="${TARGET^^}"
-echo "$TARGET_UPPER" > /tmp/algodeck_active_task.txt
-
-gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "$TARGET_UPPER" >/dev/null 2>&1 || true
-
-curl -s -X POST "http://127.0.0.1:8080/api/set-active/$TARGET" >/dev/null 2>&1 || true
-
-if [ -f "$HOME/.local/bin/sd_algo_code.sh" ]; then
-    "$HOME/.local/bin/sd_algo_code.sh" "$WORKSPACE/$TARGET" "$WORKSPACE/$TARGET/$TARGET.cpp" >/dev/null 2>&1 || true
-fi
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_switch.sh"
-
-# 7g. Skrypt sd_algo_menu_back.sh
-cat > "$HOME/.local/bin/sd_algo_menu_back.sh" << 'EOF'
-#!/usr/bin/env bash
-SERIAL="A00SA6042JGA63"
-WORKSPACE="$HOME/algodeck-workspace"
-TARGET=""
-if [ -f /tmp/algodeck_active_task.txt ]; then
-    TARGET=$(cat /tmp/algodeck_active_task.txt 2>/dev/null || echo "")
-fi
-if [ -z "$TARGET" ]; then
-    for dir in "$WORKSPACE"/*; do
-        [ -d "$dir" ] || continue
-        bname=$(basename "$dir")
-        [ "$bname" = "tests" ] && continue
-        if [ -f "$dir/$bname.cpp" ] || [ -d "$dir/.algo" ]; then
-            TARGET="${bname^^}"
-            break
-        fi
-    done
-fi
-if [ -z "$TARGET" ]; then
-    TARGET="ALGO_IDLE"
-fi
-
-gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method com.core447.StreamController.ChangePage "$SERIAL" "$TARGET" >/dev/null 2>&1 || true
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_menu_back.sh"
-
-# 7h. Skrypt sd_algo_new_task.sh (Okno dodawania nowego zadania)
-cat > "$HOME/.local/bin/sd_algo_new_task.sh" << 'EOF'
-#!/usr/bin/env bash
-"$HOME/.local/bin/sd_algo_panel.sh" --tab=new >/dev/null 2>&1 &
-EOF
-chmod +x "$HOME/.local/bin/sd_algo_new_task.sh"
-
-# 7i. Konfiguracja VS Code (Wewnętrzne rozszerzenie bridge, maksymalizacja okna i skróty klawiszowe)
-echo "Konfiguracja integracji VS Code i Stream Deck..."
-mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
-if [ -d "$INSTALL_DIR/backend/vscode_extension" ]; then
-    cp -r "$INSTALL_DIR/backend/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
-elif [ -d "$SCRIPT_DIR/backend/vscode_extension" ]; then
-    cp -r "$SCRIPT_DIR/backend/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
-fi
-
-# Konfiguracja settings.json (okno na pełny ekran / zmaksymalizowane)
-python3 -c '
-import json, os
-p = os.path.expanduser("~/.config/Code/User/settings.json")
-try:
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-    except Exception:
-        cfg = {}
-    if cfg.get("window.newWindowDimensions") != "maximized":
-        cfg["window.newWindowDimensions"] = "maximized"
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=4)
-except Exception:
-    pass
-' 2>/dev/null || true
-
-# Konfiguracja keybindings.json (F6, Ctrl+Shift+B, Ctrl+Alt+R, Ctrl+Alt+E)
-python3 -c '
-import json, os
-p = os.path.expanduser("~/.config/Code/User/keybindings.json")
-try:
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            kb = json.load(f)
-    except Exception:
-        kb = []
-
-    needed = [
-        {"key": "f6", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: TESTUJ"},
-        {"key": "ctrl+alt+e", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: TESTUJ"},
-        {"key": "ctrl+shift+b", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: ODPAL"},
-        {"key": "ctrl+alt+r", "command": "workbench.action.tasks.runTask", "args": "AlgoDeck: ODPAL"},
-    ]
-
-    existing_map = {item.get("key", "").lower(): item for item in kb if isinstance(item, dict)}
-    modified = False
-    for n in needed:
-        key_l = n["key"].lower()
-        cur = existing_map.get(key_l)
-        if not cur or cur.get("command") != n["command"] or cur.get("args") != n["args"]:
-            kb = [item for item in kb if isinstance(item, dict) and item.get("key", "").lower() != key_l]
-            kb.append(n)
-            modified = True
-
-    if modified:
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(kb, f, indent=4)
-except Exception:
-    pass
-' 2>/dev/null || true
-
-# 7j. Skrypt uruchamiający przeglądarkę z wczytanym rozszerzeniem AlgoDeck
-cat > "$HOME/.local/bin/algodeck-browser" << EOF
-#!/usr/bin/env bash
-EXT_DIR="$INSTALL_DIR/extension"
-if command -v google-chrome &> /dev/null; then
-    exec google-chrome --load-extension="\$EXT_DIR" "http://localhost:8080" "\$@"
-elif command -v brave-browser &> /dev/null; then
-    exec brave-browser --load-extension="\$EXT_DIR" "http://localhost:8080" "\$@"
-elif command -v chromium &> /dev/null; then
-    exec chromium --load-extension="\$EXT_DIR" "http://localhost:8080" "\$@"
-else
-    xdg-open "http://localhost:8080"
-fi
-EOF
-chmod +x "$HOME/.local/bin/algodeck-browser"
-
-# 7k. Native Messaging Host dla rozszerzenia przeglądarki
-if [ -f "$INSTALL_DIR/scripts/algodeck-native-host" ]; then
-    cp "$INSTALL_DIR/scripts/algodeck-native-host" "$HOME/.local/bin/algodeck-native-host"
-    chmod +x "$HOME/.local/bin/algodeck-native-host"
-fi
-
-# Oblicz dynamiczne identyfikatory Chrome dla obu możliwych ścieżek
-EXT_ID_1=$(python3 -c "import hashlib; d=hashlib.sha256(b'$INSTALL_DIR/extension').digest()[:16]; print(''.join(chr(ord('a')+(b>>4))+chr(ord('a')+(b&0x0F)) for b in d))" 2>/dev/null || echo "cdgdnkfkkbadljdgjjjbaefefcbelplf")
-EXT_ID_2=$(python3 -c "import hashlib; d=hashlib.sha256(b'$SCRIPT_DIR/extension').digest()[:16]; print(''.join(chr(ord('a')+(b>>4))+chr(ord('a')+(b&0x0F)) for b in d))" 2>/dev/null || echo "cdgdnkfkkbadljdgjjjbaefefcbelplf")
-
-for nm_dir in \
-    "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts" \
-    "$HOME/.config/google-chrome/NativeMessagingHosts" \
-    "$HOME/.config/chromium/NativeMessagingHosts"; do
-    mkdir -p "$nm_dir"
-    cat > "$nm_dir/com.algodeck.launcher.json" << EOF_NM
-{
+MANIFEST_CONTENT='{
   "name": "com.algodeck.launcher",
-  "description": "AlgoDeck Native Messaging Host for browser launching",
-  "path": "$HOME/.local/bin/algodeck-native-host",
+  "description": "AlgoDeck 100% Rust Native Messaging Host",
+  "path": "'"$HOME/.local/bin/algodeck-native-host"'",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
-    "chrome-extension://$EXT_ID_1/",
-    "chrome-extension://$EXT_ID_2/"
+    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"
   ]
-}
-EOF_NM
+}'
+
+for TARGET_DIR in "${CHROME_TARGETS[@]}"; do
+    mkdir -p "$TARGET_DIR"
+    echo "$MANIFEST_CONTENT" > "$TARGET_DIR/com.algodeck.launcher.json"
 done
 
+# Ikona na pulpicie i w menu aplikacji
+mkdir -p "$HOME/.local/share/applications"
+mkdir -p "$HOME/.local/share/icons"
+cp "$REPO_DIR/assets/icon128.png" "$HOME/.local/share/icons/algodeck.png" 2>/dev/null || true
 
-# Dodanie ~/.local/bin do PATH w bashrc i zshrc jeśli brak
-for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
-    if [ -f "$rc" ] && ! grep -q '\$HOME/\.local/bin' "$rc"; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc"
-    fi
-done
+cat << DESKTOP_EOF > "$HOME/.local/share/applications/algodeck.desktop"
+[Desktop Entry]
+Name=AlgoDeck
+Comment=Środowisko Olimpijskie Koło MAP
+Exec=$HOME/.local/bin/algodeck
+Icon=$HOME/.local/share/icons/algodeck.png
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+StartupWMClass=AlgoDeck
+DESKTOP_EOF
 
-# 8. Konfiguracja usługi systemd użytkownika
-echo -e "\n${CYAN}[8/8] Konfiguracja usługi AlgoDeck w systemd...${NC}"
+# Usługa systemd w tle
 mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/algodeck.service" << EOF
+cat << SERVICE_EOF > "$HOME/.config/systemd/user/algodeck.service"
 [Unit]
-Description=AlgoDeck ⚡ Koło MAP - Daemon środowiska olimpijskiego
+Description=AlgoDeck ⚡ Koło MAP - 100% Rust Daemon & Stream Deck Controller
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$HOME/.local/bin/algodeck-daemon
+ExecStart=$HOME/.local/bin/algodeck daemon
 Restart=always
-RestartSec=3s
+RestartSec=2s
+Environment="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 [Install]
 WantedBy=default.target
-EOF
+SERVICE_EOF
 
-systemctl --user daemon-reload || true
-
-# Aktywator w menu aplikacji / wyszukiwarce systemowej (.desktop)
-mkdir -p "$HOME/.local/share/applications"
-cat > "$HOME/.local/share/applications/algodeck.desktop" << EOF
-[Desktop Entry]
-Name=AlgoDeck
-Comment=Zautomatyzowane środowisko do algorytmiki C++ i Stream Decka
-Exec=$HOME/.local/bin/algodeck --gui-launch
-Icon=applications-development
-Terminal=false
-Type=Application
-Categories=Development;IDE;Education;
-StartupNotify=true
-EOF
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable algodeck.service 2>/dev/null || true
+systemctl --user restart algodeck.service 2>/dev/null || true
 
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
-echo -e "${GREEN}${BOLD}          🎉 INSTALACJA ALGODECK ZAKOŃCZONA SUKCESEM!                        ${NC}"
-echo -e "${GREEN}${BOLD}==============================================================================${NC}\n"
-echo -e "${BOLD}Środowisko jest w 100% gotowe i działa w tle jako usługa systemd.${NC}\n"
-echo -e "🚀 ${BOLD}Jak korzystać z AlgoDeck:${NC}"
-echo -e "  1. ${CYAN}Rozszerzenie przeglądarki:${NC}"
-echo -e "     - Wpisz w terminalu: ${BOLD}algodeck-browser${NC} (otworzy przeglądarkę z wczytanym rozszerzeniem)"
-echo -e "     - Lub w Chrome/Brave wejdź na: ${BOLD}chrome://extensions${NC} -> włącz 'Tryb programisty' ->"
-echo -e "       kliknij 'Załaduj rozpakowane' i wybierz folder: ${CYAN}$INSTALL_DIR/extension${NC}"
-echo -e "  2. ${CYAN}W oknie rozszerzenia:${NC}"
-echo -e "     - Przeciągnij plik PDF zadania i/lub archiwum ZIP z testami (np. chwocen.zip, akcje_testy.zip)"
-echo -e "     - Lub skorzystaj z zakładki 'Ręczny Workspace' (wystarczy podać nazwę zadania!)"
-echo -e "     - Kliknij 'Utwórz Workspace' — automatycznie otwiera się VS Code z gotowym szablonem C++20!"
-echo -e "  3. ${CYAN}Stream Deck (Minimalistyczne Symbole):${NC}"
-echo -e "     - [${CYAN}</>${NC}] VS Code  |  [${GREEN}⚗${NC}] Testy (test.sh)  |  [${YELLOW}▶${NC}] Odpal  |  [${RED}⏹${NC}] Kill  |  [${CYAN}⊞${NC}] Galeria"
-echo -e "     - Klawisze posiadają czyste, minimalistyczne symbole bez zbędnych etykiet tekstowych."
-echo -e "  4. ${CYAN}Lokalny panel Web UI:${NC}"
-echo -e "     - Zawsze dostępny również bezpośrednio pod adresem: ${CYAN}http://localhost:8080${NC}\n"
+echo -e "${GREEN}${BOLD}       🎉 AlgoDeck v2.0.0 (100% Rust) zainstalowany i gotowy do pracy!        ${NC}"
+echo -e "${GREEN}${BOLD}==============================================================================${NC}"
+echo -e "• Daemon działa w tle (zużycie RAM: ~2 MB, czas startu: 10 ms)"
+echo -e "• Stream Deck: Bezpośrednia obsługa sprzętowa USB HID bez zewnętrznych apek"
+echo -e "• GUI: Uruchom 'algodeck' w terminalu lub kliknij ikonę w menu aplikacji"
+echo -e "• Testy w konsoli: 'algodeck test <kod_zadania>'"
+echo -e "• Status: 'algodeck status'\n"

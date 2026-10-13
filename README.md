@@ -1,115 +1,94 @@
 # AlgoDeck ⚡ (Koło MAP)
 ### Zautomatyzowane środowisko do algorytmiki i programowania dla Koła MAP, OIJ, OI oraz Szkopuła
-#### Obsługa Linux, macOS (Apple Silicon & Intel) oraz Windows ze wsparciem oficjalnego oprogramowania Stream Deck i natywnym GUI w Rust
+#### Architektura 100% RUST — Niezależna pojedyncza binarka, bezpośrednia obsługa USB HID Stream Decka, natywny Desktop GUI
 
-> **Cel:** Zminimalizowanie progu wejścia i maksymalne skrócenie czasu od pobrania zadania ze Szkopuła / MAP do pisania kodu w Visual Studio Code. Zero żmudnego kopiowania testów, zero ręcznego tworzenia plików `.cpp` czy ręcznej konfiguracji skrótów.
+> **Cel:** Zminimalizowanie progu wejścia i skrócenie czasu od pobrania zadania ze Szkopuła / MAP do pisania kodu w Visual Studio Code. Zero Pythona, zero zależności zewnętrznych aplikacji typu StreamController czy oficjalnego oprogramowania Elgato, zero żmudnego kopiowania testów.
 
 ---
 
 ## 💻 Instalatory One-Liner (Dla Każdego Systemu)
 
-Zainstaluj całe środowisko jednym poleceniem skopiowanym do terminala:
-
-### 🍎 macOS (Apple Silicon M1/M2/M3/M4 & Intel — Priorytet)
-Otwórz Terminal i wklej:
-```bash
-curl -fsSL https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_mac.sh | bash
-```
+Zainstaluj całe środowisko jednym poleceniem w terminalu:
 
 ### 🐧 Linux (Ubuntu, Debian, Fedora, Arch)
-Otwórz Terminal i wklej:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/bootstrap.sh | bash
 ```
 
+### 🍎 macOS (Apple Silicon M1/M2/M3/M4 & Intel)
+```bash
+curl -fsSL https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_mac.sh | bash
+```
+
 ### 🪟 Windows (PowerShell 5.1 / 7+)
-Otwórz PowerShell i wklej:
 ```powershell
 irm https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_win.ps1 | iex
 ```
 
 ---
 
-## 🚀 Kluczowe Nowości & Architektura v2.1
+## 🚀 Kluczowe Cechy Architektury 100% Rust
 
-### 1. 🦀 Nowoczesny, Błyskawiczny Panel Kontrolny w RUST (`algodeck-gui`)
-- Całkowite odejście od starego, ociężałego menu na rzecz natywnego interfejsu w **Rust** (`eframe` / `egui`).
-- **Autorski Customowy Pasek Tytułowy:** Płynne przesuwanie okna (dragging), minimalizacja i zamykanie. Zgodnie z założeniami brak zbędnego rozszerzania na pełny ekran.
-- **Stylistyka Cyberpunk / Deep Obsidian:** Czysta ciemna paleta `#080b11`, akcenty neonowego błękitu `#38bdf8` i szmaragdu `#10b981`.
-- **Trzy Główne Sekcje:**
-  - `➕ Nowe Zadanie`: Przełącznik między automatycznym importem PDF/ZIP a ręcznym wpisaniem (cin/cout).
-  - `📋 Zadania`: Przegląd zadań z badge'ami `⚡ [AKTYWNE]`, liczba testów, 1-klik aktywacja na Stream Decku, otwieranie w VS Code, usuwanie zadań.
-  - `⚙️ Ustawienia & Zaawansowane Tweakowanie`:
-    - Ścieżka katalogu roboczego (`algodeck-workspace`).
-    - Standard C++: `C++17`, `C++20` (domyślny), `C++23`.
-    - Tryb Strict Debug: flaga `-fsanitize=address,undefined` do natychmiastowego wykrywania wycieków pamięci i UB.
-    - Zachowanie VS Code (pojedyncze okno z podfolderami vs osobne okna).
-    - Platforma docelowa Stream Decka (Linux StreamController / macOS Elgato / Windows Elgato) i numer seryjny.
-    - Przyciski szybkiej synchronizacji profili oraz powrotu do ekranu zachęty (`ALGO_IDLE`).
-- **Wieloplatformowa Kompilacja:** GitHub Actions automatycznie kompiluje binarki na Linux, macOS (Universal arm64/x86_64) i Windows!
+### 1. 🦀 Pojedyncza, Błyskawiczna Binarka `algodeck`
+- Całkowite wyeliminowanie Pythona, uvicorna, środowisk wirtualnych `.venv` oraz ciężkich bibliotek.
+- **Zużycie pamięci RAM:** spadek z ponad 600 MB do zaledwie **~2-3 MB**!
+- **Czas startu:** poniżej **15 milisekund**.
+- Jednolity interfejs CLI:
+  - `algodeck` — uruchamia natywne, nowoczesne okno GUI (`eframe`/`egui`) z obsługą systemowego zasobnika (tray).
+  - `algodeck daemon` — uruchamia bezgłowy proces daemona w tle (serwer Axum REST/WebSocket + bezpośredni sterownik USB HID).
+  - `algodeck start` / `stop` / `status` — szybkie zarządzanie procesem w tle.
+  - `algodeck test <kod_zadania>` — błyskawiczne uruchomienie i weryfikacja wszystkich testów bezpośrednio z poziomu konsoli.
+  - `algodeck run <kod_zadania>` — interaktywne uruchomienie skompilowanego rozwiązania C++.
+  - `algodeck native-host` — bezpośredni mostek Native Messaging dla przeglądarki Chrome, Chromium, Brave i Edge.
 
-### 2. 🎮 Pełne Wsparcie macOS i Windows (Oficjalna Aplikacja Elgato Stream Deck)
-- **Linux:** Automatyczna synchronizacja stron JSON z oprogramowaniem **StreamController** (Flatpak).
-- **macOS i Windows:** AlgoDeck dostarcza oficjalny plugin Elgato Stream Deck (`com.algodeck.streamdeck.sdPlugin`):
-  - Instalowany bezpośrednio do katalogu wtyczek Elgato (`~/Library/Application Support/com.elgato.StreamDeck/Plugins` na macOS oraz `%APPDATA%\Elgato\StreamDeck\Plugins` na Windows).
-  - Dwukierunkowa komunikacja WebSocket w czasie rzeczywistym z lokalnym serwerem AlgoDeck (`127.0.0.1:8080`).
-  - Identyczne działanie na każdym systemie operacyjnym: dynamiczne wyświetlanie kodu zadania na klawiszu OLED, kompilacja, uruchamianie, testowanie i ubijanie wiszących procesów!
+### 2. 🎮 Bezpośredni Sterownik USB HID dla Elgato Stream Deck
+- **Koniec problemów ze StreamControllerem i oficjalną aplikacją Elgato:** AlgoDeck komunikuje się z fizycznym kontrolerem Stream Deck bezpośrednio przez magistralę USB HID w czystym Rust.
+- **Zero migania profili i opóźnień:** Klawisze LCD i OLED są rysowane i odświeżane w milisekundach w natywnym formacie.
+- **Wsparcie dla wszystkich modeli:** Stream Deck Original v1/v2, MK.2, Mini, XL, Plus.
+- **Tryb wirtualny:** W przypadku braku podłączonego fizycznego urządzenia USB, AlgoDeck działa płynnie w trybie wirtualnym przez Web Deck / Desktop GUI.
 
-### 3. ⚡ Uruchamianie na Żądanie (On-Demand) i Nowy Klawisz Wyjścia
-- **W Przeglądarce:** Po otwarciu rozszerzenia widoczny jest **DUŻY, ZIELONY OKRĄGŁY PRZYCISK "URUCHOM"**.
-  - Kliknięcie uruchamia AlgoDeck i natychmiast aktywuje ekran zachęty (`ALGO_IDLE`) na Stream Decku z logiem i przyciskiem startowym.
-- **W Terminalu:** Wpisanie polecenia `algodeck`:
-  - Uruchamia środowisko w 100% w tle (jako odłączony proces / daemon).
-  - Wyświetla natywne powiadomienie na pulpicie (`notify-send` na Linuksie, powiadomienie AppleScript na macOS, Windows Toast na Windowsie).
-  - Terminal natychmiast wraca do znaku zachęty — zamknięcie terminala **nie zamyka** programu!
-- **Zawinięta Strzałka Wyjścia na Stream Decku (`↩`):**
-  - W ostatnim wolnym polu dolnego rzędu Stream Decka (`1x2`, zaraz obok ikony ustawień `0x2`) zaimplementowano nową, geometryczną zawiniętą strzałkę powrotu.
-  - Kliknięcie jej natychmiast kończy pracę nad bieżącym zadaniem i przywraca czysty ekran zachęty (`ALGO_IDLE`).
+### 3. 🎨 Dopracowany Interfejs Desktop GUI
+- **Ekran Zachęty (Standby Hero View):**
+  - Minimalistyczny branding AlgoDeck Koło MAP.
+  - **Duży, 168-pikselowy okrągły przycisk START** w nasyconej szmaragdowej zieleni (`#05af69` / `#10d77d`) z poświatą Cyber Emerald Halo Glow.
+  - Wizualny stan ładowania w trakcie uruchamiania procesów w tle.
+- **Centrum Zarządzania Zadaniami:**
+  - `⚡ Import (PDF + ZIP)`: Dedykowane obszary dropzone dla treści zadania oraz archiwum ZIP, automatyczne parsowanie kodu, tytułu i limitów.
+  - `✍ Ręczny Workspace`: Formularz do błyskawicznego tworzenia szablonu z własnymi danymi wejściowymi i wyjściowymi.
+  - `📁 Zadania`: Przejrzysta galeria zadań olimpijskich z licznikami testów, otwieraniem w VS Code oraz 1-klik aktywacją.
+  - `⚙ Ustawienia`: Czyste, czytelne okno konfiguracji folderu roboczego, kompilatora C++ (C++17/20/23) oraz integracji.
 
-### 4. 🧩 Niezawodne Wykrywanie Pobrań i Izolowany Widok 1-Klik
-- **Naprawiono problem z pobraniami:** Wykrywanie działa w 100% deterministycznie na każdym systemie i dystrybucji dzięki wielopoziomowej weryfikacji stanu pobierania (retry backoff, sprawdzanie plików `.pdf` oraz `.zip` ze Szkopuła i MAP, systemowe notyfikacje OS Toast).
-- **Izolowane Okno Powiadomienia:** Gdy pobranie zostanie wykryte, rozszerzenie wyświetla **WYŁĄCZNIE** elegancką kartę powiadomienia z opisem zadania, limitami oraz przyciskiem:
-  > **⚡ Utwórz Workspace i Otwórz VS Code (1 Klik)**
-  Cały standardowy układ popupa jest całkowicie ukryty, zapobiegając rozpraszaniu uwagi.
+### 4. 🧩 Rozszerzenie do Przeglądarki i Wykrywanie Pobrań
+- Pełna odporność na restart komputera: pobrania z przeszłości są ignorowane, brak spamu okienkami po ponownym uruchomieniu przeglądarki.
+- Singleton window lock zapobiegający dublowaniu okien.
+- 1-klik utworzenie projektu po pobraniu zadania ze Szkopuła lub Koła MAP.
 
 ---
 
-## 🎮 Układ Klawiszy Stream Decka (15 Klawiszy)
+## 🎮 Domyślny Układ Klawiszy Stream Decka (15 Klawiszy)
 
-### Widok Zadania (np. `CHW` lub `AKC`):
 | Pozycja | Klawisz | Symbol | Działanie |
-| :--- | :---: | :---: | :--- |
-| **Góra (0x0 .. 4x0)** | `0x0, 4x0` | `=` | Ozdobne separatory OLED |
-| | `1x0 .. 3x0` | `● C ● H ● W` | Dynamiczne litery aktywnego zadania |
-| **Środek (0x1 .. 4x1)** | `0x1` | `➕` | Dodaj nowe zadanie (otwiera okno w Rust) |
-| | `1x1` | `⚗` | Uruchom test runner ze wszystkimi testami |
-| | `2x1` | `▶` | Odpal w terminalu VS Code (oczekuje na cin) |
-| | `3x1` | `⏹` | Natychmiast ubij wiszące pętle nieskończone |
-| | `4x1` | `⊞` | Galeria wszystkich zapisanych zadań |
-| **Dół (0x2 .. 4x2)** | `0x2` | `⚙` | Otwórz Centrum Kontroli i Ustawienia w Rust |
-| | **`1x2`** | **`↩`** | **Zawinięta strzałka wyjścia — powrót do ekranu zachęty (ALGO_IDLE)** |
-| | `2x2` | `‹` | Poprzednie zadanie w workspace |
-| | `3x2` | `[ 1/3 ]` | Wskaźnik numeru zadania w kolejności chronologicznej |
-| | `4x2` | `›` | Następne zadanie w workspace |
+|:---:|:---:|:---:|:---|
+| **0, 1, 3, 4** | Testy | `●` | Wskaźniki statusu poszczególnych testów |
+| **2** | Zadanie | `KOD` | Wyświetla aktywny identyfikator zadania (np. `CHW`) |
+| **5** | CODE | `</>` | Otwiera zadanie w Visual Studio Code (z podziałem ekranu na kod i PDF) |
+| **6** | TEST | `⚗` | Kompiluje z optymalizacjami i uruchamia wszystkie testy |
+| **7** | RUN | `▶` | Uruchamia program interaktywnie |
+| **8** | KILL | `⏹` | Zatrzymuje wiszący lub zbyt długo wykonujący się proces |
+| **9** | MENU | `⊞` | Otwiera okno panelu AlgoDeck |
+| **10** | PREV | `‹` | Przełącza na poprzednie zadanie olimpijskie |
+| **11, 12, 13** | Testy | `●` | Kolejne wskaźniki testów |
+| **14** | NEXT | `›` | Przełącza na następne zadanie olimpijskie |
 
 ---
 
-## 🔧 Komendy CLI
+## 🛠 Wymagania i Kompilacja ze Źródeł
 
-Po instalacji w terminalu dostępne są intuicyjne polecenia:
+Wymagany jest standardowy kompilator C++ (`g++` lub `clang++`) oraz kompilator Rust (`cargo`):
 
 ```bash
-algodeck           # Uruchamia AlgoDeck w tle i aktywuje ekran zachęty na Stream Decku
-algodeck status    # Sprawdza status daemona i aktywnego zadania
-algodeck settings  # Otwiera natywne okno ustawień w Rust
-algodeck stop      # Zatrzymuje działanie daemona w tle
+git clone https://github.com/veritus-git/AlgoDeck.git
+cd AlgoDeck
+cargo build --release
+cp target/release/algodeck ~/.local/bin/algodeck
 ```
-
----
-
-## 🧩 Ładowanie Rozszerzenia w Przeglądarce
-
-1. Otwórz w Google Chrome, Brave lub Edge adres: `chrome://extensions`.
-2. Włącz suwak **Tryb programisty** (Developer mode) w prawym górnym rogu.
-3. Kliknij **Załaduj rozpakowane** (Load unpacked) i wybierz katalog `extension/` z repozytorium (lub `~/.local/share/algodeck/extension`).
-4. Przypnij ikonę AlgoDeck ⚡ do paska przeglądarki.

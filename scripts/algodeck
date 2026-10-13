@@ -1,192 +1,32 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AlgoDeck ⚡ Koło MAP - Główny CLI i Daemon Manager
-# Obsługa uruchamiania w tle, powiadomień oraz otwierania Rust GUI
+# AlgoDeck ⚡ Koło MAP - Główny CLI & Launcher (100% Rust Architecture)
 # ==============================================================================
 
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INSTALL_DIR="$HOME/.local/share/algodeck"
-[ -d "$INSTALL_DIR" ] || INSTALL_DIR="$REPO_DIR"
 
-VENV_DIR="$INSTALL_DIR/venv"
-[ -d "$VENV_DIR" ] || VENV_DIR="$REPO_DIR/.venv"
-
-ACTION="${1:-start}"
-
-is_running() {
-    curl -s --max-time 1 http://127.0.0.1:8080/api/status >/dev/null 2>&1
-}
-
-ensure_streamcontroller() {
-    if ! pgrep -f "StreamController" >/dev/null 2>&1; then
-        echo "🎮 Uruchamianie StreamControllera w tle..."
-        if command -v flatpak >/dev/null 2>&1 && flatpak info com.core447.StreamController >/dev/null 2>&1; then
-            flatpak run com.core447.StreamController >/dev/null 2>&1 &
-        elif command -v streamcontroller >/dev/null 2>&1; then
-            streamcontroller >/dev/null 2>&1 &
-        fi
-        for i in {1..25}; do
-            if gdbus call --session --dest com.core447.StreamController --object-path /com/core447/StreamController --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1; then
-                break
-            fi
-            sleep 0.2
-        done
-    fi
-}
-
-ensure_tray() {
-    if ! pgrep -f "algodeck-gui --tray" >/dev/null 2>&1; then
-        GUI_BIN=""
-        if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
-            GUI_BIN="$HOME/.local/bin/algodeck-gui"
-        elif [ -x "$REPO_DIR/gui/target/release/algodeck-gui" ]; then
-            GUI_BIN="$REPO_DIR/gui/target/release/algodeck-gui"
-        fi
-        if [ -n "$GUI_BIN" ]; then
-            (nohup "$GUI_BIN" --tray </dev/null >/dev/null 2>&1 &)
-        fi
-    fi
-}
-
-start_daemon() {
-    ensure_streamcontroller
-
-    if is_running; then
-        echo "⚡ AlgoDeck już działa w tle na porcie 8080."
-        curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
-        ensure_tray
-        notify-send "AlgoDeck ⚡" "AlgoDeck jest aktywny! Ekran zachęty na Stream Decku." 2>/dev/null || true
-        return 0
-    fi
-
-    echo "⚡ Uruchamianie AlgoDeck w tle..."
-
-    # Próba przez systemd jeśli usługa istnieje
-    if systemctl --user is-enabled algodeck.service >/dev/null 2>&1; then
-        systemctl --user start algodeck.service >/dev/null 2>&1 || true
-    fi
-
-    # Jeśli systemd nie wystartował lub nie ma usługi, odpalamy niezależny proces w tle (detached nohup)
-    if ! is_running; then
-        mkdir -p "$HOME/.config/algodeck/logs"
-        cd "$INSTALL_DIR"
-        export PYTHONPATH="$INSTALL_DIR"
-        if [ -f "$VENV_DIR/bin/python3" ]; then
-            PYTHON_BIN="$VENV_DIR/bin/python3"
-        else
-            PYTHON_BIN="python3"
-        fi
-
-        nohup "$PYTHON_BIN" -m uvicorn backend.server:app --host 127.0.0.1 --port 8080 > "$HOME/.config/algodeck/logs/server.log" 2>&1 &
-    fi
-
-    # Czekaj max 3 sekundy na start
-    for i in {1..30}; do
-        if is_running; then
-            break
-        fi
-        sleep 0.1
-    done
-
-    # Wywołaj aktywację ekranu zachęty
-    curl -s -X POST http://127.0.0.1:8080/api/launch >/dev/null 2>&1 || true
-
-    # Uruchom ikonę zasobnika systemowego
-    ensure_tray
-
-    # Powiadomienie na pulpicie
-    notify-send "AlgoDeck ⚡" "Środowisko olimpijskie uruchomione w tle! Ekran zachęty aktywny na Stream Decku." 2>/dev/null || true
-
-    echo "✅ AlgoDeck został pomyślnie uruchomiony w tle! Ekran zachęty aktywny na Stream Decku."
-    echo "💡 Możesz teraz zamknąć ten terminal — proces działa niezależnie."
-}
-
-stop_daemon() {
-    echo "⏹ Zatrzymywanie daemona AlgoDeck i usuwanie profili ze Stream Decka..."
-    if [ -f "$VENV_DIR/bin/python3" ]; then
-        PYTHON_BIN="$VENV_DIR/bin/python3"
+find_bin() {
+    if [ -x "$HOME/.local/bin/algodeck" ]; then
+        echo "$HOME/.local/bin/algodeck"
+    elif [ -x "$REPO_DIR/target/release/algodeck" ]; then
+        echo "$REPO_DIR/target/release/algodeck"
+    elif [ -x "$REPO_DIR/target/debug/algodeck" ]; then
+        echo "$REPO_DIR/target/debug/algodeck"
+    elif command -v algodeck >/dev/null 2>&1; then
+        command -v algodeck
     else
-        PYTHON_BIN="python3"
-    fi
-    PYTHONPATH="$INSTALL_DIR" "$PYTHON_BIN" -c "from backend.streamdeck.streamcontroller_bridge import StreamControllerBridge; StreamControllerBridge().cleanup_and_exit()" 2>/dev/null || true
-    systemctl --user stop algodeck.service >/dev/null 2>&1 || true
-    pkill -f "uvicorn backend.server:app" >/dev/null 2>&1 || true
-    pkill -f "algodeck-gui --tray" >/dev/null 2>&1 || true
-    rm -f /tmp/algodeck_tray.pid
-    notify-send "AlgoDeck ⚡" "Środowisko AlgoDeck wyłączone. Profile usunięte ze Stream Decka." 2>/dev/null || true
-    echo "✓ AlgoDeck zatrzymany, profile usunięte."
-}
-
-open_gui() {
-    TAB="${1:---tab=new}"
-    GUI_BIN=""
-    if [ -x "$HOME/.local/bin/algodeck-gui" ]; then
-        GUI_BIN="$HOME/.local/bin/algodeck-gui"
-    elif [ -x "$REPO_DIR/gui/target/release/algodeck-gui" ]; then
-        GUI_BIN="$REPO_DIR/gui/target/release/algodeck-gui"
-    fi
-
-    if [ -n "$GUI_BIN" ]; then
-        "$GUI_BIN" "$TAB" >/dev/null 2>&1 &
-    else
-        python3 "$INSTALL_DIR/scripts/panel_dialog.py" "$TAB" >/dev/null 2>&1 &
+        echo ""
     fi
 }
 
-case "$ACTION" in
-    start)
-        start_daemon
-        ;;
-    stop|exit)
-        stop_daemon
-        ;;
-    restart)
-        stop_daemon
-        sleep 1
-        start_daemon
-        ;;
-    status)
-        if is_running; then
-            STATUS_JSON=$(curl -s http://127.0.0.1:8080/api/status 2>/dev/null || echo "{}")
-            echo "🟢 AlgoDeck jest ONLINE (127.0.0.1:8080)"
-            echo "   Status: $STATUS_JSON"
-        else
-            echo "🔴 AlgoDeck jest OFFLINE"
-        fi
-        ;;
-    gui|settings)
-        shift || true
-        open_gui "$@"
-        ;;
-    --gui-launch|--app-launch|--desktop)
-        open_gui
-        ;;
-    tray|--tray)
-        ensure_tray
-        ;;
-    --tab=*)
-        open_gui "$ACTION"
-        ;;
-    --foreground)
-        echo "⚡ Uruchamianie w trybie pierwszoplanowym..."
-        ensure_streamcontroller
-        cd "$INSTALL_DIR"
-        export PYTHONPATH="$INSTALL_DIR"
-        if [ -f "$VENV_DIR/bin/python3" ]; then
-            PYTHON_BIN="$VENV_DIR/bin/python3"
-        else
-            PYTHON_BIN="python3"
-        fi
-        exec "$PYTHON_BIN" -m uvicorn backend.server:app --host 127.0.0.1 --port 8080
-        ;;
-    *)
-        # Jeśli podano argument nieznany (np. --tab, --pdf), uruchom GUI
-        if [[ "$ACTION" == --* ]]; then
-            open_gui "$@"
-        else
-            start_daemon
-        fi
-        ;;
-esac
+BIN="$(find_bin)"
+
+if [ -z "$BIN" ]; then
+    echo "⚡ Kompilacja AlgoDeck w Rust..."
+    (cd "$REPO_DIR" && cargo build --release)
+    BIN="$REPO_DIR/target/release/algodeck"
+fi
+
+exec "$BIN" "$@"

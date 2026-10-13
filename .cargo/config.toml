@@ -1,0 +1,3 @@
+[env]
+PKG_CONFIG_PATH = { value = "/home/linux/.local/lib/pkgconfig", relative = false }
+CFLAGS = "-I/home/linux/.local/include"

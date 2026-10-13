@@ -1,0 +1,41 @@
+[package]
+name = "algodeck"
+version = "2.0.0"
+edition = "2021"
+authors = ["AlgoDeck Team"]
+description = "AlgoDeck ⚡ 100% Rust Olympic Programming Environment & Stream Deck Controller"
+
+[dependencies]
+# Web server & WebSockets (replacing FastAPI/uvicorn)
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tokio = { version = "1.40", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Direct Stream Deck Hardware HID Driver (replacing StreamController & Elgato app)
+streamdeck = "0.10.0"
+
+# PDF parsing & heuristics
+pdf-extract = "0.12.1"
+regex = "1.10"
+
+# Archive & Workspace
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+chrono = "0.4"
+
+# Desktop GUI (eframe / egui)
+eframe = { version = "0.29", default-features = true }
+egui = "0.29"
+rfd = "0.14"
+dirs = "5.0"
+open = "5.3"
+ksni = { version = "0.3", features = ["blocking"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# Network & CLI
+ureq = { version = "2.10", features = ["json"] }
+clap = { version = "4.5", features = ["derive"] }
