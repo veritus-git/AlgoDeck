@@ -1,4 +1,4 @@
-use egui::{vec2, Align, Color32, Layout, RichText, Rounding, Stroke, Ui};
+use egui::{pos2, vec2, Align, Align2, Color32, Layout, RichText, Rounding, Stroke, Ui};
 use std::path::{Path, PathBuf};
 
 use crate::api::{ApiClient, ProblemInfo};
@@ -79,6 +79,8 @@ pub struct AlgoDeckApp {
     pub selected_problem_idx: Option<usize>,
     pub filter_query: String,
     pub is_launcher_status: bool,
+    pub show_settings_offline: bool,
+    pub is_starting_daemon: bool,
 
     // Komunikaty statusu (Toast)
     pub status_message: Option<(String, bool)>, // (treść, is_error)
@@ -107,6 +109,8 @@ impl AlgoDeckApp {
             selected_problem_idx: None,
             filter_query: String::new(),
             is_launcher_status: false,
+            show_settings_offline: false,
+            is_starting_daemon: false,
             status_message: None,
         };
 
@@ -191,17 +195,57 @@ impl eframe::App for AlgoDeckApp {
             }
         });
 
-        // Obsługa trybu okienka statusu uruchomienia (z menu systemowego / wyszukiwarki)
-        if self.is_launcher_status {
+        // Sprawdzamy czy backend jest aktywny
+        let is_alive = ApiClient::is_alive();
+        if is_alive {
+            self.is_starting_daemon = false;
+        }
+
+        // Tryb OFFLINE: Ekran powitalny z dużym zielonym przyciskiem startu (jak w rozszerzeniu)
+        if !is_alive && !self.show_settings_offline {
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(COLOR_BG_DARK))
                 .show(ctx, |ui| {
-                    self.render_launcher_status_view(ctx, ui);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    self.render_custom_titlebar(ctx, ui);
+                    self.render_offline_hero_view(ui);
                 });
             return;
         }
 
-        // Główny kontener aplikacji
+        // Tryb OFFLINE: Użytkownik przegląda Ustawienia
+        if !is_alive && self.show_settings_offline {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(COLOR_BG_DARK))
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    self.render_custom_titlebar(ctx, ui);
+
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(14, 18, 28))
+                        .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+                        .show(ui, |ui| {
+                            let btn_back = ui.add(
+                                egui::Button::new(RichText::new("< Powrót do ekranu startowego").color(COLOR_CYAN_ACCENT).size(11.5).strong())
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE),
+                            );
+                            if btn_back.clicked() {
+                                self.show_settings_offline = false;
+                            }
+                        });
+
+                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                    egui::Frame::none()
+                        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                        .show(ui, |ui| {
+                            self.render_tab_settings(ui);
+                        });
+                });
+            return;
+        }
+
+        // Główny kontener aplikacji ONLINE
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(COLOR_BG_DARK))
             .show(ctx, |ui| {
@@ -1019,65 +1063,133 @@ impl AlgoDeckApp {
         });
     }
 
-    fn render_launcher_status_view(&mut self, ctx: &egui::Context, ui: &mut Ui) {
-        let width = ui.available_width();
+    fn render_offline_hero_view(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(35.0);
 
-        // Górny pasek z przyciskiem zamknięcia
-        egui::Frame::none()
-            .fill(Color32::from_rgb(20, 24, 34))
-            .show(ui, |ui| {
-                ui.set_min_size(vec2(width, 32.0));
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-                    ui.label(RichText::new("AlgoDeck ⚡").color(COLOR_CYAN_ACCENT).size(12.0).strong());
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button(RichText::new("✕").color(COLOR_TEXT_MUTED).size(12.0)).clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
+            // 1. Tytuł i minimalistyczny branding
+            ui.label(RichText::new("⚡").color(COLOR_CYAN_ACCENT).size(38.0));
+            ui.add_space(6.0);
+            ui.label(RichText::new("AlgoDeck").color(Color32::WHITE).size(22.0).strong());
+            ui.add_space(2.0);
+            ui.label(RichText::new("KOŁO MAP • OLIMPIADA INFORMATYCZNA").color(COLOR_CYAN_ACCENT).size(9.5).strong());
+
+            ui.add_space(38.0);
+
+            // 2. JEDEN DUŻY PRZYCISK W KSZTAŁCIE OKRĘGU (Powiększony, Nasycony Szmaragd)
+            let diameter = 168.0;
+            let (rect, response) = ui.allocate_exact_size(vec2(diameter, diameter), egui::Sense::click());
+            let center = rect.center();
+            let radius = diameter / 2.0;
+            let is_hovered = response.hovered() && !self.is_starting_daemon;
+
+            // Pierścień poświaty (Cyber Emerald Halo Glow)
+            if !self.is_starting_daemon {
+                let halo_alpha = if is_hovered { 75 } else { 30 };
+                let halo_radius = if is_hovered { radius + 11.0 } else { radius + 7.0 };
+                ui.painter().circle_stroke(
+                    center,
+                    halo_radius,
+                    Stroke::new(2.5f32, Color32::from_rgba_premultiplied(16, 215, 125, halo_alpha)),
+                );
+            }
+
+            // Kolory głównego okręgu (Nasycony Szmaragd)
+            let (fill_color, border_stroke) = if self.is_starting_daemon {
+                // W trakcie uruchamiania w tle — elegancki matowy szary
+                (
+                    Color32::from_rgb(30, 41, 59),
+                    Stroke::new(2.5f32, Color32::from_rgb(71, 85, 105)),
+                )
+            } else if is_hovered {
+                (
+                    Color32::from_rgb(16, 215, 125), // Jasny, ultra nasycony szmaragd
+                    Stroke::new(3.5f32, Color32::from_rgb(209, 250, 229)),
+                )
+            } else {
+                (
+                    Color32::from_rgb(5, 175, 105), // Głęboki, żywy szmaragdowy zielony
+                    Stroke::new(3.0f32, Color32::from_rgb(52, 235, 155)),
+                )
+            };
+
+            ui.painter().circle_filled(center, radius, fill_color);
+            ui.painter().circle_stroke(center, radius, border_stroke);
+
+            // Ikona i tekst wewnątrz okręgu
+            let icon_color = if self.is_starting_daemon {
+                Color32::from_rgb(148, 163, 184)
+            } else {
+                Color32::WHITE
+            };
+
+            let text_color = if self.is_starting_daemon {
+                Color32::from_rgb(148, 163, 184)
+            } else {
+                Color32::from_rgb(236, 253, 245)
+            };
+
+            let label_text = if self.is_starting_daemon {
+                "STARTING..."
+            } else {
+                "START"
+            };
+
+            // Duża błyskawica ⚡
+            let bolt_pos = pos2(center.x, center.y - 12.0);
+            ui.painter().text(
+                bolt_pos,
+                Align2::CENTER_CENTER,
+                "⚡",
+                egui::FontId::proportional(54.0),
+                icon_color,
+            );
+
+            // Podpis START pod błyskawicą wewnątrz okręgu
+            let label_pos = pos2(center.x, center.y + 32.0);
+            ui.painter().text(
+                label_pos,
+                Align2::CENTER_CENTER,
+                label_text,
+                egui::FontId::proportional(12.5),
+                text_color,
+            );
+
+            if response.clicked() && !self.is_starting_daemon {
+                self.is_starting_daemon = true;
+                ApiClient::start_daemon();
+                self.set_status("Uruchamianie AlgoDeck i Stream Decka w tle...", false);
+            }
+        });
+
+        // 3. NA SAMYM DOLE: Konfiguracja i Ustawienia
+        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+            ui.add_space(24.0);
+
+            let btn_settings = ui.add(
+                egui::Button::new(RichText::new("⚙ Konfiguracja i Ustawienia").color(COLOR_TEXT_MUTED).size(11.5))
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(Stroke::NONE),
+            );
+            if btn_settings.clicked() {
+                self.show_settings_offline = true;
+                self.current_tab = ActiveTab::Settings;
+            }
+
+            // Dolny toast (jeśli jest aktywny komunikat)
+            if let Some((ref msg, is_err)) = self.status_message {
+                let fill = if is_err { Color32::from_rgb(127, 29, 29) } else { Color32::from_rgb(6, 78, 59) };
+                let stroke = if is_err { COLOR_RED } else { COLOR_GREEN };
+                egui::Frame::none()
+                    .fill(fill)
+                    .stroke(Stroke::new(1.0f32, stroke))
+                    .rounding(Rounding::same(5.0))
+                    .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(msg).color(Color32::WHITE).size(11.0).strong());
                     });
-                });
-            });
-
-        ui.add_space(12.0);
-
-        egui::Frame::none()
-            .fill(COLOR_SURFACE)
-            .rounding(Rounding::same(8.0))
-            .stroke(Stroke::new(1.0f32, COLOR_BORDER))
-            .inner_margin(egui::Margin::symmetric(16.0, 14.0))
-            .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("⚡ AlgoDeck jest aktywny!").color(COLOR_CYAN_ACCENT).size(16.0).strong());
-                    ui.add_space(6.0);
-                    ui.label(RichText::new("Środowisko olimpijskie zostało uruchomione w tle.").color(COLOR_TEXT_MAIN).size(12.0));
-                    ui.label(RichText::new("Ekran zachęty czeka na Stream Decku, a aplikacja czuwa w zasobniku systemowym.").color(COLOR_TEXT_MUTED).size(11.0));
-                });
-
-                ui.add_space(14.0);
-
-                ui.horizontal(|ui| {
-                    let btn_gui = ui.add_sized(
-                        vec2(ui.available_width() * 0.55, 34.0),
-                        egui::Button::new(RichText::new("🖥 Otwórz Centrum Kontroli").color(Color32::WHITE).size(11.5).strong())
-                            .fill(COLOR_CYAN)
-                            .rounding(Rounding::same(6.0)),
-                    );
-                    if btn_gui.clicked() {
-                        self.is_launcher_status = false;
-                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(340.0, 580.0)));
-                    }
-
-                    let btn_min = ui.add_sized(
-                        vec2(ui.available_width(), 34.0),
-                        egui::Button::new(RichText::new("✕ Minimalizuj").color(COLOR_TEXT_MAIN).size(11.5).strong())
-                            .fill(COLOR_SURFACE_LIGHT)
-                            .stroke(Stroke::new(1.0f32, COLOR_BORDER))
-                            .rounding(Rounding::same(6.0)),
-                    );
-                    if btn_min.clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-            });
+                ui.add_space(8.0);
+            }
+        });
     }
 }

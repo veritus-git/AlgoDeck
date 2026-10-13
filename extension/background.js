@@ -1,61 +1,123 @@
 // AlgoDeck ⚡ Koło MAP - Background Service Worker
-// Niezawodne wykrywanie NOWO pobranych zadań PDF i ZIP (Szkopuł, Koło MAP, OIJ, OI)
-// - Ścisłe śledzenie wcześniej pobranych plików (nie dubluje powiadomień po restarcie)
-// - Zabezpieczenie przed otwieraniem wielu okienek popupa (dokładnie 1 instancja powiadomienia)
+// Niezawodne, rygorystyczne wykrywanie ŚWIEŻO pobranych zadań PDF i ZIP (Szkopuł, Koło MAP, OIJ, OI)
+// - Wykorzystuje chrome.storage.session do jednoznacznej identyfikacji startu przeglądarki
+// - Chroni przed powielaniem okienek po restarcie komputera (stare pobrania są w 100% ignorowane)
+// - Obsługuje wyłącznie pobrania zainicjowane W TEJ SESJI przez użytkownika
+// - Singleton lock na otwieranie dedykowanego okna (dokładnie 1 instancja powiadomienia)
 
 const API_BASE = "http://127.0.0.1:8080";
-const SESSION_START_TIME = Date.now();
+
+let sessionBootEpoch = 0;
+let isSessionReady = false;
+let initPromise = null;
+
+// Pobrania zainicjowane (onCreated) WŁAŚNIE W TEJ SESJI po inicjalizacji
+const sessionCreatedDownloads = new Set();
 const handledDownloads = new Set();
 let seenFilesMap = {};
+
 let activeNotificationWindowId = null;
+let isOpeningWindow = false;
 
-// 1. Inicjalizacja: Wczytaj historię z chrome.storage i zindeksuj istniejące pliki
-async function initSession() {
-  try {
-    const res = await chrome.storage.local.get(["seen_files", "seen_downloads"]);
-    if (res.seen_files && typeof res.seen_files === "object") {
-      seenFilesMap = res.seen_files;
-    }
-    if (Array.isArray(res.seen_downloads)) {
-      for (const id of res.seen_downloads) {
-        handledDownloads.add(id);
+// 1. Inicjalizacja sesji z gwarancją odróżnienia restartu komputera / przeglądarki
+async function ensureSessionInitialized() {
+  if (isSessionReady) return;
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    try {
+      // chrome.storage.session czyści się samoczynnie przy restarcie przeglądarki!
+      let bootTime = 0;
+      try {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+          const sess = await chrome.storage.session.get(["session_boot_time"]);
+          if (sess && sess.session_boot_time) {
+            bootTime = sess.session_boot_time;
+          }
+        }
+      } catch (e) {
+        console.warn("[AlgoDeck] storage.session niedostępny:", e);
       }
-    }
 
-    // Zindeksuj WSZYSTKIE istniejące już pobrania w historii przeglądarki,
-    // aby po restarcie komputera lub ponownym uruchomieniu przeglądarki
-    // pliki sprzed restartu NIE były traktowane jako nowe!
-    const existing = await chrome.downloads.search({});
-    let updated = false;
-    for (const item of existing) {
-      if (item.id) handledDownloads.add(item.id);
-      if (item.filename) {
-        const normKey = item.filename.toLowerCase();
-        if (!seenFilesMap[normKey]) {
-          seenFilesMap[normKey] = {
-            startTime: item.startTime || 0,
-            endTime: item.endTime || 0,
-            url: item.url || "",
-            initial: true
-          };
-          updated = true;
+      if (!bootTime) {
+        // ŚWIEŻY START PRZEGLĄDARKI / RESTART KOMPUTERA
+        bootTime = Date.now();
+        sessionBootEpoch = bootTime;
+        try {
+          if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+            await chrome.storage.session.set({ session_boot_time: bootTime });
+          }
+        } catch (_) {}
+
+        // Wyczyść stare, wiszące stany z poprzednich dni / sesji
+        try {
+          if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+            await chrome.storage.local.remove([
+              "auto_pdf", "auto_pdf_ts", "auto_is_zip",
+              "algodeck_staged_pdf", "algodeck_staged_zip"
+            ]);
+          }
+        } catch (_) {}
+      } else {
+        sessionBootEpoch = bootTime;
+      }
+
+      // Wczytaj zindeksowane wcześniej pliki z local storage
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        const local = await chrome.storage.local.get(["seen_files", "seen_downloads"]);
+        if (local.seen_files && typeof local.seen_files === "object") {
+          seenFilesMap = local.seen_files;
+        }
+        if (Array.isArray(local.seen_downloads)) {
+          for (const id of local.seen_downloads) {
+            handledDownloads.add(id);
+          }
         }
       }
+
+      // Zindeksuj WSZYSTKIE istniejące już pobrania w historii przeglądarki
+      // Żadne z nich nie może być traktowane jako nowe!
+      if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
+        const existing = await chrome.downloads.search({});
+        for (const item of existing) {
+          if (item.id) handledDownloads.add(item.id);
+          if (item.filename) {
+            const normKey = item.filename.toLowerCase();
+            seenFilesMap[normKey] = {
+              downloadId: item.id,
+              time: item.startTime ? new Date(item.startTime).getTime() : 0,
+              handled: true
+            };
+          }
+        }
+      }
+
+      // Zapisz zaktualizowaną historię
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        const entries = Object.entries(seenFilesMap).slice(-300);
+        seenFilesMap = Object.fromEntries(entries);
+        await chrome.storage.local.set({
+          seen_downloads: Array.from(handledDownloads).slice(-200),
+          seen_files: seenFilesMap
+        });
+      }
+    } catch (err) {
+      console.warn("[AlgoDeck] Błąd inicjalizacji sesji pobrań:", err);
+    } finally {
+      isSessionReady = true;
     }
-    if (updated) {
-      // Zachowaj maksymalnie 300 ostatnich wpisów
-      const entries = Object.entries(seenFilesMap).slice(-300);
-      seenFilesMap = Object.fromEntries(entries);
-      await chrome.storage.local.set({ seen_files: seenFilesMap });
-    }
-  } catch (err) {
-    console.warn("[AlgoDeck] Błąd inicjalizacji sesji pobrań:", err);
-  }
+  })();
+
+  return initPromise;
 }
-initSession();
+
+// Uruchom od razu
+ensureSessionInitialized();
 
 async function markHandled(downloadId, filename, url) {
   handledDownloads.add(downloadId);
+  sessionCreatedDownloads.delete(downloadId);
+
   if (filename) {
     const normKey = filename.toLowerCase();
     seenFilesMap[normKey] = {
@@ -67,13 +129,15 @@ async function markHandled(downloadId, filename, url) {
   }
 
   try {
-    const dList = Array.from(handledDownloads).slice(-200);
-    const entries = Object.entries(seenFilesMap).slice(-300);
-    seenFilesMap = Object.fromEntries(entries);
-    await chrome.storage.local.set({
-      seen_downloads: dList,
-      seen_files: seenFilesMap
-    });
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      const dList = Array.from(handledDownloads).slice(-200);
+      const entries = Object.entries(seenFilesMap).slice(-300);
+      seenFilesMap = Object.fromEntries(entries);
+      await chrome.storage.local.set({
+        seen_downloads: dList,
+        seen_files: seenFilesMap
+      });
+    }
   } catch (e) {}
 }
 
@@ -131,9 +195,9 @@ async function processDownload(downloadId) {
       return;
     }
 
-    // 2. Ignorujemy pliki pobrane przed startem tej sesji przeglądarki
+    // 2. Dodatkowa walidacja czasu: pobranie MUSIAŁO się rozpocząć po czasie startu sesji (+ margines)
     const startTime = item.startTime ? new Date(item.startTime).getTime() : 0;
-    if (startTime > 0 && startTime < (SESSION_START_TIME - 3000)) {
+    if (startTime > 0 && startTime < sessionBootEpoch) {
       markHandled(downloadId, filename, item.url);
       return;
     }
@@ -154,10 +218,11 @@ async function processDownload(downloadId) {
     }
 
     if (!isOlympicTaskFile(item)) {
+      markHandled(downloadId, filename, item.url);
       return;
     }
 
-    // 4. Sprawdź czy automatyczne wykrywanie nie zostało wyłączone
+    // 4. Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
     let autoDetect = true;
     try {
       const stored = await chrome.storage.local.get(["auto_detect_downloads"]);
@@ -167,7 +232,7 @@ async function processDownload(downloadId) {
     } catch (e) {}
 
     if (!autoDetect) {
-      console.log("[AlgoDeck] Automatyczne wykrywanie pobrań wyłączone.");
+      markHandled(downloadId, filename, item.url);
       return;
     }
 
@@ -182,7 +247,7 @@ async function processDownload(downloadId) {
     if (handledDownloads.has(downloadId) || seenFilesMap[normKey]) return;
     await markHandled(downloadId, filename, item.url);
 
-    console.log("[AlgoDeck] Wykryto nowo pobrany plik zadania:", filename);
+    console.log("[AlgoDeck] Rzeczywiście wykryto NOWO pobrany plik zadania:", filename);
 
     // Zapisz w pamięci podręcznej rozszerzenia
     try {
@@ -192,17 +257,6 @@ async function processDownload(downloadId) {
         auto_is_zip: filename.toLowerCase().endsWith(".zip")
       });
     } catch (e) {}
-
-    // Wyślij do stagingu na backendzie
-    try {
-      await fetch(`${API_BASE}/api/auto-import-pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_path: filename, auto_create: false })
-      });
-    } catch (err) {
-      console.warn("[AlgoDeck] Serwer nie odpowiada jeszcze na staging:", err);
-    }
 
     // Powiadomienie systemowe Chrome (Native OS Toast)
     const baseName = filename.replace(/^.*[\\\/]/, '');
@@ -219,32 +273,39 @@ async function processDownload(downloadId) {
       }
     } catch (e) {}
 
-    // Otwórz DOKŁADNIE JEDNO dedykowane okienko powiadomienia (singleton)
+    // Otwórz DOKŁADNIE JEDNO dedykowane okienko powiadomienia (singleton lock)
     await openDedicatedNotificationWindow(filename);
   });
 }
 
-// Otwieranie dedykowanego okienka powiadomienia 1-kliknięcie (Ściśle JEDNA instancja okna)
+// Otwieranie dedykowanego okienka powiadomienia (Singleton Lock - ZAWSZE maksymalnie 1 okno!)
 async function openDedicatedNotificationWindow(filename) {
-  const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}`);
-
-  if (activeNotificationWindowId !== null) {
-    try {
-      const existingWin = await chrome.windows.get(activeNotificationWindowId);
-      if (existingWin) {
-        const tabs = await chrome.tabs.query({ windowId: activeNotificationWindowId });
-        if (tabs && tabs.length > 0) {
-          await chrome.tabs.update(tabs[0].id, { url: targetUrl });
-          await chrome.windows.update(activeNotificationWindowId, { focused: true });
-          return;
-        }
-      }
-    } catch (_) {
-      activeNotificationWindowId = null;
-    }
+  if (isOpeningWindow) {
+    console.log("[AlgoDeck] Okno powiadomienia jest już w trakcie otwierania - pomijam duplikat.");
+    return;
   }
+  isOpeningWindow = true;
 
   try {
+    const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}`);
+
+    // Przeszukaj wszystkie istniejące okna przeglądarki pod kątem otwartego już popup.html AlgoDeck
+    try {
+      const allWindows = await chrome.windows.getAll({ populate: true });
+      for (const win of allWindows) {
+        if (win.tabs) {
+          const popupTab = win.tabs.find(t => t.url && t.url.includes("popup.html"));
+          if (popupTab) {
+            await chrome.tabs.update(popupTab.id, { url: targetUrl });
+            await chrome.windows.update(win.id, { focused: true });
+            activeNotificationWindowId = win.id;
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Jeśli nie ma otwartego okna AlgoDeck, stwórz DOKŁADNIE JEDNO
     const newWin = await chrome.windows.create({
       url: targetUrl,
       type: "popup",
@@ -255,15 +316,21 @@ async function openDedicatedNotificationWindow(filename) {
     activeNotificationWindowId = newWin.id;
   } catch (err) {
     console.warn("[AlgoDeck] Błąd otwierania okna popupa:", err);
+  } finally {
+    setTimeout(() => {
+      isOpeningWindow = false;
+    }, 600);
   }
 }
 
 // Czyszczenie referencji okna po jego zamknięciu
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === activeNotificationWindowId) {
-    activeNotificationWindowId = null;
-  }
-});
+if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.onRemoved) {
+  chrome.windows.onRemoved.addListener((windowId) => {
+    if (windowId === activeNotificationWindowId) {
+      activeNotificationWindowId = null;
+    }
+  });
+}
 
 // Synchronizacja ustawień z backendem
 async function syncSettingsFromBackend() {
@@ -280,23 +347,54 @@ async function syncSettingsFromBackend() {
 syncSettingsFromBackend();
 setInterval(syncSettingsFromBackend, 15000);
 
-// Nasłuchiwanie zdarzeń pobierania
-chrome.downloads.onChanged.addListener((delta) => {
-  if (delta.state && delta.state.current === "complete") {
-    processDownload(delta.id);
-  } else if (delta.filename && !delta.filename.current.endsWith(".crdownload")) {
-    processDownload(delta.id);
-  }
-});
+// Nasłuchiwanie utworzenia nowego pobrania (onCreated)
+if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onCreated) {
+  chrome.downloads.onCreated.addListener(async (item) => {
+    await ensureSessionInitialized();
 
-chrome.downloads.onCreated.addListener((item) => {
-  if (item.state === "complete") {
-    processDownload(item.id);
-  }
-});
+    if (!item || !item.id) return;
+
+    // Ignoruj pliki, które powstały przed startem tej sesji przeglądarki
+    const itemStart = item.startTime ? new Date(item.startTime).getTime() : Date.now();
+    if (itemStart < sessionBootEpoch) {
+      handledDownloads.add(item.id);
+      return;
+    }
+
+    // Rejestrujemy, że ten plik został zainicjowany W TEJ SESJI przez użytkownika!
+    sessionCreatedDownloads.add(item.id);
+
+    if (item.state === "complete") {
+      processDownload(item.id);
+    }
+  });
+}
+
+// Nasłuchiwanie zmian stanu pobierania (onChanged)
+if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onChanged) {
+  chrome.downloads.onChanged.addListener(async (delta) => {
+    await ensureSessionInitialized();
+
+    if (!delta || !delta.id) return;
+
+    // KLUCZOWE ZABEZPIECZENIE:
+    // Jeśli pobranie NIE zostało utworzone w tej aktywnej sesji przez użytkownika,
+    // to jest to zdarzenie odtwarzania historii przez przeglądarkę po restarcie — ignorujemy!
+    if (!sessionCreatedDownloads.has(delta.id)) {
+      handledDownloads.add(delta.id);
+      return;
+    }
+
+    if (delta.state && delta.state.current === "complete") {
+      processDownload(delta.id);
+    } else if (delta.filename && !delta.filename.current.endsWith(".crdownload")) {
+      processDownload(delta.id);
+    }
+  });
+}
 
 // Kliknięcie w powiadomienie systemowe
-if (chrome.notifications && chrome.notifications.onClicked) {
+if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {
   chrome.notifications.onClicked.addListener((notifId) => {
     chrome.storage.local.get(["auto_pdf"], (data) => {
       if (data.auto_pdf) {

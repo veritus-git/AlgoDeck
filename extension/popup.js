@@ -184,18 +184,11 @@ async function checkDaemonHealth() {
 // ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
   const urlParams = new URLSearchParams(window.location.search);
-  let autoPdf = urlParams.get("auto_pdf");
+  const autoPdf = urlParams.get("auto_pdf");
 
-  if (!autoPdf && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-    try {
-      const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
-      if (stored.auto_pdf && stored.auto_pdf_ts && (Date.now() - stored.auto_pdf_ts < 30000)) {
-        autoPdf = stored.auto_pdf;
-        chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts"]);
-      }
-    } catch (e) {}
-  }
-
+  // KLUCZOWE: Wyświetlaj widok wykrytego zadania TYLKO i WYŁĄCZNIE wtedy,
+  // gdy to okno zostało bezpośrednio otwarte jako powiadomienie z parametrem ?auto_pdf=...
+  // Zwykłe kliknięcie w ikonę rozszerzenia NIGDY nie wyświetla fałszywego powiadomienia!
   if (!autoPdf) return false;
 
   document.body.classList.add("detected-mode");
@@ -273,9 +266,16 @@ async function checkDetectedMode() {
     }
   };
 
-  btnDetClose.onclick = () => {
+  btnDetClose.onclick = async () => {
+    try {
+      await fetch(`${API_BASE}/api/clear-staged`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_type: "all" })
+      });
+    } catch (_) {}
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
+      chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip", "algodeck_staged_pdf", "algodeck_staged_zip"]);
     }
     window.close();
   };
@@ -447,40 +447,8 @@ function clearStagedStorage(type = "all") {
 }
 
 function restoreStagedStorage() {
-  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(["algodeck_staged_pdf", "algodeck_staged_zip"], (res) => {
-      if (res && res.algodeck_staged_pdf) {
-        hasPdfStaged = true;
-        stagedPdfName.textContent = res.algodeck_staged_pdf;
-        dropPdfBody.classList.add("hidden");
-        stagedPdfPill.classList.remove("hidden");
-      }
-      if (res && res.algodeck_staged_zip) {
-        hasZipStaged = true;
-        stagedZipName.textContent = res.algodeck_staged_zip;
-        dropZipBody.classList.add("hidden");
-        stagedZipPill.classList.remove("hidden");
-      }
-      updateFilesSubmitBtn();
-    });
-  }
-  try {
-    const savedPdf = localStorage.getItem("algodeck_staged_pdf");
-    if (savedPdf && !hasPdfStaged) {
-      hasPdfStaged = true;
-      stagedPdfName.textContent = savedPdf;
-      dropPdfBody.classList.add("hidden");
-      stagedPdfPill.classList.remove("hidden");
-    }
-    const savedZip = localStorage.getItem("algodeck_staged_zip");
-    if (savedZip && !hasZipStaged) {
-      hasZipStaged = true;
-      stagedZipName.textContent = savedZip;
-      dropZipBody.classList.add("hidden");
-      stagedZipPill.classList.remove("hidden");
-    }
-    updateFilesSubmitBtn();
-  } catch (_) {}
+  // Stan poczekalni (staging) jest pobierany bezpośrednio i autorytatywnie
+  // z backendu przez loadExistingStagedState() — nie pokazujemy przeterminowanych plików z pamięci lokalnej.
 }
 
 function setupDropZone(dropZoneEl, onFileDrop) {

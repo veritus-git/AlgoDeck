@@ -161,8 +161,7 @@ case "$ACTION" in
         open_gui "$@"
         ;;
     --gui-launch|--app-launch|--desktop)
-        start_daemon
-        open_gui "--launcher-status"
+        open_gui
         ;;
     tray|--tray)
         ensure_tray
