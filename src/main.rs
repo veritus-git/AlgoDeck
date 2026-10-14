@@ -149,6 +149,26 @@ fn run_daemon(port: u16) {
                     }
                 }
             }
+            "run_interactive" => {
+                if !active_id.is_empty() {
+                    let _ = std::process::Command::new("x-terminal-emulator")
+                        .args(["-e", &format!("algodeck run {}", active_id)])
+                        .spawn();
+                }
+            }
+            "next_task" | "prev_task" => {
+                let ws_path = settings_clone.get_workspace_path();
+                let problems = workspace::WorkspaceManager::list_problems(&ws_path);
+                if !problems.is_empty() {
+                    let cur_idx = problems.iter().position(|p| p.problem_id == active_id).unwrap_or(0);
+                    let new_idx = if action == "next_task" {
+                        (cur_idx + 1) % problems.len()
+                    } else {
+                        (cur_idx + problems.len() - 1) % problems.len()
+                    };
+                    streamdeck_clone.set_active_problem(&problems[new_idx].problem_id);
+                }
+            }
             "open_menu" => {
                 let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
                 let _ = std::process::Command::new(self_exe).spawn();
@@ -162,6 +182,15 @@ fn run_daemon(port: u16) {
             _ => {}
         }
     });
+
+    // Ustaw początkowe aktywne zadanie na Stream Decku jeśli istnieje w workspace
+    let ws_path = settings.get_workspace_path();
+    let problems = workspace::WorkspaceManager::list_problems(&ws_path);
+    if let Some(first) = problems.first() {
+        streamdeck.set_active_problem(&first.problem_id);
+    } else {
+        streamdeck.set_idle_screen();
+    }
 
     // Uruchom wątek sprzętowy Stream Deck USB HID
     streamdeck.clone().start_hardware_thread(action_callback);

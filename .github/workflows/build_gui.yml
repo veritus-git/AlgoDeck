@@ -1,4 +1,4 @@
-name: Build and Release AlgoDeck Rust GUI
+name: Build and Release AlgoDeck Standalone Binary
 
 on:
   push:
@@ -20,26 +20,26 @@ jobs:
           # Linux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary_name: algodeck-gui
-            artifact_name: algodeck-gui-linux-x86_64
+            binary_name: algodeck
+            artifact_name: algodeck-linux-x86_64
 
           # macOS Apple Silicon (arm64)
           - os: macos-14
             target: aarch64-apple-darwin
-            binary_name: algodeck-gui
-            artifact_name: algodeck-gui-macos-arm64
+            binary_name: algodeck
+            artifact_name: algodeck-macos-arm64
 
-          # macOS Intel (x86_64) - cross-compiled on macos-14 Apple Silicon
+          # macOS Intel (x86_64)
           - os: macos-14
             target: x86_64-apple-darwin
-            binary_name: algodeck-gui
-            artifact_name: algodeck-gui-macos-x86_64
+            binary_name: algodeck
+            artifact_name: algodeck-macos-x86_64
 
           # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary_name: algodeck-gui.exe
-            artifact_name: algodeck-gui-windows-x86_64.exe
+            binary_name: algodeck.exe
+            artifact_name: algodeck-windows-x86_64.exe
 
     steps:
       - name: Checkout repository
@@ -49,15 +49,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libasound2-dev libudev-dev pkg-config
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libasound2-dev libudev-dev libhidapi-dev pkg-config
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build Rust GUI
-        working-directory: gui
+      - name: Build Rust Standalone Binary
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare Artifact
@@ -65,9 +64,9 @@ jobs:
         run: |
           mkdir -p dist
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp gui/target/${{ matrix.target }}/release/algodeck-gui.exe dist/${{ matrix.artifact_name }}
+            cp target/${{ matrix.target }}/release/algodeck.exe dist/${{ matrix.artifact_name }}
           else
-            cp gui/target/${{ matrix.target }}/release/algodeck-gui dist/${{ matrix.artifact_name }}
+            cp target/${{ matrix.target }}/release/algodeck dist/${{ matrix.artifact_name }}
             chmod +x dist/${{ matrix.artifact_name }}
           fi
 
@@ -115,11 +114,11 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release_tag.outputs.name }}
           body: |
-            Natywne binarki panelu AlgoDeck Rust GUI (`algodeck-gui`) skompilowane dla wszystkich platform:
-            - **Linux x86_64:** `algodeck-gui-linux-x86_64`
-            - **macOS Apple Silicon:** `algodeck-gui-macos-arm64`
-            - **macOS Intel:** `algodeck-gui-macos-x86_64`
-            - **Windows x86_64:** `algodeck-gui-windows-x86_64.exe`
+            Natywne pojedyncze binarki AlgoDeck (100% Rust) skompilowane dla wszystkich platform:
+            - **Linux x86_64:** `algodeck-linux-x86_64`
+            - **macOS Apple Silicon:** `algodeck-macos-arm64`
+            - **macOS Intel:** `algodeck-macos-x86_64`
+            - **Windows x86_64:** `algodeck-windows-x86_64.exe`
             
             Wersja: `${{ steps.release_tag.outputs.tag }}`
             Commit: `${{ github.sha }}`

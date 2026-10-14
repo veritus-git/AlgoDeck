@@ -157,8 +157,18 @@ pub fn open_control_panel() {
 pub fn stop_algodeck() {
     let pid_file = std::env::temp_dir().join("algodeck_tray.pid");
     let _ = std::fs::remove_file(pid_file);
-    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
-    let _ = Command::new(self_exe).arg("stop").spawn();
+
+    let _ = ureq::post("http://127.0.0.1:8080/api/shutdown")
+        .timeout(std::time::Duration::from_millis(500))
+        .call();
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("systemctl")
+            .args(["--user", "stop", "algodeck.service"])
+            .output();
+        let _ = Command::new("pkill").arg("-9").arg("-f").arg("algodeck daemon").output();
+    }
 }
 
 #[cfg(target_os = "linux")]

@@ -19,6 +19,9 @@ pub struct AppSettings {
     #[serde(default = "default_cpp_standard")]
     pub cpp_standard: String,
 
+    #[serde(default)]
+    pub sanitize_enabled: bool,
+
     #[serde(default = "default_open_pdf_in_vscode")]
     pub open_pdf_in_vscode: bool,
 
@@ -94,6 +97,7 @@ impl Default for AppSettings {
             notifications: default_notifications(),
             auto_detect_downloads: default_auto_detect_downloads(),
             cpp_standard: default_cpp_standard(),
+            sanitize_enabled: false,
             open_pdf_in_vscode: default_open_pdf_in_vscode(),
             cxx_compiler: default_compiler(),
             cxx_release_flags: default_release_flags(),

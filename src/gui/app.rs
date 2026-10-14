@@ -9,9 +9,8 @@ use crate::workspace::{ProblemSummary, WorkspaceManager};
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum ActiveTab {
-    Import,
-    Manual,
-    Tasks,
+    NewTask,
+    TasksList,
     Settings,
 }
 
@@ -19,7 +18,7 @@ pub struct AlgoDeckGuiApp {
     pub current_tab: ActiveTab,
     pub settings: AppSettings,
 
-    // Import state
+    // Import / New task state
     pub pdf_path: String,
     pub zip_path: String,
     pub task_code: String,
@@ -29,7 +28,8 @@ pub struct AlgoDeckGuiApp {
     pub detected_tests_count: usize,
     pub is_submitting: bool,
 
-    // Manual state
+    // Manual input toggle
+    pub show_manual_inputs: bool,
     pub manual_cin: String,
     pub manual_cout: String,
 
@@ -44,7 +44,7 @@ pub struct AlgoDeckGuiApp {
     pub show_settings_offline: bool,
 
     // Status toast
-    pub status_message: Option<(String, bool)>, // (msg, is_error)
+    pub status_message: Option<(String, bool)>,
 }
 
 impl AlgoDeckGuiApp {
@@ -57,7 +57,7 @@ impl AlgoDeckGuiApp {
         let active_id = Self::fetch_active_problem_id();
 
         let mut app = Self {
-            current_tab: ActiveTab::Import,
+            current_tab: ActiveTab::NewTask,
             settings,
             pdf_path: String::new(),
             zip_path: String::new(),
@@ -67,6 +67,7 @@ impl AlgoDeckGuiApp {
             memory_limit: 128,
             detected_tests_count: 0,
             is_submitting: false,
+            show_manual_inputs: false,
             manual_cin: String::new(),
             manual_cout: String::new(),
             problems,
@@ -83,7 +84,6 @@ impl AlgoDeckGuiApp {
                 app.set_pdf(pdf);
             }
         } else {
-            // Check staging for pre-existing files
             app.check_staging_files();
         }
 
@@ -92,7 +92,7 @@ impl AlgoDeckGuiApp {
 
     fn check_backend_alive() -> bool {
         match ureq::get("http://127.0.0.1:8080/api/status")
-            .timeout(std::time::Duration::from_millis(400))
+            .timeout(std::time::Duration::from_millis(300))
             .call()
         {
             Ok(r) => r.status() == 200,
@@ -102,7 +102,7 @@ impl AlgoDeckGuiApp {
 
     fn fetch_active_problem_id() -> String {
         if let Ok(res) = ureq::get("http://127.0.0.1:8080/api/status")
-            .timeout(std::time::Duration::from_millis(400))
+            .timeout(std::time::Duration::from_millis(300))
             .call()
         {
             if let Ok(json) = res.into_json::<serde_json::Value>() {
@@ -165,7 +165,7 @@ impl AlgoDeckGuiApp {
 
 impl eframe::App for AlgoDeckGuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Periodic check for daemon alive if in starting state
+        // Okresowe sprawdzanie czy serwer jest online podczas startu
         if self.is_starting_daemon {
             if Self::check_backend_alive() {
                 self.is_backend_online = true;
@@ -177,35 +177,190 @@ impl eframe::App for AlgoDeckGuiApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(300));
         }
 
-        // Render main view
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(COLOR_BG_DARK))
             .show(ctx, |ui| {
+                // 1. Oryginalny, customowy pasek tytułowy (z obsługą przeciągania, minimalizacji i zamykania)
+                self.render_custom_titlebar(ctx, ui);
+
+                // 2. Widok Standby Hero (gdy backend offline i nie przeglądamy ustawień)
                 if !self.is_backend_online && !self.show_settings_offline {
                     self.render_offline_hero_view(ui);
-                } else {
-                    self.render_active_dashboard_view(ui);
+                    return;
+                }
+
+                // 3. Pasek Zakładek (Nowe Zadanie, Zadania, Ustawienia)
+                self.render_tab_bar(ui);
+
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+
+                // 4. Zawartość aktywnej zakładki w przewijanym obszarze
+                egui::Frame::none()
+                    .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                    .show(ui, |ui| {
+                        match self.current_tab {
+                            ActiveTab::NewTask => self.render_tab_new_task(ui),
+                            ActiveTab::TasksList => self.render_tab_tasks(ui),
+                            ActiveTab::Settings => self.render_tab_settings(ui),
+                        }
+                    });
+
+                // 5. Dolny pasek statusu (Toast)
+                if let Some((ref msg, is_err)) = self.status_message {
+                    ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+                        let fill = if is_err { Color32::from_rgb(127, 29, 29) } else { Color32::from_rgb(6, 78, 59) };
+                        let stroke = if is_err { COLOR_RED } else { COLOR_GREEN };
+                        egui::Frame::none()
+                            .fill(fill)
+                            .stroke(Stroke::new(1.0f32, stroke))
+                            .rounding(Rounding::same(5.0))
+                            .inner_margin(egui::Margin::symmetric(10.0, 5.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(msg).color(Color32::WHITE).size(11.0).strong());
+                            });
+                    });
                 }
             });
     }
 }
 
 impl AlgoDeckGuiApp {
-    // ----------------- 1. OFFLINE HERO VIEW (Approved Emerald Circle) -----------------
+    // ----------------- 1. ORYGINALNY CUSTOMOWY PASEK TYTUŁOWY -----------------
+    fn render_custom_titlebar(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        let width = ui.available_width();
+        egui::Frame::none()
+            .fill(Color32::from_rgb(20, 24, 34))
+            .rounding(0.0)
+            .inner_margin(0.0)
+            .show(ui, |ui| {
+                ui.set_min_size(vec2(width, 34.0));
+                ui.set_max_size(vec2(width, 34.0));
+
+                let title_bar_rect = ui.max_rect();
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+
+                    let (close_rect, min_rect) = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let button_size = [42.0, 34.0];
+                        let stroke = Stroke::new(1.0f32, Color32::from_gray(215));
+
+                        // 1. Zamknij (X)
+                        let (close_rect, close_resp) = ui.allocate_exact_size(button_size.into(), egui::Sense::click());
+                        if close_resp.clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        let is_close_hovered = close_resp.hovered()
+                            || ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| close_rect.contains(p)));
+                        if is_close_hovered {
+                            ui.painter().rect_filled(close_rect, 0.0, Color32::from_rgb(200, 40, 40));
+                        }
+                        let center = close_rect.center();
+                        ui.painter().line_segment([center + vec2(-4.0, -4.0), center + vec2(4.0, 4.0)], stroke);
+                        ui.painter().line_segment([center + vec2(-4.0, 4.0), center + vec2(4.0, -4.0)], stroke);
+                        close_resp.on_hover_text("Zamknij");
+
+                        // 2. Minimalizuj (-)
+                        let (min_rect, min_resp) = ui.allocate_exact_size(button_size.into(), egui::Sense::click());
+                        if min_resp.clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                        let is_min_hovered = min_resp.hovered()
+                            || ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| min_rect.contains(p)));
+                        if is_min_hovered {
+                            ui.painter().rect_filled(min_rect, 0.0, Color32::from_white_alpha(15));
+                        }
+                        let m_center = min_rect.center();
+                        ui.painter().line_segment([m_center + vec2(-4.0, 0.0), m_center + vec2(4.0, 0.0)], stroke);
+                        min_resp.on_hover_text("Minimalizuj");
+
+                        // 3. Lewa strona (tytuł i logo)
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("⚡").color(COLOR_CYAN_ACCENT).size(14.0).strong());
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("AlgoDeck").color(Color32::from_gray(230)).size(12.0).strong());
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("KOŁO MAP • OI").color(COLOR_CYAN_ACCENT).size(9.5).strong());
+                        });
+
+                        (close_rect, min_rect)
+                    }).inner;
+
+                    // Przeciąganie okna kursorem myszy
+                    if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                        if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                            if title_bar_rect.contains(pos) && !close_rect.contains(pos) && !min_rect.contains(pos) {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                            }
+                        }
+                    }
+                });
+            });
+    }
+
+    // ----------------- 2. PASEK ZAKŁADEK -----------------
+    fn render_tab_bar(&mut self, ui: &mut Ui) {
+        egui::Frame::none()
+            .fill(Color32::from_rgb(14, 18, 28))
+            .inner_margin(egui::Margin::symmetric(10.0, 4.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let tabs = [
+                        (ActiveTab::NewTask, "+ Nowe Zadanie"),
+                        (ActiveTab::TasksList, "Zadania"),
+                        (ActiveTab::Settings, "Ustawienia"),
+                    ];
+
+                    for (tab, label) in tabs {
+                        let is_active = self.current_tab == tab;
+                        let bg = if is_active { COLOR_SURFACE_LIGHT } else { Color32::TRANSPARENT };
+                        let fg = if is_active { COLOR_CYAN_ACCENT } else { COLOR_TEXT_MUTED };
+
+                        let btn = ui.add(
+                            egui::Button::new(RichText::new(label).color(fg).size(12.0).strong())
+                                .fill(bg)
+                                .stroke(Stroke::NONE)
+                                .rounding(Rounding::same(4.0))
+                                .min_size(vec2(85.0, 24.0)),
+                        );
+
+                        if btn.clicked() {
+                            self.current_tab = tab;
+                            self.show_settings_offline = false;
+                            if tab == ActiveTab::TasksList {
+                                self.refresh_problems();
+                            }
+                        }
+                    }
+
+                    // Wskaźnik ONLINE po prawej stronie
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (dot_color, label) = if self.is_backend_online {
+                            (COLOR_GREEN, "ONLINE")
+                        } else {
+                            (COLOR_TEXT_MUTED, "OFFLINE")
+                        };
+                        ui.label(RichText::new(label).color(dot_color).size(10.0).strong());
+                    });
+                });
+            });
+    }
+
+    // ----------------- 3. OFFLINE HERO VIEW (SZMARAGDOWY OKRĄGŁY PRZYCISK) -----------------
     fn render_offline_hero_view(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(35.0);
+            ui.add_space(28.0);
 
-            // 1. Tytuł i minimalistyczny branding
-            ui.label(RichText::new("⚡").color(COLOR_CYAN_ACCENT).size(38.0));
-            ui.add_space(6.0);
-            ui.label(RichText::new("AlgoDeck").color(Color32::WHITE).size(22.0).strong());
+            ui.label(RichText::new("⚡").color(COLOR_CYAN_ACCENT).size(36.0));
+            ui.add_space(4.0);
+            ui.label(RichText::new("AlgoDeck").color(Color32::WHITE).size(20.0).strong());
             ui.add_space(2.0);
-            ui.label(RichText::new("KOŁO MAP • OLIMPIADA INFORMATYCZNA").color(COLOR_CYAN_ACCENT).size(9.5).strong());
+            ui.label(RichText::new("KOŁO MAP • OLIMPIADA INFORMATYCZNA").color(COLOR_CYAN_ACCENT).size(9.0).strong());
 
-            ui.add_space(38.0);
+            ui.add_space(32.0);
 
-            // 2. JEDEN DUŻY PRZYCISK W KSZTAŁCIE OKRĘGU (168px Nasycony Szmaragd)
+            // JEDEN DUŻY PRZYCISK W KSZTAŁCIE OKRĘGU (168px Nasycony Szmaragd)
             let diameter = 168.0;
             let (rect, response) = ui.allocate_exact_size(vec2(diameter, diameter), egui::Sense::click());
             let center = rect.center();
@@ -223,7 +378,7 @@ impl AlgoDeckGuiApp {
                 );
             }
 
-            // Kolory głównego okręgu (Nasycony Szmaragd)
+            // Kolory głównego okręgu
             let (fill_color, border_stroke) = if self.is_starting_daemon {
                 (
                     Color32::from_rgb(30, 41, 59),
@@ -248,11 +403,9 @@ impl AlgoDeckGuiApp {
             let text_color = if self.is_starting_daemon { Color32::from_rgb(148, 163, 184) } else { Color32::from_rgb(236, 253, 245) };
             let label_text = if self.is_starting_daemon { "STARTING..." } else { "START" };
 
-            // Duża błyskawica ⚡
             let bolt_pos = pos2(center.x, center.y - 12.0);
             ui.painter().text(bolt_pos, Align2::CENTER_CENTER, "⚡", egui::FontId::proportional(54.0), icon_color);
 
-            // Podpis START pod błyskawicą
             let label_pos = pos2(center.x, center.y + 32.0);
             ui.painter().text(label_pos, Align2::CENTER_CENTER, label_text, egui::FontId::proportional(12.5), text_color);
 
@@ -268,12 +421,11 @@ impl AlgoDeckGuiApp {
             }
         });
 
-        // 3. NA SAMYM DOLE: Konfiguracja i Ustawienia
+        // Konfiguracja i Ustawienia na dole
         ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-            ui.add_space(24.0);
-
+            ui.add_space(20.0);
             let btn_settings = ui.add(
-                egui::Button::new(RichText::new("⚙ Konfiguracja i Ustawienia").color(COLOR_TEXT_MUTED).size(11.5))
+                egui::Button::new(RichText::new("⚙ Konfiguracja i Ustawienia").color(COLOR_TEXT_MUTED).size(11.0))
                     .fill(Color32::TRANSPARENT)
                     .stroke(Stroke::NONE),
             );
@@ -281,543 +433,430 @@ impl AlgoDeckGuiApp {
                 self.show_settings_offline = true;
                 self.current_tab = ActiveTab::Settings;
             }
-
-            if let Some((ref msg, is_err)) = self.status_message {
-                let color = if is_err { COLOR_RED } else { COLOR_GREEN };
-                ui.label(RichText::new(msg).color(color).size(10.5));
-                ui.add_space(4.0);
-            }
         });
     }
 
-    // ----------------- 2. ACTIVE DASHBOARD VIEW -----------------
-    fn render_active_dashboard_view(&mut self, ui: &mut Ui) {
-        // Górny pasek nagłówka
-        self.render_header(ui);
-
-        // Pasek aktywnego zadania (jeśli jest zadanie)
-        if !self.active_problem_id.is_empty() {
-            self.render_active_task_banner(ui);
-        }
-
-        ui.add_space(6.0);
-
-        // Nawigacja po zakładkach
-        self.render_nav_tabs(ui);
-
-        ui.add_space(8.0);
-
-        // Zawartość aktywnej zakładki
-        match self.current_tab {
-            ActiveTab::Import => self.render_import_tab(ui),
-            ActiveTab::Manual => self.render_manual_tab(ui),
-            ActiveTab::Tasks => self.render_tasks_tab(ui),
-            ActiveTab::Settings => self.render_settings_tab(ui),
-        }
-
-        // Dolny toast
-        if let Some((ref msg, is_err)) = self.status_message {
-            ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                ui.add_space(10.0);
-                let bg = if is_err { Color32::from_rgb(69, 10, 10) } else { Color32::from_rgb(6, 78, 59) };
-                let stroke = if is_err { COLOR_RED } else { COLOR_GREEN };
-                egui::Frame::none()
-                    .fill(bg)
-                    .stroke(Stroke::new(1.0_f32, stroke))
-                    .rounding(Rounding::same(6.0))
-                    .inner_margin(egui::Margin::symmetric(14.0, 6.0))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new(msg).color(Color32::WHITE).size(11.0).strong());
-                    });
-            });
-        }
-    }
-
-    fn render_header(&mut self, ui: &mut Ui) {
-        egui::Frame::none()
-            .fill(COLOR_SURFACE)
-            .stroke(Stroke::new(1.0_f32, COLOR_BORDER))
-            .inner_margin(egui::Margin::symmetric(14.0, 10.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("⚡").color(COLOR_CYAN_ACCENT).size(18.0));
-                    ui.add_space(2.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new("AlgoDeck").color(Color32::WHITE).size(13.0).strong());
-                        ui.label(RichText::new("KOŁO MAP • OLIMPIADA INFORMATYCZNA").color(COLOR_CYAN_ACCENT).size(8.5).strong());
-                    });
-
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let (dot_color, label) = if self.is_backend_online {
-                            (COLOR_GREEN, "ONLINE")
-                        } else {
-                            (COLOR_TEXT_MUTED, "OFFLINE")
-                        };
-
-                        egui::Frame::none()
-                            .fill(Color32::from_rgb(14, 22, 38))
-                            .stroke(Stroke::new(1.0_f32, COLOR_BORDER))
-                            .rounding(Rounding::same(12.0))
-                            .inner_margin(egui::Margin::symmetric(8.0, 3.0))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.painter().circle_filled(ui.cursor().min + vec2(4.0, 6.0), 3.5, dot_color);
-                                    ui.add_space(8.0);
-                                    ui.label(RichText::new(label).color(Color32::WHITE).size(9.5).strong());
-                                });
-                            });
-                    });
-                });
-            });
-    }
-
-    fn render_active_task_banner(&mut self, ui: &mut Ui) {
-        egui::Frame::none()
-            .fill(Color32::from_rgb(14, 30, 52))
-            .stroke(Stroke::new(1.0_f32, COLOR_CYAN))
-            .inner_margin(egui::Margin::symmetric(14.0, 7.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("●").color(COLOR_EMERALD_ACCENT).size(11.0));
-                    ui.add_space(2.0);
-                    ui.label(RichText::new("Aktywne:").color(COLOR_TEXT_MUTED).size(10.5));
-                    ui.label(RichText::new(self.active_problem_id.to_uppercase()).color(Color32::WHITE).size(11.5).strong());
-
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let btn_vs = ui.add(
-                            egui::Button::new(RichText::new("VS Code").color(Color32::WHITE).size(10.5).strong())
-                                .fill(COLOR_CYAN)
-                                .stroke(Stroke::NONE)
-                                .rounding(Rounding::same(4.0)),
-                        );
-                        if btn_vs.clicked() {
-                            let _ = ureq::post(&format!("http://127.0.0.1:8080/api/open-vscode/{}", self.active_problem_id)).call();
-                        }
-                    });
-                });
-            });
-    }
-
-    fn render_nav_tabs(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            let tabs = [
-                (ActiveTab::Import, "⚡ Import (PDF + ZIP)"),
-                (ActiveTab::Manual, "✍ Ręczny Workspace"),
-                (ActiveTab::Tasks, "📁 Zadania"),
-                (ActiveTab::Settings, "⚙ Ustawienia"),
-            ];
-
-            for (tab, label) in tabs {
-                let is_active = self.current_tab == tab;
-                let text_color = if is_active { Color32::WHITE } else { COLOR_TEXT_MUTED };
-                let bg_color = if is_active { COLOR_SURFACE_LIGHT } else { Color32::TRANSPARENT };
-                let stroke = if is_active { Stroke::new(1.0_f32, COLOR_CYAN_ACCENT) } else { Stroke::NONE };
-
-                let btn = ui.add(
-                    egui::Button::new(RichText::new(label).color(text_color).size(11.0).strong())
-                        .fill(bg_color)
-                        .stroke(stroke)
-                        .rounding(Rounding::same(5.0)),
-                );
-                if btn.clicked() {
-                    self.current_tab = tab;
-                    if tab == ActiveTab::Tasks {
-                        self.refresh_problems();
-                    }
-                }
-            }
-        });
-    }
-
-    // ----------------- TAB 1: IMPORT (PDF + ZIP) -----------------
-    fn render_import_tab(&mut self, ui: &mut Ui) {
-        ui.vertical(|ui| {
-            ui.add_space(4.0);
-
-            // Grid z dwoma obszarami dropzone
-            ui.columns(2, |cols| {
-                // Lewa kolumna: Plik PDF
-                cols[0].group(|ui| {
-                    ui.label(RichText::new("📄 Treść zadania (PDF)").color(Color32::WHITE).size(11.0).strong());
+    // ----------------- 4. TAB 1: NOWE ZADANIE -----------------
+    fn render_tab_new_task(&mut self, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            // Karta 1: Treść zadania (PDF)
+            egui::Frame::none()
+                .fill(COLOR_SURFACE)
+                .rounding(Rounding::same(6.0))
+                .stroke(Stroke::new(1.0f32, COLOR_BORDER))
+                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .show(ui, |ui| {
+                    ui.label(RichText::new("📄 Treść zadania (PDF)").color(COLOR_CYAN_ACCENT).size(11.0).strong());
                     ui.add_space(4.0);
 
                     if self.pdf_path.is_empty() {
-                        ui.label(RichText::new("Wybierz lub upuść plik .pdf").color(COLOR_TEXT_MUTED).size(10.0));
-                        ui.add_space(6.0);
-                        if ui.button("Wybierz PDF...").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_file() {
-                                self.set_pdf(path.to_string_lossy().to_string());
+                        let btn = ui.add_sized(
+                            vec2(ui.available_width(), 30.0),
+                            egui::Button::new(RichText::new("Wybierz plik PDF...").size(11.0)),
+                        );
+                        if btn.clicked() {
+                            if let Some(file) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_file() {
+                                self.set_pdf(file.to_string_lossy().to_string());
                             }
                         }
                     } else {
-                        let fname = Path::new(&self.pdf_path).file_name().unwrap_or_default().to_string_lossy().to_string();
-                        ui.label(RichText::new(format!("✓ {}", fname)).color(COLOR_EMERALD_ACCENT).size(10.5).strong());
-                        ui.add_space(4.0);
-                        if ui.button("✕ Usuń").clicked() {
-                            self.pdf_path.clear();
-                            self.task_code.clear();
-                            self.task_title.clear();
-                        }
+                        let name = Path::new(&self.pdf_path)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&name).color(Color32::WHITE).size(11.0));
+                            if ui.button(RichText::new("Usuń").color(COLOR_RED).size(10.0)).clicked() {
+                                self.pdf_path.clear();
+                            }
+                        });
                     }
                 });
 
-                // Prawa kolumna: Plik ZIP
-                cols[1].group(|ui| {
-                    ui.label(RichText::new("📦 Paczka testów (ZIP)").color(Color32::WHITE).size(11.0).strong());
+            ui.add_space(4.0);
+
+            // Karta 2: Paczka testów (ZIP)
+            egui::Frame::none()
+                .fill(COLOR_SURFACE)
+                .rounding(Rounding::same(6.0))
+                .stroke(Stroke::new(1.0f32, COLOR_BORDER))
+                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .show(ui, |ui| {
+                    ui.label(RichText::new("📦 Paczka testów (ZIP - opcjonalnie)").color(COLOR_CYAN_ACCENT).size(11.0).strong());
                     ui.add_space(4.0);
 
                     if self.zip_path.is_empty() {
-                        ui.label(RichText::new("Wybierz lub upuść plik .zip").color(COLOR_TEXT_MUTED).size(10.0));
-                        ui.add_space(6.0);
-                        if ui.button("Wybierz ZIP...").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().add_filter("ZIP", &["zip"]).pick_file() {
-                                self.zip_path = path.to_string_lossy().to_string();
-                                self.set_status("Dołączono archiwum ZIP!", false);
+                        let btn = ui.add_sized(
+                            vec2(ui.available_width(), 30.0),
+                            egui::Button::new(RichText::new("Wybierz plik ZIP...").size(11.0)),
+                        );
+                        if btn.clicked() {
+                            if let Some(file) = rfd::FileDialog::new().add_filter("ZIP", &["zip"]).pick_file() {
+                                self.zip_path = file.to_string_lossy().to_string();
                             }
                         }
                     } else {
-                        let fname = Path::new(&self.zip_path).file_name().unwrap_or_default().to_string_lossy().to_string();
-                        ui.label(RichText::new(format!("✓ {}", fname)).color(COLOR_EMERALD_ACCENT).size(10.5).strong());
-                        ui.add_space(4.0);
-                        if ui.button("✕ Usuń").clicked() {
-                            self.zip_path.clear();
-                        }
+                        let name = Path::new(&self.zip_path)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&name).color(Color32::WHITE).size(11.0));
+                            if ui.button(RichText::new("Usuń").color(COLOR_RED).size(10.0)).clicked() {
+                                self.zip_path.clear();
+                            }
+                        });
                     }
                 });
-            });
 
-            ui.add_space(8.0);
+            ui.add_space(4.0);
 
-            // Karta z weryfikacją metadanych (jeśli wybrano PDF lub podano kod)
-            if !self.pdf_path.is_empty() || !self.task_code.is_empty() {
-                egui::Frame::none()
-                    .fill(COLOR_SURFACE)
-                    .stroke(Stroke::new(1.0_f32, COLOR_BORDER))
-                    .rounding(Rounding::same(6.0))
-                    .inner_margin(egui::Margin::symmetric(12.0, 10.0))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Kod:").color(COLOR_TEXT_MUTED).size(10.5));
-                            ui.add_sized(vec2(70.0, 22.0), egui::TextEdit::singleline(&mut self.task_code));
-
-                            ui.add_space(8.0);
-                            ui.label(RichText::new("Tytuł:").color(COLOR_TEXT_MUTED).size(10.5));
-                            ui.add_sized(vec2(ui.available_width() - 10.0, 22.0), egui::TextEdit::singleline(&mut self.task_title));
-                        });
+            // Karta 3: Metadane zadania
+            egui::Frame::none()
+                .fill(COLOR_SURFACE)
+                .rounding(Rounding::same(6.0))
+                .stroke(Stroke::new(1.0f32, COLOR_BORDER))
+                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Kod:").color(COLOR_TEXT_MUTED).size(11.0));
+                        ui.add_sized(vec2(70.0, 22.0), egui::TextEdit::singleline(&mut self.task_code));
 
                         ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Limit czasu (s):").color(COLOR_TEXT_MUTED).size(10.5));
-                            ui.add(egui::DragValue::new(&mut self.time_limit).speed(0.1).range(0.1..=10.0));
+                        ui.label(RichText::new("Tytuł:").color(COLOR_TEXT_MUTED).size(11.0));
+                        ui.add_sized(vec2(ui.available_width(), 22.0), egui::TextEdit::singleline(&mut self.task_title));
+                    });
 
-                            ui.add_space(12.0);
-                            ui.label(RichText::new("RAM (MB):").color(COLOR_TEXT_MUTED).size(10.5));
-                            ui.add(egui::DragValue::new(&mut self.memory_limit).speed(16).range(16..=2048));
-                        });
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Limit (s):").color(COLOR_TEXT_MUTED).size(11.0));
+                        let mut t_str = format!("{:.1}", self.time_limit);
+                        if ui.add_sized(vec2(45.0, 22.0), egui::TextEdit::singleline(&mut t_str)).changed() {
+                            if let Ok(v) = t_str.parse::<f64>() {
+                                self.time_limit = v;
+                            }
+                        }
 
-                        if self.detected_tests_count > 0 {
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(format!("● Wykryto {} oficjalnych testów w PDF", self.detected_tests_count)).color(COLOR_EMERALD_ACCENT).size(10.0));
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("RAM (MB):").color(COLOR_TEXT_MUTED).size(11.0));
+                        let mut m_str = format!("{}", self.memory_limit);
+                        if ui.add_sized(vec2(55.0, 22.0), egui::TextEdit::singleline(&mut m_str)).changed() {
+                            if let Ok(v) = m_str.parse::<u64>() {
+                                self.memory_limit = v;
+                            }
                         }
                     });
 
-                ui.add_space(10.0);
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut self.show_manual_inputs, "Wklej ręczne testy (cin / cout)");
+                    if self.show_manual_inputs {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("Wejście (cin):").color(COLOR_TEXT_MUTED).size(9.5));
+                                ui.add_sized(vec2(ui.available_width() / 2.0 - 4.0, 48.0), egui::TextEdit::multiline(&mut self.manual_cin));
+                            });
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("Wyjście (cout):").color(COLOR_TEXT_MUTED).size(9.5));
+                                ui.add_sized(vec2(ui.available_width(), 48.0), egui::TextEdit::multiline(&mut self.manual_cout));
+                            });
+                        });
+                    }
+                });
 
-                // Duży przycisk rozpoczęcia
-                let btn_start = ui.add_sized(
-                    vec2(ui.available_width(), 38.0),
-                    egui::Button::new(RichText::new("⚡ Rozpocznij Zadanie w VS Code").color(Color32::WHITE).size(12.5).strong())
-                        .fill(COLOR_EMERALD)
-                        .stroke(Stroke::NONE)
-                        .rounding(Rounding::same(6.0)),
-                );
+            ui.add_space(10.0);
 
-                if btn_start.clicked() && !self.is_submitting {
-                    self.submit_import_task();
-                }
+            // Główny przycisk startu zadania
+            let can_submit = !self.task_code.trim().is_empty() && !self.is_submitting;
+            let start_btn = ui.add_sized(
+                vec2(ui.available_width(), 42.0),
+                egui::Button::new(RichText::new("⚡ Rozpocznij Zadanie w VS Code").color(Color32::WHITE).size(13.0).strong())
+                    .fill(if can_submit { COLOR_EMERALD } else { Color32::from_rgb(30, 41, 59) })
+                    .stroke(Stroke::NONE)
+                    .rounding(Rounding::same(6.0)),
+            );
+
+            if start_btn.clicked() && can_submit {
+                self.create_and_launch_task();
             }
         });
     }
 
-    fn submit_import_task(&mut self) {
+    fn create_and_launch_task(&mut self) {
+        self.is_submitting = true;
+        let ws_dir = self.settings.get_workspace_path();
         let code = self.task_code.trim().to_lowercase();
-        if code.is_empty() {
-            self.set_status("Podaj kod zadania!", true);
-            return;
+        let title = if self.task_title.is_empty() { code.to_uppercase() } else { self.task_title.clone() };
+
+        let mut tests = Vec::new();
+        if !self.manual_cin.trim().is_empty() {
+            tests.push(crate::pdf::TestCase {
+                id: "test_1".to_string(),
+                name: "Test 1".to_string(),
+                input: self.manual_cin.clone(),
+                expected_output: self.manual_cout.clone(),
+                is_edge_case: false,
+                tag: "manual".to_string(),
+            });
         }
 
-        self.is_submitting = true;
-        let _ws_dir = self.settings.get_workspace_path();
+        let analysis = crate::pdf::ProblemAnalysis {
+            problem_id: code.clone(),
+            title: title.clone(),
+            time_limit_sec: self.time_limit,
+            memory_limit_mb: self.memory_limit,
+            tests,
+            used_engine: "manual".to_string(),
+        };
 
-        let payload = serde_json::json!({
-            "file_path": self.pdf_path,
-            "problem_id": code,
-            "title": self.task_title,
-            "time_limit": self.time_limit,
-            "memory_limit": self.memory_limit,
-            "auto_create": true
-        });
-
-        match ureq::post("http://127.0.0.1:8080/api/auto-import-pdf")
-            .timeout(std::time::Duration::from_secs(6))
-            .send_json(payload)
-        {
+        match WorkspaceManager::create_problem(
+            &ws_dir,
+            &analysis,
+            if self.pdf_path.is_empty() { None } else { Some(Path::new(&self.pdf_path)) },
+        ) {
             Ok(_) => {
                 if !self.zip_path.is_empty() {
-                    let _ = self.upload_zip_tests(&code);
+                    if let Ok(bytes) = std::fs::read(&self.zip_path) {
+                        let _ = WorkspaceManager::add_tests_from_zip(&ws_dir, &code, &bytes);
+                    }
                 }
+                let _ = ureq::post(&format!("http://127.0.0.1:8080/api/set-active/{}", code)).call();
+                let _ = ureq::post(&format!("http://127.0.0.1:8080/api/open-vscode/{}", code)).call();
+
                 self.active_problem_id = code.clone();
-                self.set_status(&format!("Zadanie {} utworzone!", code.to_uppercase()), false);
-                self.pdf_path.clear();
-                self.zip_path.clear();
-                self.task_code.clear();
-                self.task_title.clear();
+                self.set_status(&format!("Zadanie {} utworzone i otwarte w VS Code!", code.to_uppercase()), false);
                 self.refresh_problems();
             }
             Err(e) => {
-                self.set_status(&format!("Błąd: {}", e), true);
+                self.set_status(&format!("Błąd tworzenia zadania: {}", e), true);
             }
         }
         self.is_submitting = false;
     }
 
-    fn upload_zip_tests(&self, problem_id: &str) -> Result<(), String> {
-        let zip_bytes = std::fs::read(&self.zip_path).map_err(|e| e.to_string())?;
-        let ws_dir = self.settings.get_workspace_path();
-        WorkspaceManager::add_tests_from_zip(&ws_dir, problem_id, &zip_bytes).map(|_| ())
-    }
-
-    // ----------------- TAB 2: RĘCZNY WORKSPACE -----------------
-    fn render_manual_tab(&mut self, ui: &mut Ui) {
-        egui::Frame::none()
-            .fill(COLOR_SURFACE)
-            .stroke(Stroke::new(1.0_f32, COLOR_BORDER))
-            .rounding(Rounding::same(6.0))
-            .inner_margin(egui::Margin::symmetric(14.0, 12.0))
-            .show(ui, |ui| {
-                ui.label(RichText::new("Kod zadania * (np. chw, kol, sil):").color(COLOR_TEXT_MUTED).size(10.5));
-                ui.add_sized(vec2(ui.available_width(), 24.0), egui::TextEdit::singleline(&mut self.task_code));
-
-                ui.add_space(6.0);
-                ui.label(RichText::new("Pełny tytuł (opcjonalny):").color(COLOR_TEXT_MUTED).size(10.5));
-                ui.add_sized(vec2(ui.available_width(), 24.0), egui::TextEdit::singleline(&mut self.task_title));
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Czas (s):").color(COLOR_TEXT_MUTED).size(10.5));
-                    ui.add(egui::DragValue::new(&mut self.time_limit).speed(0.1).range(0.1..=10.0));
-                    ui.add_space(8.0);
-                    ui.label(RichText::new("RAM (MB):").color(COLOR_TEXT_MUTED).size(10.5));
-                    ui.add(egui::DragValue::new(&mut self.memory_limit).speed(16).range(16..=2048));
-                });
-
-                ui.add_space(6.0);
-                ui.label(RichText::new("Przykładowe wejście cin:").color(COLOR_TEXT_MUTED).size(10.5));
-                ui.add_sized(vec2(ui.available_width(), 44.0), egui::TextEdit::multiline(&mut self.manual_cin));
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Oczekiwane wyjście cout:").color(COLOR_TEXT_MUTED).size(10.5));
-                ui.add_sized(vec2(ui.available_width(), 44.0), egui::TextEdit::multiline(&mut self.manual_cout));
-
-                ui.add_space(10.0);
-                let btn_create = ui.add_sized(
-                    vec2(ui.available_width(), 34.0),
-                    egui::Button::new(RichText::new("Utwórz Workspace").color(Color32::WHITE).size(12.0).strong())
-                        .fill(COLOR_EMERALD)
-                        .stroke(Stroke::NONE)
-                        .rounding(Rounding::same(5.0)),
-                );
-
-                if btn_create.clicked() {
-                    let code = self.task_code.trim().to_lowercase();
-                    if code.is_empty() {
-                        self.set_status("Podaj kod zadania!", true);
-                        return;
-                    }
-                    let payload = serde_json::json!({
-                        "problem_id": code,
-                        "title": self.task_title,
-                        "time_limit": self.time_limit,
-                        "memory_limit": self.memory_limit,
-                        "sample_cin": self.manual_cin,
-                        "sample_cout": self.manual_cout
-                    });
-                    if let Ok(_) = ureq::post("http://127.0.0.1:8080/api/create-manual").send_json(payload) {
-                        self.active_problem_id = code.clone();
-                        self.set_status(&format!("Utworzono zadanie {}", code.to_uppercase()), false);
-                        self.task_code.clear();
-                        self.task_title.clear();
-                        self.manual_cin.clear();
-                        self.manual_cout.clear();
-                        self.refresh_problems();
-                    }
-                }
-            });
-    }
-
-    // ----------------- TAB 3: ZADANIA (GALLERY) -----------------
-    fn render_tasks_tab(&mut self, ui: &mut Ui) {
+    // ----------------- 5. TAB 2: ZADANIA (WIDOK LISTY KTÓRY SIĘ SPODOBAŁ) -----------------
+    fn render_tab_tasks(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("🔍").size(12.0));
-            ui.add_sized(vec2(ui.available_width() - 80.0, 24.0), egui::TextEdit::singleline(&mut self.search_query).hint_text("Szukaj zadania..."));
-            if ui.button("Odśwież").clicked() {
+            ui.label(RichText::new("🔎").size(12.0));
+            ui.add_sized(
+                vec2(ui.available_width() - 75.0, 24.0),
+                egui::TextEdit::singleline(&mut self.search_query).hint_text("Filtruj zadania..."),
+            );
+            if ui.button(RichText::new("Odśwież").size(10.5)).clicked() {
                 self.refresh_problems();
+                self.active_problem_id = Self::fetch_active_problem_id();
             }
         });
 
-        ui.add_space(8.0);
+        ui.add_space(6.0);
 
-        let query = self.search_query.to_lowercase();
-        let filtered: Vec<ProblemSummary> = self.problems.iter().filter(|p| {
-            query.is_empty() || p.problem_id.contains(&query) || p.title.to_lowercase().contains(&query)
-        }).cloned().collect();
+        let query = self.search_query.trim().to_lowercase();
+        let filtered_problems: Vec<ProblemSummary> = self.problems
+            .iter()
+            .filter(|p| {
+                if query.is_empty() {
+                    true
+                } else {
+                    p.problem_id.to_lowercase().contains(&query)
+                        || p.title.to_lowercase().contains(&query)
+                }
+            })
+            .cloned()
+            .collect();
 
-        if filtered.is_empty() {
+        if filtered_problems.is_empty() {
             ui.vertical_centered(|ui| {
-                ui.add_space(30.0);
+                ui.add_space(40.0);
                 ui.label(RichText::new("Brak zadań w katalogu workspace").color(COLOR_TEXT_MUTED).size(12.0));
             });
             return;
         }
 
+        let mut to_delete = None;
+        let mut to_set_active = None;
+        let mut to_open_vscode = None;
+
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for prob in filtered {
-                let is_active = prob.problem_id == self.active_problem_id;
-                let border = if is_active {
-                    Stroke::new(1.5_f32, COLOR_EMERALD_ACCENT)
-                } else {
-                    Stroke::new(1.0_f32, COLOR_BORDER)
-                };
+            for prob in &filtered_problems {
+                let is_active = self.active_problem_id == prob.problem_id;
+                let border_col = if is_active { COLOR_EMERALD } else { COLOR_BORDER };
 
                 egui::Frame::none()
                     .fill(COLOR_SURFACE)
-                    .stroke(border)
                     .rounding(Rounding::same(6.0))
-                    .inner_margin(egui::Margin::symmetric(12.0, 8.0))
+                    .stroke(Stroke::new(1.0f32, border_col))
+                    .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            // Badge z kodem
+                            let badge_bg = if is_active { COLOR_EMERALD } else { COLOR_SURFACE_LIGHT };
                             egui::Frame::none()
-                                .fill(Color32::from_rgb(14, 30, 52))
-                                .stroke(Stroke::new(1.0_f32, COLOR_CYAN))
+                                .fill(badge_bg)
                                 .rounding(Rounding::same(4.0))
                                 .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
-                                    ui.label(RichText::new(prob.problem_id.to_uppercase()).color(COLOR_CYAN_ACCENT).size(10.5).strong());
+                                    ui.label(RichText::new(prob.problem_id.to_uppercase()).color(Color32::WHITE).size(11.0).strong());
                                 });
 
                             ui.add_space(4.0);
-                            ui.label(RichText::new(&prob.title).color(Color32::WHITE).size(11.5).strong());
-
-                            ui.add_space(4.0);
-                            ui.label(RichText::new(format!("({} testów)", prob.tests_count)).color(COLOR_TEXT_MUTED).size(10.0));
+                            ui.label(RichText::new(&prob.title).color(Color32::WHITE).size(12.0).strong());
 
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if !is_active {
-                                    let btn_act = ui.add(
-                                        egui::Button::new(RichText::new("⚡ Aktywuj").color(Color32::WHITE).size(10.0).strong())
-                                            .fill(COLOR_EMERALD)
-                                            .stroke(Stroke::NONE)
-                                            .rounding(Rounding::same(4.0)),
-                                    );
-                                    if btn_act.clicked() {
-                                        let _ = ureq::post(&format!("http://127.0.0.1:8080/api/set-active/{}", prob.problem_id)).call();
-                                        self.active_problem_id = prob.problem_id.clone();
-                                    }
+                                ui.label(RichText::new(format!("{} testów", prob.tests_count)).color(COLOR_TEXT_MUTED).size(10.0));
+                            });
+                        });
+
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{:.1}s | {}MB", prob.time_limit_sec, prob.memory_limit_mb)).color(COLOR_TEXT_MUTED).size(10.0));
+
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                // Przycisk Usuń
+                                if ui.button(RichText::new("🗑").color(COLOR_RED).size(11.0)).clicked() {
+                                    to_delete = Some(prob.problem_id.clone());
                                 }
 
-                                let btn_code = ui.add(
-                                    egui::Button::new(RichText::new("VS Code").color(Color32::WHITE).size(10.0))
-                                        .fill(Color32::from_rgb(14, 30, 52))
-                                        .stroke(Stroke::new(1.0_f32, COLOR_CYAN))
-                                        .rounding(Rounding::same(4.0)),
-                                );
-                                if btn_code.clicked() {
-                                    let _ = ureq::post(&format!("http://127.0.0.1:8080/api/open-vscode/{}", prob.problem_id)).call();
+                                // Przycisk VS Code
+                                if ui.button(RichText::new("VS Code").size(10.5)).clicked() {
+                                    to_open_vscode = Some(prob.problem_id.clone());
+                                }
+
+                                // Przycisk Aktywuj
+                                if is_active {
+                                    ui.label(RichText::new("✓ Aktywne").color(COLOR_EMERALD).size(10.5).strong());
+                                } else {
+                                    if ui.button(RichText::new("Aktywuj").size(10.5)).clicked() {
+                                        to_set_active = Some(prob.problem_id.clone());
+                                    }
                                 }
                             });
                         });
                     });
-
                 ui.add_space(4.0);
             }
         });
+
+        if let Some(pid) = to_delete {
+            let ws_dir = self.settings.get_workspace_path();
+            let _ = WorkspaceManager::delete_problem(&ws_dir, &pid);
+            self.refresh_problems();
+        }
+        if let Some(pid) = to_open_vscode {
+            let _ = ureq::post(&format!("http://127.0.0.1:8080/api/open-vscode/{}", pid)).call();
+        }
+        if let Some(pid) = to_set_active {
+            let _ = ureq::post(&format!("http://127.0.0.1:8080/api/set-active/{}", pid)).call();
+            self.active_problem_id = pid;
+        }
     }
 
-    // ----------------- TAB 4: USTAWIENIA (Clean, Clear, Highly Readable) -----------------
-    fn render_settings_tab(&mut self, ui: &mut Ui) {
-        egui::Frame::none()
-            .fill(COLOR_SURFACE)
-            .stroke(Stroke::new(1.0_f32, COLOR_BORDER))
-            .rounding(Rounding::same(6.0))
-            .inner_margin(egui::Margin::symmetric(14.0, 12.0))
-            .show(ui, |ui| {
-                ui.label(RichText::new("📁 ŚRODOWISKO I KATALOGI").color(COLOR_CYAN_ACCENT).size(11.0).strong());
-                ui.add_space(4.0);
+    // ----------------- 6. TAB 3: USTAWIENIA (PRZYWRÓCONY ORYGINALNY UKŁAD Z C74952D) -----------------
+    fn render_tab_settings(&mut self, ui: &mut Ui) {
+        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+            // 1. Przycisk zapisu przypięty do SAMEGO DOŁU okna
+            ui.add_space(4.0);
+            let btn_save = ui.add_sized(
+                vec2(ui.available_width(), 36.0),
+                egui::Button::new(RichText::new("Zapisz Ustawienia").color(Color32::WHITE).size(12.0).strong())
+                    .fill(COLOR_CYAN)
+                    .stroke(Stroke::NONE)
+                    .rounding(Rounding::same(6.0)),
+            );
 
-                ui.label(RichText::new("Główny folder z zadaniami olimpijskimi:").color(COLOR_TEXT_MUTED).size(10.5));
-                ui.horizontal(|ui| {
-                    ui.add_sized(vec2(ui.available_width() - 85.0, 24.0), egui::TextEdit::singleline(&mut self.settings.workspace_dir));
-                    if ui.button("Zmień...").clicked() {
-                        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                            self.settings.workspace_dir = folder.to_string_lossy().to_string();
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                ui.label(RichText::new("⚡ KOMPILATOR C++").color(COLOR_CYAN_ACCENT).size(11.0).strong());
-                ui.add_space(4.0);
-
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Standard:").color(COLOR_TEXT_MUTED).size(10.5));
-                    for std in ["c++17", "c++20", "c++23"] {
-                        if ui.selectable_label(self.settings.cpp_standard == std, std.to_uppercase()).clicked() {
-                            self.settings.cpp_standard = std.to_string();
-                        }
-                    }
-                });
-
-                ui.add_space(4.0);
-                ui.label(RichText::new("Flagi optymalizacji (Release):").color(COLOR_TEXT_MUTED).size(10.0));
-                ui.add_sized(vec2(ui.available_width(), 22.0), egui::TextEdit::singleline(&mut self.settings.cxx_release_flags));
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                ui.label(RichText::new("🛠 OPCJE EDYTORA I INTEGRACJI").color(COLOR_CYAN_ACCENT).size(11.0).strong());
-                ui.add_space(4.0);
-
-                ui.checkbox(&mut self.settings.open_pdf_in_vscode, "Dziel ekran w VS Code (Kod po lewej, PDF po prawej)");
-                ui.checkbox(&mut self.settings.notifications, "Powiadomienia na pulpicie o wyniku kompilacji i testów");
-                ui.checkbox(&mut self.settings.auto_detect_downloads, "Automatycznie wykrywaj pobrane zadania ze Szkopuła i OIJ");
-
-                ui.add_space(12.0);
-
-                let btn_save = ui.add_sized(
-                    vec2(ui.available_width(), 34.0),
-                    egui::Button::new(RichText::new("💾 Zapisz Ustawienia").color(Color32::WHITE).size(11.5).strong())
-                        .fill(COLOR_CYAN)
-                        .stroke(Stroke::NONE)
-                        .rounding(Rounding::same(5.0)),
-                );
-
-                if btn_save.clicked() {
-                    match self.settings.save() {
-                        Ok(_) => {
-                            let _ = ureq::post("http://127.0.0.1:8080/api/settings").send_json(serde_json::to_value(&self.settings).unwrap());
-                            self.set_status("Ustawienia zapisane pomyślnie!", false);
-                            self.show_settings_offline = false;
-                        }
-                        Err(e) => {
-                            self.set_status(&format!("Błąd zapisu: {}", e), true);
-                        }
-                    }
+            if btn_save.clicked() {
+                match self.settings.save() {
+                    Ok(_) => self.set_status("Ustawienia zapisane pomyślnie!", false),
+                    Err(e) => self.set_status(&format!("Błąd zapisu: {}", e), true),
                 }
+            }
+
+            // 2. Jeden spójny panel ustawień wypełniający całą dostępną przestrzeń
+            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::Frame::none()
+                        .fill(COLOR_SURFACE)
+                        .rounding(Rounding::same(6.0))
+                        .stroke(Stroke::new(1.0f32, COLOR_BORDER))
+                        .inner_margin(egui::Margin::symmetric(10.0, 10.0))
+                        .show(ui, |ui| {
+                            // --- Sekcja 1: Kompilator i Środowisko ---
+                            ui.label(RichText::new("Kompilator i Środowisko").color(COLOR_CYAN_ACCENT).size(11.5).strong());
+                            ui.add_space(5.0);
+
+                            // 1. Katalog roboczy
+                            ui.label(RichText::new("Katalog roboczy (Workspace):").color(COLOR_TEXT_MUTED).size(10.5).strong());
+                            ui.horizontal(|ui| {
+                                ui.add_sized(vec2(ui.available_width() - 65.0, 22.0), egui::TextEdit::singleline(&mut self.settings.workspace_dir));
+                                if ui.button(RichText::new("Wybierz").size(10.0)).clicked() {
+                                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                        self.settings.workspace_dir = folder.to_string_lossy().to_string();
+                                    }
+                                }
+                            });
+
+                            ui.add_space(6.0);
+
+                            // 2. Visual Studio Code
+                            ui.label(RichText::new("Tryb okien Visual Studio Code:").color(COLOR_TEXT_MUTED).size(10.5).strong());
+                            ui.horizontal(|ui| {
+                                let is_single = self.settings.vscode_mode == "single_window";
+                                if ui.selectable_label(is_single, "Jedno okno").clicked() {
+                                    self.settings.vscode_mode = "single_window".to_string();
+                                }
+                                if ui.selectable_label(!is_single, "Osobne okna").clicked() {
+                                    self.settings.vscode_mode = "separate_windows".to_string();
+                                }
+                            });
+
+                            ui.add_space(4.0);
+                            ui.checkbox(&mut self.settings.open_pdf_in_vscode, "Dziel ekran: Kod po lewej, PDF po prawej");
+
+                            ui.add_space(6.0);
+
+                            // 3. Standard C++
+                            ui.label(RichText::new("Standard C++ kompilacji zadań:").color(COLOR_TEXT_MUTED).size(10.5).strong());
+                            ui.horizontal(|ui| {
+                                for std in ["c++17", "c++20", "c++23"] {
+                                    if ui.selectable_label(self.settings.cpp_standard == std, std.to_uppercase()).clicked() {
+                                        self.settings.cpp_standard = std.to_string();
+                                    }
+                                }
+                            });
+
+                            ui.add_space(4.0);
+                            ui.checkbox(&mut self.settings.sanitize_enabled, "Strict Debug: -fsanitize=address,undefined");
+
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.add_space(8.0);
+
+                            // --- Sekcja 2: Integracje i Narzędzia ---
+                            ui.label(RichText::new("Integracje i Narzędzia").color(COLOR_CYAN_ACCENT).size(11.5).strong());
+                            ui.add_space(5.0);
+
+                            ui.checkbox(&mut self.settings.notifications, "Powiadomienia pulpitu o testach");
+                            ui.checkbox(&mut self.settings.auto_detect_downloads, "Automatycznie wykrywaj pobieranie PDF");
+
+                            ui.add_space(6.0);
+
+                            ui.label(RichText::new("Sprzęt: Stream Deck MK.2 USB HID (100% Rust Driver)").color(COLOR_CYAN_ACCENT).size(10.5));
+
+                            ui.add_space(10.0);
+                            ui.separator();
+                            ui.add_space(6.0);
+
+                            // Wyłącz AlgoDeck
+                            let btn_stop = ui.add_sized(
+                                vec2(ui.available_width(), 28.0),
+                                egui::Button::new(RichText::new("🛑 Wyłącz daemona AlgoDeck").color(Color32::from_rgb(248, 113, 113)).size(10.5))
+                                    .fill(Color32::from_rgb(30, 20, 20)),
+                            );
+                            if btn_stop.clicked() {
+                                crate::gui::tray::stop_algodeck();
+                            }
+                        });
+                });
             });
+        });
     }
 }
