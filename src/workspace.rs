@@ -161,10 +161,11 @@ impl WorkspaceManager {
     }
 
     pub fn list_problems(workspace_dir: &Path) -> Vec<ProblemSummary> {
-        let mut list = Vec::new();
         if !workspace_dir.exists() || !workspace_dir.is_dir() {
-            return list;
+            return Vec::new();
         }
+
+        let mut list: Vec<(ProblemSummary, i64)> = Vec::new();
 
         if let Ok(entries) = fs::read_dir(workspace_dir) {
             for entry in entries.flatten() {
@@ -181,11 +182,15 @@ impl WorkspaceManager {
                     let mut memory_limit = 128;
                     let mut tests_count = 0;
 
+                    let mut created_ts: i64 = 0;
                     if let Some(m) = Self::get_manifest(workspace_dir, &p_id) {
                         title = m.title;
                         time_limit = m.time_limit_sec;
                         memory_limit = m.memory_limit_mb;
                         tests_count = m.tests.len();
+                        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&m.created_at) {
+                            created_ts = dt.timestamp_millis();
+                        }
                     } else {
                         // Fallback counting .in files in .algo/tests
                         let tests_dir = p.join(".algo").join("tests");
@@ -200,24 +205,41 @@ impl WorkspaceManager {
                         }
                     }
 
+                    if created_ts == 0 {
+                        if let Ok(meta) = entry.metadata() {
+                            let sys_time = meta.created().or_else(|_| meta.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                            created_ts = sys_time
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as i64;
+                        }
+                    }
+
                     let test_sh = p.join(".algo").join("test.sh");
                     if !test_sh.exists() {
                         Self::ensure_problem_scripts(workspace_dir, &p_id, &title, time_limit);
                     }
 
-                    list.push(ProblemSummary {
-                        problem_id: p_id,
-                        title,
-                        tests_count,
-                        time_limit_sec: time_limit,
-                        memory_limit_mb: memory_limit,
-                    });
+                    list.push((
+                        ProblemSummary {
+                            problem_id: p_id,
+                            title,
+                            tests_count,
+                            time_limit_sec: time_limit,
+                            memory_limit_mb: memory_limit,
+                        },
+                        created_ts,
+                    ));
                 }
             }
         }
 
-        list.sort_by(|a, b| a.problem_id.cmp(&b.problem_id));
-        list
+        // Sortowanie chronologiczne według kolejności dodania zadań
+        list.sort_by(|(a_summary, a_ts), (b_summary, b_ts)| {
+            a_ts.cmp(b_ts).then_with(|| a_summary.problem_id.cmp(&b_summary.problem_id))
+        });
+
+        list.into_iter().map(|(summary, _)| summary).collect()
     }
 
     pub fn delete_problem(workspace_dir: &Path, problem_id: &str) -> Result<(), String> {

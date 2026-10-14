@@ -416,7 +416,10 @@ async fn auto_import_pdf(
                         let _ = WorkspaceManager::add_tests_from_zip(&ws_dir, &analysis.problem_id, &bytes);
                     }
                 }
-                state.streamdeck.set_active_problem(&analysis.problem_id);
+                let problems = WorkspaceManager::list_problems(&ws_dir);
+                let total = problems.len().max(1);
+                let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
+                state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
                 let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
                 let (split_pdf, pdf_pos, split_ratio) = {
                     let s = state.settings.read().unwrap();
@@ -475,7 +478,11 @@ async fn create_manual(
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
     match WorkspaceManager::create_problem(&ws_dir, &analysis, None) {
         Ok(_) => {
-            state.streamdeck.set_active_problem(&pid);
+            let problems = WorkspaceManager::list_problems(&ws_dir);
+            let total = problems.len().max(1);
+            let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&pid)).map(|i| i + 1).unwrap_or(total);
+            state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, total);
+            let _ = state.ws_sender.send(format!("active:{}", pid));
             let (split_pdf, pdf_pos, split_ratio) = {
                 let s = state.settings.read().unwrap();
                 (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
@@ -734,7 +741,10 @@ async fn start_staged(
                 }
             }
 
-            state.streamdeck.set_active_problem(&analysis.problem_id);
+            let problems = WorkspaceManager::list_problems(&ws_dir);
+            let total = problems.len().max(1);
+            let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
+            state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
             let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
             let (split_pdf, pdf_pos, split_ratio) = {
                 let s = state.settings.read().unwrap();
@@ -776,7 +786,10 @@ async fn start_staged(
             let _ = WorkspaceManager::add_tests_from_zip(&ws_dir, &analysis.problem_id, &bytes);
         }
 
-        state.streamdeck.set_active_problem(&analysis.problem_id);
+        let problems = WorkspaceManager::list_problems(&ws_dir);
+        let total = problems.len().max(1);
+        let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
+        state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
         let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
         let (split_pdf, pdf_pos, split_ratio) = {
             let s = state.settings.read().unwrap();
@@ -801,10 +814,11 @@ async fn set_active(
 ) -> Json<serde_json::Value> {
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
     let problems = WorkspaceManager::list_problems(&ws_dir);
-    let cur_idx = problems.iter().position(|p| p.problem_id == id).unwrap_or(0) + 1;
-    state.streamdeck.set_active_problem_with_meta(&id, cur_idx, problems.len().max(1));
+    let total = problems.len().max(1);
+    let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&id)).map(|i| i + 1).unwrap_or(total);
+    state.streamdeck.set_active_problem_with_meta(&id, cur_idx, total);
     let _ = state.ws_sender.send(format!("active:{}", id));
-    Json(serde_json::json!({ "success": true, "problem_id": id }))
+    Json(serde_json::json!({ "success": true, "problem_id": id, "current_idx": cur_idx, "total": total }))
 }
 
 async fn open_vscode(
@@ -812,6 +826,12 @@ async fn open_vscode(
     AxumPath(id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
+    let problems = WorkspaceManager::list_problems(&ws_dir);
+    let total = problems.len().max(1);
+    let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&id)).map(|i| i + 1).unwrap_or(total);
+    state.streamdeck.set_active_problem_with_meta(&id, cur_idx, total);
+    let _ = state.ws_sender.send(format!("active:{}", id));
+
     let (split_pdf, pdf_pos, split_ratio) = {
         let s = state.settings.read().unwrap();
         (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)

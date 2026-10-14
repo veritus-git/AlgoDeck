@@ -366,6 +366,7 @@ impl StreamDeckEngine {
         self.dirty.store(true, Ordering::SeqCst);
     }
 
+    #[allow(dead_code)]
     pub fn set_active_problem(&self, problem_id: &str) {
         self.set_active_problem_with_meta(problem_id, 1, 1);
     }
