@@ -36,3 +36,4 @@ gui/target/
 **/target/
 release_artifacts/
 dist/
+.cargo/

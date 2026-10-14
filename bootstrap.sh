@@ -56,19 +56,19 @@ if [ "$HAS_SUDO" = true ]; then
     if command -v apt-get &> /dev/null; then
         sudo apt-get update -qq 2>/dev/null || true
         sudo apt-get install -y -qq \
-            build-essential gdb clang pkg-config libhidapi-dev libusb-1.0-0-dev \
+            build-essential gdb clang pkg-config libhidapi-dev libusb-1.0-0-dev libudev-dev \
             curl wget git unzip tar 2>/dev/null || true
     elif command -v dnf &> /dev/null; then
         sudo dnf install -y -q \
-            gcc gcc-c++ gdb clang pkgconfig hidapi-devel libusb1-devel \
+            gcc gcc-c++ gdb clang pkgconfig hidapi-devel libusb1-devel systemd-devel \
             curl wget git unzip tar 2>/dev/null || true
     elif command -v pacman &> /dev/null; then
         sudo pacman -S --needed --noconfirm \
-            base-devel gdb clang pkgconf hidapi libusb \
+            base-devel gdb clang pkgconf hidapi libusb systemd-libs \
             curl wget git unzip tar 2>/dev/null || true
     elif command -v zypper &> /dev/null; then
         sudo zypper install -y \
-            gcc-c++ gdb clang pkg-config hidapi-devel libusb-1_0-devel \
+            gcc-c++ gdb clang pkg-config hidapi-devel libusb-1_0-devel libudev-devel \
             curl wget git unzip tar 2>/dev/null || true
     fi
 fi
@@ -254,11 +254,14 @@ for TARGET_DIR in "${CHROME_TARGETS[@]}"; do
 done
 echo -e "${GREEN}✓ Mostek Native Messaging zarejestrowany dla Chrome, Brave, Chromium i Edge.${NC}"
 
-# PATH w powłokach użytkownika
+# PATH i PKG_CONFIG_PATH w powłokach użytkownika
 for RC in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
     if [ -f "$RC" ]; then
         if ! grep -q '\.local/bin' "$RC" 2>/dev/null; then
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$RC"
+        fi
+        if [ -d "$HOME/.local/lib/pkgconfig" ] && ! grep -q '\.local/lib/pkgconfig' "$RC" 2>/dev/null; then
+            echo 'export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"' >> "$RC"
         fi
     fi
 done
