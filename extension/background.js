@@ -346,8 +346,8 @@ async function openDedicatedNotificationWindow(filename) {
     const createdWin = await chrome.windows.create({
       url: targetUrl,
       type: "popup",
-      width: 405,
-      height: 215,
+      width: 390,
+      height: 155,
       focused: true
     });
     if (createdWin && createdWin.id) {

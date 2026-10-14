@@ -184,9 +184,9 @@ body.detected-mode .app-container {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  height: 140px !important;
-  min-height: 125px !important;
-  max-height: 140px !important;
+  height: 116px !important;
+  min-height: 105px !important;
+  max-height: 120px !important;
   background: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -198,15 +198,15 @@ body.detected-mode .view-detected {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  height: 140px !important;
-  min-height: 125px !important;
-  max-height: 140px !important;
-  padding: 13px 16px 13px 16px !important;
+  height: 116px !important;
+  min-height: 105px !important;
+  max-height: 120px !important;
+  padding: 10px 14px 10px 14px !important;
   box-sizing: border-box !important;
   background: transparent !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: space-between !important;
+  justify-content: flex-start !important;
 }
 
 body.detected-mode .detected-box-card {
@@ -219,8 +219,8 @@ body.detected-mode .detected-box-card {
   padding: 0;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: space-between !important;
-  gap: 8px;
+  justify-content: flex-start !important;
+  gap: 7px;
 }
 
 .det-top-row {
