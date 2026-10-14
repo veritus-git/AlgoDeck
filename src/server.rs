@@ -107,12 +107,45 @@ pub fn create_router(app_state: AppState) -> Router {
         .with_state(app_state);
 
     // Serve static frontend if directory exists
-    let frontend_dir = PathBuf::from("./frontend");
-    if frontend_dir.exists() {
+    if let Some(frontend_dir) = find_frontend_dir() {
         router = router.fallback_service(ServeDir::new(frontend_dir));
     }
 
     router
+}
+
+fn find_frontend_dir() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(dir) = std::env::var("ALGODECK_DIR") {
+        candidates.push(PathBuf::from(&dir).join("frontend"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("frontend"));
+            candidates.push(parent.join("../share/algodeck/frontend"));
+            candidates.push(parent.join("../share/algodeck/extension"));
+        }
+    }
+    candidates.push(PathBuf::from("frontend"));
+    candidates.push(PathBuf::from("extension"));
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local).join("AlgoDeck/frontend"));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join(".local/share/algodeck/frontend"));
+            candidates.push(home.join(".local/share/algodeck/extension"));
+        }
+    }
+
+    candidates.into_iter().find(|c| c.exists() && c.is_dir())
 }
 
 // ----------------- Handlers -----------------
@@ -138,10 +171,20 @@ async fn set_streamdeck_brightness(
 fn find_file_in_candidates(filename: &str) -> Option<PathBuf> {
     let mut candidates = Vec::new();
 
+    if let Ok(dir) = std::env::var("ALGODECK_DIR") {
+        candidates.push(PathBuf::from(&dir).join("extension").join(filename));
+        candidates.push(PathBuf::from(&dir).join("frontend").join(filename));
+    }
+    if let Ok(dir) = std::env::var("ALGODECK_EXTENSION_DIR") {
+        candidates.push(PathBuf::from(&dir).join(filename));
+    }
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             candidates.push(parent.join("extension").join(filename));
             candidates.push(parent.join("../extension").join(filename));
+            candidates.push(parent.join("../share/algodeck/extension").join(filename));
+            candidates.push(parent.join("../share/algodeck/frontend").join(filename));
             candidates.push(parent.join("frontend").join(filename));
         }
     }
@@ -153,6 +196,10 @@ fn find_file_in_candidates(filename: &str) -> Option<PathBuf> {
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             candidates.push(PathBuf::from(local).join("AlgoDeck/extension").join(filename));
+            candidates.push(PathBuf::from(local).join("AlgoDeck/frontend").join(filename));
+        }
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            candidates.push(PathBuf::from(appdata).join("AlgoDeck/extension").join(filename));
         }
     }
 
@@ -160,6 +207,7 @@ fn find_file_in_candidates(filename: &str) -> Option<PathBuf> {
     {
         if let Some(home) = dirs::home_dir() {
             candidates.push(home.join(".local/share/algodeck/extension").join(filename));
+            candidates.push(home.join(".local/share/algodeck/frontend").join(filename));
         }
     }
 
@@ -729,9 +777,18 @@ async fn kill_task(
     Json(serde_json::json!({ "success": true }))
 }
 
-async fn launch_screen(State(state): State<AppState>) -> Json<serde_json::Value> {
-    state.streamdeck.set_idle_screen();
-    Json(serde_json::json!({ "success": true }))
+#[derive(Deserialize, Default)]
+pub struct LaunchRequest {
+    pub problem_id: Option<String>,
+}
+
+async fn launch_screen(
+    State(state): State<AppState>,
+    req: Option<Json<LaunchRequest>>,
+) -> Json<serde_json::Value> {
+    let pid = req.and_then(|r| r.problem_id.clone()).unwrap_or_else(|| "test".to_string());
+    state.streamdeck.set_active_problem_with_meta(&pid, 1, 1);
+    Json(serde_json::json!({ "success": true, "problem_id": pid }))
 }
 
 async fn exit_screen(State(state): State<AppState>) -> Json<serde_json::Value> {

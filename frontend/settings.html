@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlgoDeck ⚡ Specyfikacja i Ustawienia Środowiska</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="readme-container">
+
+    <!-- Document Header -->
+    <header class="doc-header">
+      <div class="doc-badge-row">
+        <span class="badge badge-accent">SPEC &bull; CONFIG v2.0.0</span>
+        <span class="badge badge-subtle">OLYMPIC C++ COMPANION</span>
+        <span class="badge badge-subtle">SZKOPUŁ &bull; KOŁO MAP &bull; OIJ &bull; OI</span>
+      </div>
+
+      <div class="doc-title-row">
+        <div class="doc-title-group">
+          <span class="doc-logo-bolt">⚡</span>
+          <div class="doc-title-headings">
+            <h1>AlgoDeck Architecture & Settings</h1>
+            <p class="doc-lead">Centrum konfiguracji silnika Rust, integracji VS Code, bezpośredniej obsługi Elgato Stream Deck i automatyzacji przeglądarki.</p>
+          </div>
+        </div>
+
+        <div class="header-status-group">
+          <div id="status-badge" class="status-pill connecting">
+            <span class="status-dot"></span>
+            <span id="status-text">Weryfikacja silnika...</span>
+          </div>
+          <button type="button" id="btn-close-settings" class="btn-doc-close" title="Zamknij kartę">✕ Zamknij</button>
+        </div>
+      </div>
+
+      <!-- Quick TOC Navigation -->
+      <nav class="doc-toc">
+        <span class="toc-label">SPIS TREŚCI:</span>
+        <a href="#sec-workspace" class="toc-link">1. Workspace</a>
+        <a href="#sec-vscode" class="toc-link">2. VS Code</a>
+        <a href="#sec-compiler" class="toc-link">3. Kompilator C++</a>
+        <a href="#sec-streamdeck" class="toc-link">4. Sprzęt Stream Deck</a>
+        <a href="#sec-browser" class="toc-link">5. Automatyzacja</a>
+        <a href="#sec-manual" class="toc-link">6. Podręcznik & Klawisze</a>
+      </nav>
+    </header>
+
+    <!-- Main Technical Content -->
+    <main class="doc-body">
+
+      <!-- SECTION 1: WORKSPACE -->
+      <section id="sec-workspace" class="doc-section">
+        <div class="section-heading">
+          <span class="section-num"># 01</span>
+          <h2>Katalog Roboczy i Struktura Projektów</h2>
+        </div>
+        <p class="section-intro">
+          Główna przestrzeń dyskowa, w której silnik automatycznie zakłada katalogi poszczególnych zadań, pobiera pliki PDF, generuje pliki źródłowe <code>code.cpp</code> oraz parsuje wejścia/wyjścia testowe.
+        </p>
+
+        <div class="card-setting">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="cfg-workspace-dir" class="setting-title">Główny folder projektów (Workspace Root):</label>
+              <p class="setting-desc">Katalog tworzony automatycznie przy pierwszym uruchomieniu zadania ze Szkopuła lub Koła MAP.</p>
+            </div>
+            <div class="setting-control input-flex">
+              <input type="text" id="cfg-workspace-dir" class="doc-input code-font" placeholder="/home/user/AlgoDeckWorkspace" spellcheck="false">
+              <button type="button" id="btn-reset-ws" class="btn-subtle" title="Przywróć standardową ścieżkę">Domyślna</button>
+            </div>
+          </div>
+
+          <div class="doc-code-block">
+            <div class="code-block-header">
+              <span>STRUKTURA FOLDERU ZADANIA (AUTOMATYCZNIE TWORZONA PRZEZ SILNIK)</span>
+            </div>
+            <pre><code>{workspace_dir}/
+└── <span class="tok-dir">koleje</span>/
+    ├── <span class="tok-file">code.cpp</span>       <span class="tok-comment"># Twój kod źródłowy C++20 z szablonem olimpijskim</span>
+    ├── <span class="tok-file">zadanie.pdf</span>    <span class="tok-comment"># Oficjalna treść zadania pobrana z serwisu</span>
+    ├── <span class="tok-dir">testy</span>/         <span class="tok-comment"># Pobrane lub wyodrębnione testy wzorcowe</span>
+    │   ├── <span class="tok-in">kol1.in</span>    <span class="tok-comment"># Dane wejściowe testu 1</span>
+    │   ├── <span class="tok-out">kol1.out</span>   <span class="tok-comment"># Poprawna odpowiedź testu 1</span>
+    │   ├── <span class="tok-in">kol2.in</span>
+    │   └── <span class="tok-out">kol2.out</span>
+    └── <span class="tok-bin">code</span>           <span class="tok-comment"># Skompilowana binarka (na Windows: code.exe)</span></code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 2: VS CODE -->
+      <section id="sec-vscode" class="doc-section">
+        <div class="section-heading">
+          <span class="section-num"># 02</span>
+          <h2>Integracja z Visual Studio Code</h2>
+        </div>
+        <p class="section-intro">
+          Sterowanie sposobem wywoływania edytora VS Code przez silnik AlgoDeck po kliknięciu zadania w rozszerzeniu lub na Stream Decku.
+        </p>
+
+        <div class="card-setting">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="cfg-vscode-mode" class="setting-title">Tryb zarządzania oknami VS Code:</label>
+              <p class="setting-desc">Wybierz, czy zadania mają być otwierane jako zakładki w jednym wspólnym oknie, czy w osobnych oknach edytora.</p>
+            </div>
+            <div class="setting-control">
+              <select id="cfg-vscode-mode" class="doc-select">
+                <option value="auto">Jeden wspólny workspace (Zalecane na zawodach)</option>
+                <option value="separate_windows">Osobne okno VS Code dla każdego zadania</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row switch-row">
+            <div class="setting-info">
+              <span class="setting-title">Dzielony widok PDF (Split Screen View)</span>
+              <p class="setting-desc">Automatycznie otwiera treść zadania (<code>zadanie.pdf</code>) w prawej kolumnie edytora bezpośrednio obok kodu źródłowego <code>code.cpp</code>.</p>
+            </div>
+            <div class="setting-control">
+              <label class="doc-switch">
+                <input type="checkbox" id="cfg-split-pdf">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 3: COMPILER & TESTS -->
+      <section id="sec-compiler" class="doc-section">
+        <div class="section-heading">
+          <span class="section-num"># 03</span>
+          <h2>Kompilator C++ i Silnik Testowania</h2>
+        </div>
+        <p class="section-intro">
+          Ustawienia kompilacji i ograniczeń wykonania, w pełni zgodne z oficjalnym systemem oceny Szkopuła, OIJ oraz Olimpiady Informatycznej.
+        </p>
+
+        <div class="card-setting">
+          <div class="setting-grid-2col">
+            <div class="form-cell">
+              <label for="cfg-compiler" class="setting-title">Kompilator C++:</label>
+              <select id="cfg-compiler" class="doc-select">
+                <option value="g++">GNU C++ Compiler (g++)</option>
+                <option value="clang++">LLVM Clang (clang++)</option>
+              </select>
+              <span class="cell-hint">Silnik sprawdza obecność kompilatora w systemowym PATH.</span>
+            </div>
+
+            <div class="form-cell">
+              <label for="cfg-cpp-std" class="setting-title">Standard języka C++:</label>
+              <select id="cfg-cpp-std" class="doc-select">
+                <option value="c++20">C++20 (Oficjalny standard OIJ / OI / Szkopuł)</option>
+                <option value="c++17">C++17 (Starszy standard Szkopuła)</option>
+                <option value="c++23">C++23 (Eksperymentalny)</option>
+              </select>
+              <span class="cell-hint">Parametr przekazywany jako <code>-std=&lt;wartość&gt;</code>.</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row switch-row">
+            <div class="setting-info">
+              <span class="setting-title">AddressSanitizer & UndefinedBehaviorSanitizer (ASan / UBSan)</span>
+              <p class="setting-desc">Kompiluje kod z flagami <code>-fsanitize=address,undefined</code> w celu natychmiastowego wykrywania wyjść poza tablicę, wiszących wskaźników i niezdefiniowanych zachowań.</p>
+            </div>
+            <div class="setting-control">
+              <label class="doc-switch">
+                <input type="checkbox" id="cfg-sanitizer">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-grid-2col">
+            <div class="form-cell">
+              <label for="cfg-release-flags" class="setting-title">Flagi kompilacji (Release / Szybkie testy):</label>
+              <input type="text" id="cfg-release-flags" class="doc-input code-font" value="-O3 -Wall -Wextra" spellcheck="false">
+              <span class="cell-hint">Maksymalna optymalizacja z ostrzeżeniami o ukrytych błędach.</span>
+            </div>
+
+            <div class="form-cell">
+              <label for="cfg-debug-flags" class="setting-title">Flagi diagnostyczne (Debug):</label>
+              <input type="text" id="cfg-debug-flags" class="doc-input code-font" value="-O0 -g -fsanitize=address,undefined -Wall -Wextra" spellcheck="false">
+              <span class="cell-hint">Używane przy włączonym sanitizerze lub analizie błędów.</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-grid-2col">
+            <div class="form-cell">
+              <label for="cfg-time-limit" class="setting-title">Domyślny limit czasu (Time Limit):</label>
+              <div class="input-unit">
+                <input type="number" id="cfg-time-limit" class="doc-input" min="0.1" max="30.0" step="0.5" value="1.0">
+                <span class="unit-label">sekund</span>
+              </div>
+              <span class="cell-hint">Przekroczenie tego czasu raportuje TLE (Time Limit Exceeded).</span>
+            </div>
+
+            <div class="form-cell">
+              <label for="cfg-memory-limit" class="setting-title">Domyślny limit pamięci (Memory Limit):</label>
+              <div class="input-unit">
+                <input type="number" id="cfg-memory-limit" class="doc-input" min="16" max="2048" step="16" value="128">
+                <span class="unit-label">MB</span>
+              </div>
+              <span class="cell-hint">Domyślny limit pamięci operacyjnej zadania olimpijskiego.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 4: STREAM DECK HARDWARE -->
+      <section id="sec-streamdeck" class="doc-section">
+        <div class="section-heading">
+          <span class="section-num"># 04</span>
+          <h2>Sprzęt Elgato Stream Deck (Direct USB HID)</h2>
+        </div>
+        <p class="section-intro">
+          Wbudowany w silnik Rust sterownik USB HID. Całkowity brak zależności od aplikacji zewnętrznych (StreamController na Linux, oprogramowania Elgato na Windows). Stream Deck jest zajmowany wyłącznie podczas pracy AlgoDeck, a po wyłączeniu gaśnie do czystej czerni.
+        </p>
+
+        <div class="card-setting">
+          <!-- Hardware Connection Status -->
+          <div class="streamdeck-status-box" id="sd-status-box">
+            <div class="sd-status-left">
+              <div class="sd-icon-wrapper">
+                <span class="sd-icon">⌨️</span>
+              </div>
+              <div class="sd-status-info">
+                <div class="sd-status-title-row">
+                  <h3 id="sd-conn-header">Status urządzenia: Sprawdzanie...</h3>
+                  <span id="sd-badge" class="sd-badge badge-gray">USB HID</span>
+                </div>
+                <p id="sd-conn-desc" class="sd-desc">Wykrywanie kontrolera Elgato Stream Deck 15-Key podłączonego do portu USB...</p>
+              </div>
+            </div>
+            <button type="button" id="btn-refresh-sd" class="btn-subtle" title="Ponów próbę wykrycia">Odśwież status</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Brightness Slider -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="cfg-sd-brightness" class="setting-title">Jasność ekranu OLED Stream Decka:</label>
+              <p class="setting-desc">Regulacja natężenia podświetlenia klawiszy (5% - 100%). Zmiana jest natychmiast aplikowana na fizycznym urządzeniu.</p>
+            </div>
+            <div class="setting-control brightness-control">
+              <input type="range" id="cfg-sd-brightness" min="5" max="100" step="5" value="85" class="doc-slider">
+              <span id="brightness-val-label" class="slider-val code-font">85%</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Virtual 3x5 Grid Preview -->
+          <div class="sd-virtual-preview-box">
+            <div class="preview-header">
+              <span class="preview-title">WIRTUALNA MATRYCA PODGLĄDU 3x5 (KLUCZOWY UKŁAD SPRZĘTOWY)</span>
+              <span id="sd-active-mode-label" class="preview-mode">TRYB: IDLE</span>
+            </div>
+
+            <div class="virtual-grid-15" id="virtual-grid-15">
+              <!-- 15 klawiszy wygenerowanych dynamicznie -->
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Hardware Diagnostics Buttons -->
+          <div class="hardware-actions-row">
+            <span class="hw-actions-label">Akcje diagnostyczne:</span>
+            <div class="hw-buttons-group">
+              <button type="button" id="btn-sd-idle" class="btn-secondary" title="Przełącza Stream Deck na ekran logo ALGO / BOLT / DECK">
+                ⚡ Ekran Powitalny (Idle)
+              </button>
+              <button type="button" id="btn-sd-test-screen" class="btn-secondary" title="Wyświetla testowy układ zadania z literami i przyciskami">
+                📄 Testowy Ekran Zadania
+              </button>
+              <button type="button" id="btn-sd-blank" class="btn-secondary" title="Czyści ekran urządzenia do czerni">
+                ⏹ Reset / Wygaś Stream Deck
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 5: BROWSER AUTOMATION -->
+      <section id="sec-browser" class="doc-section">
+        <div class="section-heading">
+          <span class="section-num"># 05</span>
+          <h2>Automatyzacja Przeglądarki i Sesja Pobrań</h2>
+        </div>
+        <p class="section-intro">
+          Inteligentny nasłuch pobieranych plików z serwisów olimpijskich (Szkopuł, Koło MAP, SIO2). Automatycznie proponuje natychmiastowe utworzenie projektu jednym kliknięciem.
+        </p>
+
+        <div class="card-setting">
+          <div class="setting-row switch-row">
+            <div class="setting-info">
+              <span class="setting-title">Wykrywaj pobieranie treści zadań (.pdf) i paczek (.zip)</span>
+              <p class="setting-desc">Po pobraniu zadania wyświetla eleganckie okno 1-kliknięcia do natychmiastowego otwarcia zadania w VS Code.</p>
+            </div>
+            <div class="setting-control">
+              <label class="doc-switch">
+                <input type="checkbox" id="cfg-auto-detect">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row switch-row">
+            <div class="setting-info">
+              <span class="setting-title">Powiadomienia systemowe pulpitu</span>
+              <p class="setting-desc">Wyświetla powiadomienia systemowe o uruchomieniu środowiska, zakończeniu testów i ewentualnych błędach kompilacji.</p>
+            </div>
+            <div class="setting-control">
+              <label class="doc-switch">
+                <input type="checkbox" id="cfg-notifications">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="doc-callout">
+            <span class="callout-icon">🛡️</span>
+            <div class="callout-content">
+              <strong>Zabezpieczenie przed spamem pobrań (Fresh Session Guard):</strong>
+              <p>Rozszerzenie ignoruje archiwalne pobrania z historii przeglądarki podczas restartu komputera lub uruchamiania przeglądarki. Wykrywane są wyłącznie świeże pobrania wykonane w trakcie aktywnej sesji (okno czasowe 15 sekund).</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION 6: MANUAL & CLI CHEATSHEET -->
+      <section id="sec-manual" class="doc-section">
+        <div class="section-heading">
+          <span class="section-num"># 06</span>
+          <h2>Podręcznik Klawiszy Stream Deck i Narzędzie CLI</h2>
+        </div>
+        <p class="section-intro">
+          Oficjalna ściągawka skrótów sprzętowych oraz poleceń terminalowych do pracy w środowisku zawodów.
+        </p>
+
+        <div class="card-setting">
+          <h3 class="subsection-title">1. Mapowanie 15 Klawiszy Elgato Stream Deck (Tryb Zadania)</h3>
+          <div class="doc-table-wrapper">
+            <table class="doc-table">
+              <thead>
+                <tr>
+                  <th>Pozycja</th>
+                  <th>Klawisz</th>
+                  <th>Etykieta</th>
+                  <th>Działanie podczas rozwiązywania zadania</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>0, 1, 2</code></td>
+                  <td>Litery Kodu</td>
+                  <td><code>A L G</code> / <code>K O L</code></td>
+                  <td>Skrót nazwy zadania (kliknięcie: otwiera plik <code>code.cpp</code> w VS Code)</td>
+                </tr>
+                <tr>
+                  <td><code>3</code></td>
+                  <td><code>+</code></td>
+                  <td>Nowe Zadanie</td>
+                  <td>Otwiera rozszerzenie / przeglądarkę do załadowania nowego zadania</td>
+                </tr>
+                <tr>
+                  <td><code>4</code></td>
+                  <td><code>⚙</code></td>
+                  <td>Ustawienia</td>
+                  <td>Otwiera tę pełnoekranową kartę konfiguracji i architektury</td>
+                </tr>
+                <tr>
+                  <td><code>5</code></td>
+                  <td><code>✓</code></td>
+                  <td>Kompiluj & Testuj</td>
+                  <td>Kompiluje <code>code.cpp</code> i w ułamku sekundy wykonuje testy wzorcowe</td>
+                </tr>
+                <tr>
+                  <td><code>6</code></td>
+                  <td><code>▶</code></td>
+                  <td>Uruchom CLI</td>
+                  <td>Otwiera interaktywny terminal do ręcznego wpisywania danych</td>
+                </tr>
+                <tr>
+                  <td><code>7</code></td>
+                  <td><code>⏹</code></td>
+                  <td>Zatrzymaj (Kill)</td>
+                  <td>Natychmiast przerywa zapętlony program (SIGKILL / TerminateProcess)</td>
+                </tr>
+                <tr>
+                  <td><code>8</code></td>
+                  <td><code>⊞</code></td>
+                  <td>Galeria Zadań</td>
+                  <td>Przełącza Stream Deck na menu wyboru zadania</td>
+                </tr>
+                <tr>
+                  <td><code>9</code></td>
+                  <td><code>=</code></td>
+                  <td>Status Ogólny</td>
+                  <td>Prezentuje wynik całościowy: zielone OK, czerwone ANS, pomarańczowe TLE</td>
+                </tr>
+                <tr>
+                  <td><code>10</code></td>
+                  <td><code>&lt;</code></td>
+                  <td>Poprzedni Test</td>
+                  <td>Wybiera poprzedni test z zestawu</td>
+                </tr>
+                <tr>
+                  <td><code>11</code></td>
+                  <td><code>&gt;</code></td>
+                  <td>Następny Test</td>
+                  <td>Wybiera kolejny test z zestawu</td>
+                </tr>
+                <tr>
+                  <td><code>12</code></td>
+                  <td><code>X / Y</code></td>
+                  <td>Licznik Testów</td>
+                  <td>Wskazuje numer aktualnie podglądanego testu (np. 1/4)</td>
+                </tr>
+                <tr>
+                  <td><code>13, 14</code></td>
+                  <td>Detale Testu</td>
+                  <td>Wynik / Czas</td>
+                  <td>Szczegółowy status wybranego testu (OK, ANS, TLE, MLE) i czas w ms</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="divider"></div>
+
+          <h3 class="subsection-title">2. Narzędzie Terminala <code>algodeck</code> (CLI)</h3>
+          <p class="setting-desc">Silnik może być w pełni obsługiwany z poziomu dowolnego terminala (Bash, Zsh, PowerShell):</p>
+
+          <div class="doc-code-block">
+            <pre><code><span class="tok-comment"># Uruchomienie daemona silnika w tle (port 8080)</span>
+$ <span class="tok-cmd">algodeck daemon</span>
+
+<span class="tok-comment"># Uruchomienie lub weryfikacja czy silnik działa</span>
+$ <span class="tok-cmd">algodeck start</span>
+
+<span class="tok-comment"># Sprawdzenie stanu daemona, workspace i Stream Decka</span>
+$ <span class="tok-cmd">algodeck status</span>
+
+<span class="tok-comment"># Uruchomienie kompilacji i testów aktywnego zadania</span>
+$ <span class="tok-cmd">algodeck test</span>
+
+<span class="tok-comment"># Interaktywne odpalenie programu z konsolą</span>
+$ <span class="tok-cmd">algodeck run</span>
+
+<span class="tok-comment"># Autodiagnostyka kompilatorów g++, clang++, VS Code i uprawnień USB</span>
+$ <span class="tok-cmd">algodeck doctor</span>
+
+<span class="tok-comment"># Bezpieczne zatrzymanie silnika i zgaszenie Stream Decka</span>
+$ <span class="tok-cmd">algodeck stop</span></code></pre>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Sticky Floating Action Bar -->
+    <footer class="doc-actions-bar">
+      <div class="actions-status-zone">
+        <span id="save-status-msg" class="save-feedback-text"></span>
+      </div>
+
+      <div class="actions-buttons-zone">
+        <button type="button" id="btn-test-connection" class="btn-secondary">
+          <span class="btn-icon">⚡</span> Sprawdź Połączenie
+        </button>
+        <button type="button" id="btn-save-settings" class="btn-primary">
+          <span class="btn-icon" id="save-icon">💾</span>
+          <span id="save-text">Zapisz Ustawienia</span>
+        </button>
+      </div>
+    </footer>
+
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

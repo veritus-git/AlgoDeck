@@ -233,3 +233,86 @@ async fn reqwest_like_post(url: &str) -> serde_json::Value {
     .await
     .unwrap()
 }
+
+#[tokio::test]
+async fn test_settings_serving_and_brightness_endpoint() {
+    let settings = AppSettings::default();
+    let runner = Arc::new(TestExecutor::new(settings.clone()));
+    let streamdeck = Arc::new(StreamDeckEngine::new());
+    let (ws_sender, _) = broadcast::channel(10);
+    let shutdown_signal = Arc::new(AtomicBool::new(false));
+
+    let app_state = AppState {
+        settings: Arc::new(RwLock::new(settings)),
+        runner,
+        streamdeck: streamdeck.clone(),
+        ws_sender,
+        shutdown_signal: shutdown_signal.clone(),
+    };
+
+    let router = create_router(app_state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("Bind test port");
+    let test_addr = listener.local_addr().unwrap();
+
+    let shutdown_rx = shutdown_signal.clone();
+    let server_task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move {
+                while !shutdown_rx.load(Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap();
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // 1. Sprawdź GET /settings
+    let settings_url = format!("http://{}/settings", test_addr);
+    let html_body = tokio::task::spawn_blocking(move || {
+        ureq::get(&settings_url).call().unwrap().into_string().unwrap()
+    }).await.unwrap();
+    assert!(html_body.contains("AlgoDeck Architecture & Settings"), "Strona settings.html musi zawierać nagłówek AlgoDeck");
+    assert!(html_body.contains("id=\"cfg-workspace-dir\""), "Strona musi zawierać pole workspace");
+    assert!(html_body.contains("id=\"cfg-sd-brightness\""), "Strona musi zawierać suwak jasności Stream Decka");
+
+    // 2. Sprawdź GET /settings.css
+    let css_url = format!("http://{}/settings.css", test_addr);
+    let css_resp = tokio::task::spawn_blocking(move || {
+        let resp = ureq::get(&css_url).call().unwrap();
+        let ctype = resp.header("content-type").unwrap_or("").to_string();
+        let body = resp.into_string().unwrap();
+        (ctype, body)
+    }).await.unwrap();
+    assert!(css_resp.0.contains("text/css"), "Content-type dla /settings.css musi być text/css");
+    assert!(css_resp.1.contains("--bg-page"), "CSS musi zawierać definicje motywu");
+
+    // 3. Sprawdź GET /settings.js
+    let js_url = format!("http://{}/settings.js", test_addr);
+    let js_resp = tokio::task::spawn_blocking(move || {
+        let resp = ureq::get(&js_url).call().unwrap();
+        let ctype = resp.header("content-type").unwrap_or("").to_string();
+        let body = resp.into_string().unwrap();
+        (ctype, body)
+    }).await.unwrap();
+    assert!(js_resp.0.contains("javascript"), "Content-type dla /settings.js musi być application/javascript");
+    assert!(js_resp.1.contains("API_BASE"), "JS musi zawierać logikę kontrolera");
+
+    // 4. Sprawdź POST /api/streamdeck/brightness
+    let br_url = format!("http://{}/api/streamdeck/brightness", test_addr);
+    let br_resp = tokio::task::spawn_blocking(move || {
+        ureq::post(&br_url)
+            .send_json(serde_json::json!({ "brightness": 65 }))
+            .unwrap()
+            .into_json::<serde_json::Value>()
+            .unwrap()
+    }).await.unwrap();
+    assert_eq!(br_resp.get("success").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(br_resp.get("brightness").and_then(|v| v.as_u64()), Some(65));
+    assert_eq!(streamdeck.get_brightness(), 65, "StreamDeckEngine brightness musi zostać zaktualizowane do 65");
+
+    // Cleanup
+    shutdown_signal.store(true, Ordering::SeqCst);
+    let _ = server_task.await;
+}

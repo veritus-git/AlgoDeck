@@ -810,7 +810,11 @@ function setupShutdown() {
   const btnSettings = document.getElementById("btn-header-settings");
   if (btnSettings) {
     btnSettings.addEventListener("click", () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
+      if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
+        chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
+      } else {
+        window.open("settings.html", "_blank");
+      }
     });
   }
 

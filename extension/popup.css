@@ -300,36 +300,48 @@ body.detected-mode {
 }
 
 .btn-header-settings {
-  background: rgba(56, 189, 248, 0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: rgba(56, 189, 248, 0.12);
   border: 1px solid rgba(56, 189, 248, 0.3);
   color: #38bdf8;
-  font-size: 13px;
-  padding: 2px 7px;
-  border-radius: 5px;
+  font-size: 14px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-header-settings:hover {
   background: rgba(56, 189, 248, 0.25);
   color: #ffffff;
+  border-color: #38bdf8;
+  transform: rotate(45deg);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
 }
 
 .btn-header-stop {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 5px;
+  padding: 4px 10px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-header-stop:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.3);
   color: #ffffff;
+  border-color: #ef4444;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
 }
 
 /* Karty Uploadu / Dropzony z niebieskim kreskowanym obramowaniem */
