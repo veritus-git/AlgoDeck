@@ -185,24 +185,9 @@ async function checkDaemonHealth() {
 // ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
   const urlParams = new URLSearchParams(window.location.search);
-  let autoPdf = urlParams.get("auto_pdf");
+  const autoPdf = urlParams.get("auto_pdf");
 
-  // Jeśli brak parametru w URL (np. kliknięcie w ikonę rozszerzenia na pasku),
-  // sprawdź czy w storage jest świeżo wykryte pobranie zadania (< 90 sekund)
-  if (!autoPdf) {
-    try {
-      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
-        if (stored.auto_pdf && stored.auto_pdf_ts) {
-          const age = Date.now() - stored.auto_pdf_ts;
-          if (age < 90000) {
-            autoPdf = stored.auto_pdf;
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
+  // Tryb 1-kliknięcia jest aktywowany wyłącznie gdy okno zostało otwarte z parametrem ?auto_pdf=
   if (!autoPdf) return false;
 
   document.documentElement.classList.add("detected-mode");
