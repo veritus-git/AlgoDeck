@@ -27,13 +27,9 @@ regex = "1.10"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 chrono = "0.4"
 
-# Desktop GUI (eframe / egui)
-eframe = { version = "0.29", default-features = true }
-egui = "0.29"
-rfd = "0.14"
+# System utilities & Images
 dirs = "5.0"
 open = "5.3"
-ksni = { version = "0.3", features = ["blocking"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # Network & CLI

@@ -74,13 +74,23 @@ impl StreamDeckEngine {
     }
 
     fn find_icon_file(name: &str) -> Option<PathBuf> {
+        let exe_icons = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("icons").join(name)));
+        let exe_frontend = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("../frontend/icons").join(name)));
         let home_icons = dirs::home_dir().map(|h| h.join(".local/share/algodeck/icons").join(name));
+        let win_local = std::env::var("LOCALAPPDATA").ok().map(|l| PathBuf::from(l).join("AlgoDeck/icons").join(name));
+        let win_appdata = std::env::var("APPDATA").ok().map(|a| PathBuf::from(a).join("AlgoDeck/icons").join(name));
+
         let candidates = [
+            exe_icons,
+            exe_frontend,
+            win_local,
+            win_appdata,
             home_icons,
             Some(PathBuf::from("/home/linux/.local/share/algodeck/icons").join(name)),
             Some(PathBuf::from("/home/linux/.gemini/antigravity-ide/scratch/algodeck/frontend/icons").join(name)),
             dirs::data_dir().map(|d| d.join("algodeck/icons").join(name)),
             Some(PathBuf::from("frontend/icons").join(name)),
+            Some(PathBuf::from("icons").join(name)),
             Some(PathBuf::from("/usr/local/share/algodeck/icons").join(name)),
             Some(PathBuf::from("/usr/share/algodeck/icons").join(name)),
         ];
@@ -277,10 +287,11 @@ impl StreamDeckEngine {
             status: "IDLE".to_string(),
             custom_label: None,
         };
+        // Klawisz 11: Puste pole (czysta czerń OLED #000000)
         state.keys[11] = StreamDeckKey {
             id: 11,
-            icon_name: "icon_exit.png".to_string(),
-            action: "exit_to_idle".to_string(),
+            icon_name: String::new(),
+            action: String::new(),
             status: "IDLE".to_string(),
             custom_label: None,
         };
@@ -415,12 +426,14 @@ impl StreamDeckEngine {
         let mut base = RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]));
 
         if label.contains('/') {
-            // Wskaźnik numeru zadania np. "1/5": czysty tekst wycentrowany na PURE BLACK #000000 bez ramki
-            let len = label.chars().count() as i32;
-            let char_w = 6;
-            let start_x = ((72 - (len * char_w)) / 2).max(2);
-            let start_y = 32;
-            Self::draw_mini_text(&mut base, label, start_x, start_y, Rgb([226, 232, 240]));
+            // Wskaźnik numeru zadania np. "1/1" czy "2/5": DUŻY, CZYTELNY, OSTRY napis na OLED black (#000000)
+            let char_count = label.chars().count() as i32;
+            let scale = if char_count <= 3 { 3 } else { 2 };
+            let char_w = 5 * scale + scale;
+            let total_w = char_count * char_w - scale;
+            let start_x = ((72 - total_w) / 2).max(2);
+            let start_y = (72 - 7 * scale) / 2;
+            Self::draw_scaled_text(&mut base, label, start_x, start_y, scale, Rgb([248, 250, 252]));
             return DynamicImage::ImageRgb8(base);
         }
 
@@ -441,14 +454,40 @@ impl StreamDeckEngine {
         }
 
         let len = label.chars().count() as i32;
-        let char_w = 6;
-        let start_x = ((72 - (len * char_w)) / 2).max(6);
-        let start_y = 33;
+        let scale = if len <= 4 { 2 } else { 1 };
+        let char_w = 5 * scale + scale;
+        let total_w = len * char_w - scale;
+        let start_x = ((72 - total_w) / 2).max(8);
+        let start_y = (72 - 7 * scale) / 2;
 
-        Self::draw_mini_text(&mut base, label, start_x, start_y, text_col);
+        Self::draw_scaled_text(&mut base, label, start_x, start_y, scale, text_col);
         DynamicImage::ImageRgb8(base)
     }
 
+    fn draw_scaled_text(img: &mut RgbImage, text: &str, start_x: i32, start_y: i32, scale: i32, color: Rgb<u8>) {
+        let mut cur_x = start_x;
+        for c in text.chars() {
+            let glyph = Self::get_char_glyph(c);
+            for (row_idx, row_bits) in glyph.iter().enumerate() {
+                for col_idx in 0..5 {
+                    if (row_bits & (1 << (4 - col_idx))) != 0 {
+                        for sy in 0..scale {
+                            for sx in 0..scale {
+                                let px = cur_x + col_idx as i32 * scale + sx;
+                                let py = start_y + row_idx as i32 * scale + sy;
+                                if px >= 0 && px < 72 && py >= 0 && py < 72 {
+                                    img.put_pixel(px as u32, py as u32, color);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            cur_x += 5 * scale + scale;
+        }
+    }
+
+    #[allow(dead_code)]
     fn draw_mini_text(img: &mut RgbImage, text: &str, start_x: i32, start_y: i32, color: Rgb<u8>) {
         let mut cur_x = start_x;
         for c in text.chars() {

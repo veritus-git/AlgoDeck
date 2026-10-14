@@ -1,5 +1,4 @@
 mod config;
-mod gui;
 mod native_host;
 mod pdf;
 mod runner;
@@ -20,35 +19,21 @@ use tokio::sync::broadcast;
 #[command(name = "algodeck")]
 #[command(author = "AlgoDeck Team")]
 #[command(version = "2.0.0")]
-#[command(about = "AlgoDeck ⚡ 100% Rust Olympic Programming Environment & Stream Deck Controller", long_about = None)]
+#[command(about = "AlgoDeck ⚡ 100% Rust Olympic Programming Engine & Stream Deck Controller", long_about = None)]
 struct Cli {
-    #[arg(short, long, help = "Plik PDF z treścią zadania do otwarcia w GUI")]
-    pdf: Option<String>,
-
-    #[arg(long, help = "Uruchom tylko ikonę w zasobniku systemowym (tray)")]
-    tray: bool,
-
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Uruchom graficzny panel AlgoDeck (domyślne)")]
-    Gui {
-        #[arg(short, long)]
-        pdf: Option<String>,
-        #[arg(long)]
-        tray: bool,
-    },
-
-    #[command(about = "Uruchom daemona w tle (serwer Axum + sterownik Stream Deck)")]
+    #[command(about = "Uruchom demona (serwer Axum + sterownik Stream Deck)")]
     Daemon {
         #[arg(short, long, default_value = "8080")]
         port: u16,
     },
 
-    #[command(about = "Uruchom daemona w tle jako niezależny proces")]
+    #[command(about = "Uruchom demona w tle jako niezależny proces")]
     Start,
 
     #[command(about = "Zatrzymaj działający proces AlgoDeck")]
@@ -76,17 +61,8 @@ fn main() {
 
     match cli.command {
         None => {
-            // Domyślnie uruchamiamy okno GUI
-            if let Err(e) = gui::run_gui(cli.pdf, cli.tray) {
-                eprintln!("Błąd uruchomienia GUI: {:?}", e);
-            }
-        }
-        Some(Commands::Gui { pdf, tray }) => {
-            let initial_pdf = pdf.or(cli.pdf);
-            let tray_mode = tray || cli.tray;
-            if let Err(e) = gui::run_gui(initial_pdf, tray_mode) {
-                eprintln!("Błąd uruchomienia GUI: {:?}", e);
-            }
+            // Domyślnie uruchamiamy demona
+            run_daemon(8080);
         }
         Some(Commands::Daemon { port }) => {
             run_daemon(port);
@@ -112,9 +88,52 @@ fn main() {
     }
 }
 
+fn check_streamdeck_conflicts() {
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq StreamDeck.exe"])
+            .output();
+        if let Ok(out) = output {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if s.contains("StreamDeck.exe") {
+                eprintln!("\x1b[1;33m[UWAGA] Wykryto działającą oficjalną aplikację Elgato (StreamDeck.exe)!");
+                eprintln!("Aplikacja Elgato blokuje bezpośredni dostęp USB HID do urządzenia.");
+                eprintln!("Zamknij StreamDeck.exe z paska zadań, aby AlgoDeck mógł natychmiast przejąć kontrolę nad Stream Deckiem.\x1b[0m\n");
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let output = std::process::Command::new("pgrep")
+            .args(["-i", "streamcontroller"])
+            .output();
+        if let Ok(out) = output {
+            if !out.stdout.is_empty() {
+                eprintln!("\x1b[1;33m[UWAGA] Wykryto działający proces StreamController!");
+                eprintln!("StreamController może blokować bezpośredni dostęp do urządzenia.");
+                eprintln!("Zamknij StreamController, aby AlgoDeck mógł sterować klawiszami.\x1b[0m\n");
+            }
+        }
+    }
+}
+
 fn run_daemon(port: u16) {
-    println!("⚡ AlgoDeck Daemon v2.0.0 (100% Rust Architecture)");
+    println!("{}", r#"
+  █████╗ ██╗      ██████╗  ██████╗ ██████╗ ███████╗ ██████╗██╗  ██╗
+ ██╔══██╗██║     ██╔════╝ ██╔═══██╗██╔══██╗██╔════╝██╔════╝██║ ██╔╝
+ ███████║██║     ██║  ███╗██║   ██║██║  ██║█████╗  ██║     █████═╝ 
+ ██╔══██║██║     ██║   ██║██║   ██║██║  ██║██╔══╝  ██║     ██╔═██╗ 
+ ██║  ██║███████╗╚██████╔╝╚██████╔╝██████╔╝███████╗╚██████╗██║  ██╗
+ ╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝╚═╝  ╚═╝
+
+       ⚡  K O Ł O   M A P   -   O L I M P I C K I E   C + +  ⚡
+       ⚡       100% RUST ENGINE  |  STREAM DECK HID        ⚡
+"#);
+    println!("⚡ AlgoDeck Daemon v2.0.0 (100% Rust Architecture) na porcie {}", port);
     println!("--------------------------------------------------");
+
+    check_streamdeck_conflicts();
 
     let settings = AppSettings::load();
     let runner = Arc::new(TestExecutor::new(settings.clone()));
@@ -144,62 +163,99 @@ fn run_daemon(port: u16) {
             None
         };
 
-        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-        let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
+        let temp_task_file = std::env::temp_dir().join("algodeck_active_task.txt");
+        let _ = std::fs::write(&temp_task_file, problem_id.to_uppercase());
 
-        // Zapisz /tmp/algodeck_active_task.txt
-        let _ = std::fs::write("/tmp/algodeck_active_task.txt", problem_id.to_uppercase());
-
-        // 1. Sprawdź czy skrypt sd_algo_code.sh jest dostępny
-        let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
-        let mut script_launched = false;
-        if let Some(ref script) = sd_code {
-            if script.exists() {
-                let res = std::process::Command::new(script)
-                    .arg(&p_dir)
-                    .arg(&sol_file)
-                    .env("DISPLAY", &display)
-                    .env("XAUTHORITY", &xauthority)
-                    .spawn();
-                if res.is_ok() {
-                    script_launched = true;
-                }
-            }
-        }
-
-        // 2. Bezpośrednie wywołanie VS Code jako niezawodny fallback
-        if !script_launched {
-            let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
-                "/usr/bin/code"
-            } else {
-                "code"
-            };
-            let mut cmd = std::process::Command::new(code_bin);
-            cmd.arg("--reuse-window");
+        #[cfg(target_os = "windows")]
+        {
+            let mut args = vec!["--reuse-window".to_string()];
             if settings.vscode_mode == "separate_windows" {
-                cmd.arg(&p_dir);
+                args.push(p_dir.to_string_lossy().to_string());
             } else {
-                cmd.arg(&ws_dir);
+                args.push(ws_dir.to_string_lossy().to_string());
             }
             if sol_file.exists() {
-                cmd.arg(&sol_file);
+                args.push(sol_file.to_string_lossy().to_string());
             }
             if settings.open_pdf_in_vscode {
                 if let Some(ref p) = actual_pdf {
-                    cmd.arg(p);
+                    args.push(p.to_string_lossy().to_string());
                 }
             }
-            cmd.env("DISPLAY", &display);
-            cmd.env("XAUTHORITY", &xauthority);
+
+            let win_code_cmd = std::env::var("LOCALAPPDATA")
+                .map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd"))
+                .ok();
+
+            if let Some(ref code_path) = win_code_cmd {
+                if code_path.exists() {
+                    let _ = std::process::Command::new(code_path).args(&args).spawn();
+                    return;
+                }
+            }
+
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.arg("/C").arg("code");
+            for a in args {
+                cmd.arg(a);
+            }
             let _ = cmd.spawn();
         }
 
-        // 3. Powiadomienie na pulpicie
-        let _ = std::process::Command::new("notify-send")
-            .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
-            .env("DISPLAY", &display)
-            .env("XAUTHORITY", &xauthority)
-            .spawn();
+        #[cfg(not(target_os = "windows"))]
+        {
+            let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+            let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
+
+            // 1. Skrypt sd_algo_code.sh jeśli obecny
+            let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
+            let mut script_launched = false;
+            if let Some(ref script) = sd_code {
+                if script.exists() {
+                    let res = std::process::Command::new(script)
+                        .arg(&p_dir)
+                        .arg(&sol_file)
+                        .env("DISPLAY", &display)
+                        .env("XAUTHORITY", &xauthority)
+                        .spawn();
+                    if res.is_ok() {
+                        script_launched = true;
+                    }
+                }
+            }
+
+            if !script_launched {
+                let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
+                    "/usr/bin/code"
+                } else {
+                    "code"
+                };
+                let mut cmd = std::process::Command::new(code_bin);
+                cmd.arg("--reuse-window");
+                if settings.vscode_mode == "separate_windows" {
+                    cmd.arg(&p_dir);
+                } else {
+                    cmd.arg(&ws_dir);
+                }
+                if sol_file.exists() {
+                    cmd.arg(&sol_file);
+                }
+                if settings.open_pdf_in_vscode {
+                    if let Some(ref p) = actual_pdf {
+                        cmd.arg(p);
+                    }
+                }
+                cmd.env("DISPLAY", &display);
+                cmd.env("XAUTHORITY", &xauthority);
+                let _ = cmd.spawn();
+            }
+
+            let _ = std::process::Command::new("notify-send")
+                .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
+                .env("DISPLAY", &display)
+                .env("XAUTHORITY", &xauthority)
+                .spawn();
+        }
     }
 
     let action_callback = Arc::new(move |action: String, _key_idx: usize| {

@@ -24,6 +24,9 @@ echo " ███████║██║     ██║  ███╗██║   
 echo " ██╔══██║██║     ██║   ██║██║   ██║██║  ██║██╔══╝  ██║     ██╔═██╗ "
 echo " ██║  ██║███████╗╚██████╔╝╚██████╔╝██████╔╝███████╗╚██████╗██║  ██╗"
 echo " ╚═╝  ╚═╝╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝╚═╝  ╚═╝"
+echo ""
+echo "       ⚡  K O Ł O   M A P   -   O L I M P I C K I E   C + +  ⚡"
+echo "       ⚡       100% RUST ENGINE  |  STREAM DECK HID        ⚡"
 echo -e "${NC}"
 echo -e "${BOLD}AlgoDeck ⚡ Koło MAP - 100% Rust Standalone Installer${NC}"
 echo -e "Instalacja narzędzi C++, Stream Deck HID, VS Code, daemona i rozszerzenia...\n"
@@ -92,14 +95,36 @@ if command -v code &> /dev/null; then
 fi
 
 # 4. Budowa natywnej binarki AlgoDeck
-echo -e "\n${CYAN}[4/6] Kompilacja pojedynczej binarki AlgoDeck w Rust (Release)...${NC}"
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$HOME")"
 mkdir -p "$HOME/.local/bin"
-mkdir -p "$HOME/.local/share/algodeck"
+mkdir -p "$HOME/.local/share/algodeck/icons"
 
-(cd "$REPO_DIR" && cargo build --release)
-install -m 755 "$REPO_DIR/target/release/algodeck" "$HOME/.local/bin/algodeck"
-echo -e "${GREEN}✓ Binarka algodeck zainstalowana w ~/.local/bin/algodeck (35MB, 0 runtime dependencies).${NC}"
+# Jeśli uruchomiono w sklonowanym repozytorium z Cargo.toml
+if [ -f "$REPO_DIR/Cargo.toml" ] && command -v cargo &> /dev/null; then
+    echo -e "${CYAN}Kompilacja lokalna ze źródeł...${NC}"
+    (cd "$REPO_DIR" && cargo build --release)
+    install -m 755 "$REPO_DIR/target/release/algodeck" "$HOME/.local/bin/algodeck"
+    if [ -d "$REPO_DIR/frontend/icons" ]; then
+        cp -r "$REPO_DIR/frontend/icons/"* "$HOME/.local/share/algodeck/icons/"
+    fi
+else
+    echo -e "${CYAN}Pobieranie natywnej binarki z GitHub Releases...${NC}"
+    curl -fsSL -o "$HOME/.local/bin/algodeck" "https://github.com/veritus-git/AlgoDeck/releases/latest/download/algodeck-linux-x86_64" || true
+    chmod +x "$HOME/.local/bin/algodeck"
+    # Pobierz ikony
+    echo -e "${CYAN}Pobieranie grafik Stream Decka...${NC}"
+    TMP_ZIP="/tmp/algodeck_icons_$$.zip"
+    TMP_DIR="/tmp/algodeck_extract_$$"
+    curl -fsSL -o "$TMP_ZIP" "https://github.com/veritus-git/AlgoDeck/archive/refs/heads/main.zip" || true
+    if [ -f "$TMP_ZIP" ]; then
+        unzip -q -o "$TMP_ZIP" "AlgoDeck-main/frontend/icons/*" -d "$TMP_DIR" 2>/dev/null || true
+        if [ -d "$TMP_DIR/AlgoDeck-main/frontend/icons" ]; then
+            cp -r "$TMP_DIR/AlgoDeck-main/frontend/icons/"* "$HOME/.local/share/algodeck/icons/"
+        fi
+        rm -rf "$TMP_ZIP" "$TMP_DIR"
+    fi
+fi
+echo -e "${GREEN}✓ Binarka algodeck oraz ikony zainstalowane (~/.local/bin/algodeck).${NC}"
 
 # 5. Uprawnienia USB HID dla Stream Decka (udev)
 echo -e "\n${CYAN}[5/6] Konfiguracja uprawnień USB HID dla kontrolerów Elgato Stream Deck...${NC}"

@@ -258,6 +258,14 @@ async function processDownload(downloadId) {
       });
     } catch (e) {}
 
+    // Oznacz odznakę na ikonie rozszerzenia i wyślij powiadomienie
+    try {
+      if (chrome.action && chrome.action.setBadgeText) {
+        chrome.action.setBadgeText({ text: "1" });
+        chrome.action.setBadgeBackgroundColor({ color: "#10b981" });
+      }
+    } catch (_) {}
+
     // Powiadomienie systemowe Chrome (Native OS Toast)
     const baseName = filename.replace(/^.*[\\\/]/, '');
     try {
@@ -266,61 +274,34 @@ async function processDownload(downloadId) {
           type: "basic",
           iconUrl: "icons/icon128.png",
           title: "AlgoDeck ⚡ Wykryto zadanie olimpijskie",
-          message: `Pobrano: ${baseName}\nKliknij, aby błyskawicznie utworzyć workspace C++20!`,
+          message: `Pobrano: ${baseName}\nKliknij tutaj, aby utworzyć zadanie w AlgoDeck.`,
           priority: 2,
-          requireInteraction: true
+          requireInteraction: false
         });
       }
     } catch (e) {}
-
-    // Otwórz DOKŁADNIE JEDNO dedykowane okienko powiadomienia (singleton lock)
-    await openDedicatedNotificationWindow(filename);
   });
 }
 
-// Otwieranie dedykowanego okienka powiadomienia (Singleton Lock - ZAWSZE maksymalnie 1 okno!)
-async function openDedicatedNotificationWindow(filename) {
-  if (isOpeningWindow) {
-    console.log("[AlgoDeck] Okno powiadomienia jest już w trakcie otwierania - pomijam duplikat.");
-    return;
-  }
-  isOpeningWindow = true;
-
-  try {
-    const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}`);
-
-    // Przeszukaj wszystkie istniejące okna przeglądarki pod kątem otwartego już popup.html AlgoDeck
-    try {
-      const allWindows = await chrome.windows.getAll({ populate: true });
-      for (const win of allWindows) {
-        if (win.tabs) {
-          const popupTab = win.tabs.find(t => t.url && t.url.includes("popup.html"));
-          if (popupTab) {
-            await chrome.tabs.update(popupTab.id, { url: targetUrl });
-            await chrome.windows.update(win.id, { focused: true });
-            activeNotificationWindowId = win.id;
-            return;
-          }
+// Obsługa kliknięcia w powiadomienie Chrome
+if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {
+  chrome.notifications.onClicked.addListener((notifId) => {
+    if (notifId.startsWith("algodeck_")) {
+      chrome.notifications.clear(notifId);
+      try {
+        if (chrome.action && chrome.action.setBadgeText) {
+          chrome.action.setBadgeText({ text: "" });
         }
-      }
-    } catch (_) {}
-
-    // Jeśli nie ma otwartego okna AlgoDeck, stwórz DOKŁADNIE JEDNO
-    const newWin = await chrome.windows.create({
-      url: targetUrl,
-      type: "popup",
-      width: 380,
-      height: 165,
-      focused: true
-    });
-    activeNotificationWindowId = newWin.id;
-  } catch (err) {
-    console.warn("[AlgoDeck] Błąd otwierania okna popupa:", err);
-  } finally {
-    setTimeout(() => {
-      isOpeningWindow = false;
-    }, 600);
-  }
+      } catch (_) {}
+      chrome.windows.create({
+        url: chrome.runtime.getURL("popup.html"),
+        type: "popup",
+        width: 440,
+        height: 620,
+        focused: true
+      });
+    }
+  });
 }
 
 // Czyszczenie referencji okna po jego zamknięciu

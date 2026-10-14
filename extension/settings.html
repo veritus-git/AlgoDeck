@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlgoDeck ⚡ Ustawienia Środowiska</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="settings-wrapper">
+    <!-- Header -->
+    <header class="settings-header">
+      <div class="header-left">
+        <div class="header-logo">
+          <span class="bolt">⚡</span>
+          <div class="header-title-box">
+            <h1>AlgoDeck</h1>
+            <span class="header-subtitle">Ustawienia i Konfiguracja Środowiska</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div id="status-badge" class="status-badge connecting">
+          <span class="status-dot"></span>
+          <span id="status-text">Łączenie...</span>
+        </div>
+        <button type="button" id="btn-close-settings" class="btn-secondary">Zamknij</button>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="settings-main">
+      <div class="settings-grid">
+        
+        <!-- Sekcja 1: Środowisko i Workspace -->
+        <section class="settings-card">
+          <div class="card-header">
+            <span class="card-icon">📁</span>
+            <h2>Katalog Roboczy (Workspace)</h2>
+          </div>
+          <p class="card-desc">Główny folder, w którym tworzone są projekty zadań, kody źródłowe .cpp oraz testy.</p>
+          
+          <div class="form-group">
+            <label for="cfg-workspace-dir" class="form-label">Ścieżka katalogu projektów:</label>
+            <div class="input-with-button">
+              <input type="text" id="cfg-workspace-dir" class="form-input" placeholder="/home/user/AlgoDeckWorkspace" spellcheck="false">
+              <button type="button" id="btn-reset-ws" class="btn-subtle" title="Przywróć domyślną ścieżkę">Domyślna</button>
+            </div>
+            <span class="input-hint">Katalog zostanie utworzony automatycznie przy pierwszym dodaniu zadania.</span>
+          </div>
+        </section>
+
+        <!-- Sekcja 2: Visual Studio Code -->
+        <section class="settings-card">
+          <div class="card-header">
+            <span class="card-icon">💻</span>
+            <h2>Edytor Visual Studio Code</h2>
+          </div>
+          <p class="card-desc">Sposób uruchamiania i układ okien w edytorze kodu po kliknięciu zadania.</p>
+          
+          <div class="form-group">
+            <label for="cfg-vscode-mode" class="form-label">Tryb otwierania projektów:</label>
+            <select id="cfg-vscode-mode" class="form-select">
+              <option value="auto">Jeden folder roboczy (zalecane)</option>
+              <option value="separate_windows">Osobne okno VS Code dla każdego zadania</option>
+            </select>
+          </div>
+
+          <div class="form-group switch-group">
+            <div class="switch-meta">
+              <span class="switch-title">Otwieraj treść zadania (PDF) obok kodu</span>
+              <span class="switch-desc">Dzieli edytor na dwie kolumny: po lewej kod .cpp, po prawej treść zadania.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="cfg-split-pdf">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+
+        <!-- Sekcja 3: Kompilacja i Narzędzia C++ -->
+        <section class="settings-card">
+          <div class="card-header">
+            <span class="card-icon">⚙️</span>
+            <h2>Kompilator i Standard C++</h2>
+          </div>
+          <p class="card-desc">Flagi kompilatora używane przez lokalny silnik testowania i weryfikacji rozwiązań.</p>
+          
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="cfg-compiler" class="form-label">Kompilator:</label>
+              <select id="cfg-compiler" class="form-select">
+                <option value="g++">GCC (g++)</option>
+                <option value="clang++">Clang (clang++)</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="cfg-cpp-std" class="form-label">Standard C++:</label>
+              <select id="cfg-cpp-std" class="form-select">
+                <option value="c++20">C++20 (Oficjalny standard OIJ / OI)</option>
+                <option value="c++17">C++17 (Szkopuł / Klasyczny)</option>
+                <option value="c++23">C++23 (Najnowszy)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group switch-group">
+            <div class="switch-meta">
+              <span class="switch-title">Włącz AddressSanitizer & UndefinedBehaviorSanitizer</span>
+              <span class="switch-desc">Wykrywa wyjścia poza tablicę, wycieki pamięci i błędy UB podczas lokalnego testowania.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="cfg-sanitizer">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="cfg-time-limit" class="form-label">Domyślny limit czasu (s):</label>
+              <input type="number" id="cfg-time-limit" class="form-input" min="0.1" max="30.0" step="0.5" value="1.0">
+            </div>
+            <div class="form-group flex-1">
+              <label for="cfg-memory-limit" class="form-label">Domyślny limit pamięci (MB):</label>
+              <input type="number" id="cfg-memory-limit" class="form-input" min="16" max="2048" step="16" value="128">
+            </div>
+          </div>
+        </section>
+
+        <!-- Sekcja 4: Automatyzacja i Rozszerzenie -->
+        <section class="settings-card">
+          <div class="card-header">
+            <span class="card-icon">⚡</span>
+            <h2>Automatyzacja Przeglądarki</h2>
+          </div>
+          <p class="card-desc">Integracja z serwisami olimpijskimi (Szkopuł, Koło MAP, OIJ, Olimpiada Informatyczna).</p>
+          
+          <div class="form-group switch-group">
+            <div class="switch-meta">
+              <span class="switch-title">Wykrywaj pobrane pliki PDF i ZIP zadań</span>
+              <span class="switch-desc">Automatycznie powiadamia i pozwala utworzyć workspace 1 kliknięciem po pobraniu zadania.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="cfg-auto-detect">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="form-group switch-group">
+            <div class="switch-meta">
+              <span class="switch-title">Powiadomienia systemowe</span>
+              <span class="switch-desc">Wyświetlaj powiadomienia na pulpicie o zakończeniu testów i otwarciu plików.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="cfg-notifications">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Action Bar -->
+      <div class="settings-actions-bar">
+        <div class="actions-left">
+          <span id="save-status-msg" class="save-status-msg"></span>
+        </div>
+        <div class="actions-right">
+          <button type="button" id="btn-test-connection" class="btn-secondary">Testuj Połączenie</button>
+          <button type="button" id="btn-save-settings" class="btn-primary">
+            <span class="btn-icon">💾</span> Zapisz Ustawienia
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

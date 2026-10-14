@@ -482,54 +482,89 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
         None
     };
 
-    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-    let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
+    let temp_task_file = std::env::temp_dir().join("algodeck_active_task.txt");
+    let _ = std::fs::write(&temp_task_file, problem_id.to_uppercase());
 
-    let _ = std::fs::write("/tmp/algodeck_active_task.txt", problem_id.to_uppercase());
-
-    let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
-    let mut launched = false;
-    if let Some(ref script) = sd_code {
-        if script.exists() {
-            let res = std::process::Command::new(script)
-                .arg(&p_dir)
-                .arg(&sol_file)
-                .env("DISPLAY", &display)
-                .env("XAUTHORITY", &xauthority)
-                .spawn();
-            if res.is_ok() {
-                launched = true;
-            }
-        }
-    }
-
-    if !launched {
-        let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
-            "/usr/bin/code"
-        } else {
-            "code"
-        };
-        let mut cmd = std::process::Command::new(code_bin);
-        cmd.arg("--reuse-window");
-        cmd.arg(workspace_dir);
+    #[cfg(target_os = "windows")]
+    {
+        let mut args = vec!["--reuse-window".to_string(), workspace_dir.to_string_lossy().to_string()];
         if sol_file.exists() {
-            cmd.arg(&sol_file);
+            args.push(sol_file.to_string_lossy().to_string());
         }
         if split_pdf {
             if let Some(ref p) = actual_pdf {
-                cmd.arg(p);
+                args.push(p.to_string_lossy().to_string());
             }
         }
-        cmd.env("DISPLAY", &display);
-        cmd.env("XAUTHORITY", &xauthority);
+
+        let win_code_cmd = std::env::var("LOCALAPPDATA")
+            .map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd"))
+            .ok();
+
+        if let Some(ref code_path) = win_code_cmd {
+            if code_path.exists() {
+                let _ = std::process::Command::new(code_path).args(&args).spawn();
+                return;
+            }
+        }
+
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.arg("/C").arg("code");
+        for a in args {
+            cmd.arg(a);
+        }
         let _ = cmd.spawn();
     }
 
-    let _ = std::process::Command::new("notify-send")
-        .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
-        .env("DISPLAY", &display)
-        .env("XAUTHORITY", &xauthority)
-        .spawn();
+    #[cfg(not(target_os = "windows"))]
+    {
+        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+        let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
+
+        let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
+        let mut launched = false;
+        if let Some(ref script) = sd_code {
+            if script.exists() {
+                let res = std::process::Command::new(script)
+                    .arg(&p_dir)
+                    .arg(&sol_file)
+                    .env("DISPLAY", &display)
+                    .env("XAUTHORITY", &xauthority)
+                    .spawn();
+                if res.is_ok() {
+                    launched = true;
+                }
+            }
+        }
+
+        if !launched {
+            let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
+                "/usr/bin/code"
+            } else {
+                "code"
+            };
+            let mut cmd = std::process::Command::new(code_bin);
+            cmd.arg("--reuse-window");
+            cmd.arg(workspace_dir);
+            if sol_file.exists() {
+                cmd.arg(&sol_file);
+            }
+            if split_pdf {
+                if let Some(ref p) = actual_pdf {
+                    cmd.arg(p);
+                }
+            }
+            cmd.env("DISPLAY", &display);
+            cmd.env("XAUTHORITY", &xauthority);
+            let _ = cmd.spawn();
+        }
+
+        let _ = std::process::Command::new("notify-send")
+            .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
+            .env("DISPLAY", &display)
+            .env("XAUTHORITY", &xauthority)
+            .spawn();
+    }
 }
 
 async fn switch_task(

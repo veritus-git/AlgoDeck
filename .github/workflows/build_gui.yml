@@ -91,6 +91,10 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Package icons
+        run: |
+          cd frontend && zip -r ../dist/icons.zip icons && cd ..
+
       - name: Verify artifacts
         run: ls -la dist/
 

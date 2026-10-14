@@ -806,4 +806,18 @@ function setupShutdown() {
     btnStop.disabled = false;
     btnStop.textContent = "Wyłącz";
   });
+
+  const btnSettings = document.getElementById("btn-header-settings");
+  if (btnSettings) {
+    btnSettings.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
+    });
+  }
+
+  // Wyczyść odznakę powiadomień po otwarciu popupa
+  try {
+    if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+      chrome.action.setBadgeText({ text: "" });
+    }
+  } catch (_) {}
 }
