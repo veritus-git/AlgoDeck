@@ -170,6 +170,23 @@ function setupTabs() {
       }
     });
   });
+
+  function handleUrlHash() {
+    const hash = window.location.hash;
+    if (hash === "#new" || hash === "#import") {
+      const btn = document.querySelector('[data-tab="tab-import"]');
+      if (btn) btn.click();
+    } else if (hash === "#manual") {
+      const btn = document.querySelector('[data-tab="tab-manual"]');
+      if (btn) btn.click();
+    } else if (hash === "#tasks" || hash === "#gallery") {
+      const btn = document.querySelector('[data-tab="tab-gallery"]');
+      if (btn) btn.click();
+    }
+  }
+
+  handleUrlHash();
+  window.addEventListener("hashchange", handleUrlHash);
 }
 
 // ---------------- Daemon Health & Active Task ----------------
@@ -514,7 +531,7 @@ async function loadProblems() {
     const res = await fetch(`${API_BASE}/api/problems`);
     if (res.ok) {
       const data = await res.json();
-      allProblems = data.problems || [];
+      allProblems = Array.isArray(data) ? data : (data.problems || []);
       if (data.active) {
         activeProblemId = data.active;
         activeTaskBar.classList.remove("hidden");
@@ -551,7 +568,7 @@ function renderGallery(problems) {
   problems.forEach(p => {
     const pid = p.problem_id || "zad";
     const title = p.title || pid.toUpperCase();
-    const testsCount = (p.tests || []).length;
+    const testsCount = p.tests_count !== undefined ? p.tests_count : (p.tests || []).length;
     const isActive = (pid.toLowerCase() === (activeProblemId || "").toLowerCase());
 
     const card = document.createElement("div");

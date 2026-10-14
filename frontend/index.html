@@ -3,208 +3,288 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AlgoDeck ⚡ Koło MAP</title>
+  <title>AlgoDeck ⚡ Koło MAP — Workspace & Zadania</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app-container">
-    <!-- Górny Pasek Nagłówka -->
-    <header class="app-header">
-      <div class="header-left">
-        <div class="logo-badge">⚡</div>
-        <div class="brand">
-          <h1>AlgoDeck</h1>
-          <span class="sub-badge">KOŁO MAP</span>
+  <div class="readme-container">
+    
+    <!-- NAGŁÓWEK GŁÓWNY (Styl Dokumentacyjny README) -->
+    <header class="doc-header">
+      <div class="doc-badge-row">
+        <span class="badge badge-accent">⚡ AlgoDeck Hub</span>
+        <span class="badge badge-subtle">Koło MAP</span>
+        <span class="badge badge-subtle">Wersja 2.0 (Rust Engine)</span>
+      </div>
+
+      <div class="doc-title-row">
+        <div class="doc-title-group">
+          <div class="doc-logo-bolt">⚡</div>
+          <div>
+            <h1 class="doc-title">AlgoDeck Workspace Hub</h1>
+            <p class="doc-subtitle">Szybki import treści olimpiady (.pdf), paczek testów (.zip) oraz zarządzanie projektami w Visual Studio Code.</p>
+          </div>
+        </div>
+
+        <div class="doc-header-actions">
+          <div id="daemon-status" class="status-pill status-offline" title="Status połączenia z demonem AlgoDeck">
+            <span class="status-dot"></span>
+            <span id="status-text">OFFLINE</span>
+          </div>
+
+          <a href="/settings" class="btn-doc-nav" title="Otwórz ustawienia AlgoDeck">
+            <span class="nav-gear-icon">⚙️</span>
+            <span>Ustawienia</span>
+          </a>
         </div>
       </div>
-      <div class="header-right">
-        <div id="daemon-status" class="status-pill status-offline" title="Status połączenia z daemonem AlgoDeck">
-          <span class="status-dot"></span>
-          <span id="status-text">OFFLINE</span>
+
+      <!-- Pasek Aktywnego Zadania -->
+      <div id="active-task-bar" class="active-task-banner hidden">
+        <div class="active-task-info">
+          <span class="pulse-indicator"></span>
+          <span class="active-task-label">Aktywne zadanie:</span>
+          <strong id="active-task-name" class="active-task-name">---</strong>
         </div>
-      </div>
-    </header>
-
-    <!-- Pasek Aktywnego Zadania -->
-    <div id="active-task-bar" class="active-task-bar hidden">
-      <div class="active-task-info">
-        <span class="pulse-indicator"></span>
-        <span class="active-label">Aktywne:</span>
-        <strong id="active-task-name">---</strong>
-      </div>
-      <button id="btn-quick-vscode" class="btn-quick-vscode" title="Otwórz w VS Code">
-        VS Code
-      </button>
-    </div>
-
-    <!-- Zakładki Nawigacji (Bez zbędnych emotek) -->
-    <nav class="nav-tabs">
-      <button class="tab-btn active" data-tab="tab-import">
-        <span>Import (PDF + ZIP)</span>
-      </button>
-      <button class="tab-btn" data-tab="tab-manual">
-        <span>Ręczny Workspace</span>
-      </button>
-      <button class="tab-btn" data-tab="tab-gallery">
-        <span>Zadania</span>
-      </button>
-    </nav>
-
-    <!-- Zawartość Zakładek -->
-    <main class="tab-content-wrapper">
-      
-      <!-- ZAKŁADKA 1: IMPORT (DWA OSOBNE OBSZARY + PERSISTANCE) -->
-      <section id="tab-import" class="tab-pane active">
-        <div class="staging-zones-grid">
-          
-          <!-- Obszar 1: Treść Zadania (PDF) -->
-          <div class="stage-zone-wrapper">
-            <div class="zone-label">📄 Treść zadania (PDF)</div>
-            
-            <!-- Stan pusty (Dropzone) -->
-            <div class="stage-dropzone" id="drop-pdf">
-              <div class="drop-body">
-                <span class="drop-mini-icon">📄</span>
-                <span class="drop-mini-text">Upuść plik <strong>.pdf</strong></span>
-              </div>
-              <button type="button" class="btn-picker" id="btn-browse-pdf">Wybierz</button>
-              <input type="file" id="file-input-pdf" accept=".pdf" class="hidden">
-            </div>
-
-            <!-- Stan wczytany (Staged) -->
-            <div class="stage-card hidden" id="staged-pdf-card">
-              <span class="card-file-icon">📄</span>
-              <div class="card-file-info">
-                <div class="card-file-name" id="staged-pdf-name">zadanie.pdf</div>
-                <div class="card-file-meta" id="staged-pdf-meta">Wczytano treść</div>
-              </div>
-              <button type="button" class="btn-card-remove" id="btn-remove-pdf" title="Usuń plik PDF">✕</button>
-            </div>
-          </div>
-
-          <!-- Obszar 2: Paczka Testów (ZIP) -->
-          <div class="stage-zone-wrapper">
-            <div class="zone-label">📦 Paczka testów (ZIP)</div>
-            
-            <!-- Stan pusty (Dropzone) -->
-            <div class="stage-dropzone" id="drop-zip">
-              <div class="drop-body">
-                <span class="drop-mini-icon">📦</span>
-                <span class="drop-mini-text">Upuść archiwum <strong>.zip</strong></span>
-              </div>
-              <button type="button" class="btn-picker" id="btn-browse-zip">Wybierz</button>
-              <input type="file" id="file-input-zip" accept=".zip" class="hidden">
-            </div>
-
-            <!-- Stan wczytany (Staged) -->
-            <div class="stage-card hidden" id="staged-zip-card">
-              <span class="card-file-icon">📦</span>
-              <div class="card-file-info">
-                <div class="card-file-name" id="staged-zip-name">testy.zip</div>
-                <div class="card-file-meta" id="staged-zip-meta">Wczytano testy</div>
-              </div>
-              <button type="button" class="btn-card-remove" id="btn-remove-zip" title="Usuń plik ZIP">✕</button>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- Formularz weryfikacji metadanych zadania -->
-        <div id="import-details" class="card-form hidden">
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label for="imp-code">Kod:</label>
-              <input type="text" id="imp-code" placeholder="np. chw" spellcheck="false">
-            </div>
-            <div class="form-group flex-2">
-              <label for="imp-title">Tytuł zadania:</label>
-              <input type="text" id="imp-title" placeholder="np. Chwasty" spellcheck="false">
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label for="imp-time">Czas (s):</label>
-              <input type="number" id="imp-time" value="1.0" step="0.1" min="0.1">
-            </div>
-            <div class="form-group flex-1">
-              <label for="imp-mem">RAM (MB):</label>
-              <input type="number" id="imp-mem" value="128" step="1" min="16">
-            </div>
-          </div>
-
-          <div id="tests-summary-badge" class="tests-summary-badge">
-            <span class="badge-dot">●</span>
-            <span id="tests-count-text">0 testów wykrytych</span>
-          </div>
-        </div>
-
-        <!-- Przycisk Rozpoczęcia Backendowego -->
-        <button type="button" id="btn-start-staged" class="btn-primary w-full hidden">
-          <span>⚡ Rozpocznij</span>
-        </button>
-      </section>
-
-      <!-- ZAKŁADKA 2: RĘCZNY WORKSPACE (BEZ TIPÓW) -->
-      <section id="tab-manual" class="tab-pane">
-        <div class="card-form">
-          <div class="form-group">
-            <label for="man-code" class="required">Nazwa / Kod zadania:</label>
-            <input type="text" id="man-code" placeholder="np. chw, kol, suma, zad1" required spellcheck="false">
-          </div>
-
-          <div class="form-group">
-            <label for="man-title">Pełny tytuł (opcjonalny):</label>
-            <input type="text" id="man-title" placeholder="np. Koleje" spellcheck="false">
-          </div>
-
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label for="man-time">Limit czasu (s):</label>
-              <input type="number" id="man-time" value="1.0" step="0.1" min="0.1">
-            </div>
-            <div class="form-group flex-1">
-              <label for="man-mem">Limit pamięci (MB):</label>
-              <input type="number" id="man-mem" value="128" step="1" min="16">
-            </div>
-          </div>
-
-          <!-- Opcjonalny przykładowy test -->
-          <div class="collapsible-section">
-            <div class="section-title">
-              <span>Przykładowy test (opcjonalny)</span>
-            </div>
-            <div class="form-group">
-              <label for="man-input">Dane wejściowe (cin):</label>
-              <textarea id="man-input" rows="2" placeholder="Wklej wejście testu..." spellcheck="false"></textarea>
-            </div>
-            <div class="form-group">
-              <label for="man-output">Oczekiwany wynik (cout):</label>
-              <textarea id="man-output" rows="2" placeholder="Wklej oczekiwany wynik..." spellcheck="false"></textarea>
-            </div>
-          </div>
-
-          <button type="button" id="btn-create-manual" class="btn-primary w-full">
-            <span>Utwórz Workspace i Otwórz VS Code</span>
+        <div class="active-task-buttons">
+          <button type="button" id="btn-quick-vscode" class="btn-action-sm btn-action-vscode">
+            💻 Otwórz w VS Code
           </button>
         </div>
+      </div>
+
+      <!-- Segmented Navigation Tabs -->
+      <nav class="hub-nav-tabs">
+        <button type="button" class="tab-btn active" data-tab="tab-import">
+          <span class="tab-icon">📥</span>
+          <span>Szybki Import (PDF + ZIP)</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-manual">
+          <span class="tab-icon">✏️</span>
+          <span>Ręczny Workspace</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="tab-gallery">
+          <span class="tab-icon">📁</span>
+          <span>Zapisane Zadania</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- GŁÓWNA ZAWARTOŚĆ -->
+    <main class="hub-main-content">
+      
+      <!-- =========================================================================
+           TAB 1: SZYBKI IMPORT (PDF + ZIP)
+           ========================================================================= -->
+      <section id="tab-import" class="tab-pane active">
+        <div class="doc-section-card">
+          <div class="section-tag-row">
+            <span class="section-num"># 01</span>
+            <h2 class="section-heading">Szybki import ze Szkopuła i Koła MAP</h2>
+          </div>
+          <p class="section-description">
+            Upuść oficjalną treść zadania w formacie <code>.pdf</code> oraz opcjonalną paczkę testów <code>.zip</code>. Silnik automatycznie utworzy strukturę katalogu, wyekstrahuje testy i otworzy edytor VS Code z dzielonym widokiem.
+          </p>
+
+          <!-- Dwa duże obszary Dropzone side-by-side -->
+          <div class="staging-grid">
+            
+            <!-- Strefa 1: PDF -->
+            <div class="drop-zone-wrapper">
+              <div class="zone-header">
+                <span class="zone-icon">📄</span>
+                <span class="zone-title">Treść zadania (.pdf)</span>
+              </div>
+
+              <!-- Dropzone pusty -->
+              <div class="large-dropzone" id="drop-pdf">
+                <div class="dropzone-center">
+                  <div class="dropzone-glyph">📄</div>
+                  <div class="dropzone-label">Przeciągnij i upuść plik <strong>.pdf</strong></div>
+                  <div class="dropzone-sub">lub kliknij przycisk poniżej</div>
+                </div>
+                <button type="button" class="btn-dropzone-pick" id="btn-browse-pdf">Wybierz plik PDF</button>
+                <input type="file" id="file-input-pdf" accept=".pdf" class="hidden-input">
+              </div>
+
+              <!-- Staged Card po wczytaniu -->
+              <div class="staged-file-card hidden" id="staged-pdf-card">
+                <div class="card-file-badge">PDF</div>
+                <div class="staged-details">
+                  <div class="staged-filename" id="staged-pdf-name">zadanie.pdf</div>
+                  <div class="staged-meta-text" id="staged-pdf-meta">Plik wczytany i gotowy do importu</div>
+                </div>
+                <button type="button" class="btn-staged-delete" id="btn-remove-pdf" title="Usuń plik PDF">✕</button>
+              </div>
+            </div>
+
+            <!-- Strefa 2: ZIP -->
+            <div class="drop-zone-wrapper">
+              <div class="zone-header">
+                <span class="zone-icon">📦</span>
+                <span class="zone-title">Paczka testów (.zip)</span>
+              </div>
+
+              <!-- Dropzone pusty -->
+              <div class="large-dropzone" id="drop-zip">
+                <div class="dropzone-center">
+                  <div class="dropzone-glyph">📦</div>
+                  <div class="dropzone-label">Przeciągnij i upuść paczkę <strong>.zip</strong></div>
+                  <div class="dropzone-sub">lub kliknij przycisk poniżej</div>
+                </div>
+                <button type="button" class="btn-dropzone-pick" id="btn-browse-zip">Wybierz plik ZIP</button>
+                <input type="file" id="file-input-zip" accept=".zip" class="hidden-input">
+              </div>
+
+              <!-- Staged Card po wczytaniu -->
+              <div class="staged-file-card hidden" id="staged-zip-card">
+                <div class="card-file-badge zip-badge">ZIP</div>
+                <div class="staged-details">
+                  <div class="staged-filename" id="staged-zip-name">testy.zip</div>
+                  <div class="staged-meta-text" id="staged-zip-meta">Archiwum testów wczytane</div>
+                </div>
+                <button type="button" class="btn-staged-delete" id="btn-remove-zip" title="Usuń plik ZIP">✕</button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Karta Szczegółów Zadania (po wykryciu lub wgraniu) -->
+          <div id="import-details" class="meta-preview-box hidden">
+            <div class="preview-header">
+              <span class="preview-badge">Parametry Zadania</span>
+              <div id="tests-summary-badge" class="tests-pill">
+                <span class="badge-dot">●</span>
+                <span id="tests-count-text">0 testów wykrytych</span>
+              </div>
+            </div>
+
+            <div class="form-grid-2col">
+              <div class="input-field-group">
+                <label for="imp-code">Kod zadania (np. folder i nazwa pliku .cpp):</label>
+                <input type="text" id="imp-code" class="doc-input" placeholder="np. chw" spellcheck="false">
+              </div>
+              <div class="input-field-group">
+                <label for="imp-title">Pełny tytuł zadania:</label>
+                <input type="text" id="imp-title" class="doc-input" placeholder="np. Chwasty" spellcheck="false">
+              </div>
+            </div>
+
+            <div class="form-grid-2col">
+              <div class="input-field-group">
+                <label for="imp-time">Limit czasu wykonania (s):</label>
+                <input type="number" id="imp-time" class="doc-input" value="1.0" step="0.1" min="0.1">
+              </div>
+              <div class="input-field-group">
+                <label for="imp-mem">Limit pamięci operacyjnej (MB):</label>
+                <input type="number" id="imp-mem" class="doc-input" value="128" step="1" min="16">
+              </div>
+            </div>
+          </div>
+
+          <!-- Przycisk Tworzenia Projektu -->
+          <div class="cta-container">
+            <button type="button" id="btn-start-staged" class="btn-cta-primary hidden">
+              <span>⚡ Utwórz Workspace i Otwórz VS Code</span>
+            </button>
+          </div>
+        </div>
       </section>
 
-      <!-- ZAKŁADKA 3: GALERIA / ZADANIA (Z USUWANIEM) -->
-      <section id="tab-gallery" class="tab-pane">
-        <div class="gallery-controls">
-          <input type="text" id="gallery-search" placeholder="Filtruj zadania..." spellcheck="false">
-          <button id="btn-refresh-gallery" class="btn-secondary" title="Odśwież listę">Odśwież</button>
-        </div>
+      <!-- =========================================================================
+           TAB 2: RĘCZNY WORKSPACE
+           ========================================================================= -->
+      <section id="tab-manual" class="tab-pane">
+        <div class="doc-section-card">
+          <div class="section-tag-row">
+            <span class="section-num"># 02</span>
+            <h2 class="section-heading">Ręczne tworzenie zadania</h2>
+          </div>
+          <p class="section-description">
+            Utwórz czysty katalog zadania olimpijskiego bez pliku PDF. Wystarczy podać kod zadania i ewentualny przykładowy test z treści.
+          </p>
 
-        <div id="gallery-list" class="gallery-list">
-          <div class="loading-state">Ładowanie zadań...</div>
+          <div class="manual-form-wrapper">
+            <div class="form-grid-2col">
+              <div class="input-field-group">
+                <label for="man-code" class="field-label-req">Nazwa / Kod zadania (wymagane):</label>
+                <input type="text" id="man-code" class="doc-input" placeholder="np. chw, kol, suma" required spellcheck="false">
+              </div>
+              <div class="input-field-group">
+                <label for="man-title">Pełny tytuł zadania (opcjonalny):</label>
+                <input type="text" id="man-title" class="doc-input" placeholder="np. Koleje" spellcheck="false">
+              </div>
+            </div>
+
+            <div class="form-grid-2col">
+              <div class="input-field-group">
+                <label for="man-time">Limit czasu (s):</label>
+                <input type="number" id="man-time" class="doc-input" value="1.0" step="0.1" min="0.1">
+              </div>
+              <div class="input-field-group">
+                <label for="man-mem">Limit pamięci (MB):</label>
+                <input type="number" id="man-mem" class="doc-input" value="128" step="1" min="16">
+              </div>
+            </div>
+
+            <!-- Opcjonalny przykładowy test -->
+            <div class="sample-test-box">
+              <div class="sample-header">
+                <span class="sample-title">Przykładowy test początkowy (opcjonalny)</span>
+              </div>
+              <div class="form-grid-2col">
+                <div class="input-field-group">
+                  <label for="man-input">Wejście testowe (cin):</label>
+                  <textarea id="man-input" class="doc-textarea mono" rows="3" placeholder="Wklej wejście testowe..." spellcheck="false"></textarea>
+                </div>
+                <div class="input-field-group">
+                  <label for="man-output">Oczekiwany wynik (cout):</label>
+                  <textarea id="man-output" class="doc-textarea mono" rows="3" placeholder="Wklej oczekiwany wynik..." spellcheck="false"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="cta-container">
+              <button type="button" id="btn-create-manual" class="btn-cta-primary">
+                <span>⚡ Utwórz Workspace i Otwórz VS Code</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================================
+           TAB 3: ZAPISANE ZADANIA (GALERIA)
+           ========================================================================= -->
+      <section id="tab-gallery" class="tab-pane">
+        <div class="doc-section-card">
+          <div class="section-tag-row">
+            <span class="section-num"># 03</span>
+            <h2 class="section-heading">Zapisane zadania w Twoim Workspace</h2>
+          </div>
+          <p class="section-description">
+            Wszystkie zadania zapisane w głównym katalogu roboczym. Możesz bezpośrednio aktywować projekt na Stream Decku, otworzyć go w VS Code lub dorzucić paczkę testów .zip.
+          </p>
+
+          <div class="gallery-toolbar">
+            <div class="search-input-wrapper">
+              <span class="search-glyph">🔍</span>
+              <input type="text" id="gallery-search" class="doc-search-input" placeholder="Szukaj po kodzie lub tytule zadania..." spellcheck="false">
+            </div>
+            <button type="button" id="btn-refresh-gallery" class="btn-refresh" title="Odśwież listę zadań">
+              <span>↻ Odśwież</span>
+            </button>
+          </div>
+
+          <div id="gallery-list" class="tasks-card-grid">
+            <div class="loading-state">Ładowanie zadań...</div>
+          </div>
         </div>
       </section>
 
     </main>
 
-    <!-- Kontener powiadomień Toast -->
+    <!-- Powiadomienia Toast -->
     <div id="toast-container" class="toast-container"></div>
   </div>
 

@@ -682,7 +682,7 @@ async function loadTasks() {
     const res = await fetch(`${API_BASE}/api/problems`);
     if (res.ok) {
       const data = await res.json();
-      allProblems = data.problems || [];
+      allProblems = Array.isArray(data) ? data : (data.problems || []);
       activeProblemId = data.active || null;
       renderTasks(allProblems);
     } else {
@@ -717,7 +717,7 @@ function renderTasks(problems) {
   problems.forEach(p => {
     const pid = p.problem_id || "zad";
     const title = p.title || pid.toUpperCase();
-    const testsCount = (p.tests || []).length;
+    const testsCount = p.tests_count !== undefined ? p.tests_count : (p.tests || []).length;
     const isActive = (pid.toLowerCase() === (activeProblemId || "").toLowerCase());
 
     const card = document.createElement("div");

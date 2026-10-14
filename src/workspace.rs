@@ -139,6 +139,9 @@ impl WorkspaceManager {
         let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
         fs::write(manifest_path, manifest_json).map_err(|e| e.to_string())?;
 
+        // 5. Generate run.sh, test.sh, kill.sh, accept.sh & .vscode/tasks.json
+        Self::ensure_problem_scripts(workspace_dir, &p_id, &analysis.title, analysis.time_limit_sec);
+
         Ok(p_dir)
     }
 
@@ -191,6 +194,11 @@ impl WorkspaceManager {
                                 }
                             }
                         }
+                    }
+
+                    let test_sh = p.join(".algo").join("test.sh");
+                    if !test_sh.exists() {
+                        Self::ensure_problem_scripts(workspace_dir, &p_id, &title, time_limit);
                     }
 
                     list.push(ProblemSummary {
@@ -318,5 +326,471 @@ impl WorkspaceManager {
         }
 
         Ok(added)
+    }
+
+    pub fn ensure_problem_scripts(
+        workspace_dir: &Path,
+        problem_id: &str,
+        title: &str,
+        time_limit_sec: f64,
+    ) {
+        let p_id = problem_id.trim().to_lowercase();
+        if p_id.is_empty() {
+            return;
+        }
+        let p_dir = Self::get_problem_dir(workspace_dir, &p_id);
+        let algo_dir = p_dir.join(".algo");
+        let _ = fs::create_dir_all(&algo_dir);
+
+        let time_limit_ms = (time_limit_sec * 1000.0).round() as u64;
+
+        // 1. run.sh
+        let run_sh_path = algo_dir.join("run.sh");
+        let run_content = format!(
+            r#"#!/usr/bin/env bash
+cd "{p_dir_disp}"
+
+echo -e "\e[1;36m[AlgoDeck] Kompilacja {p_id}.cpp (g++ -O3 -std=c++20)...\e[0m"
+mkdir -p .algo
+if ! g++ -O3 -std=c++20 "{p_id}.cpp" -o ".algo/{p_id}" 2>.algo/compile.log; then
+    echo -e "\e[1;31m❌ BŁĄD KOMPILACJI!\e[0m"
+    echo -e "\e[1;31m"
+    cat .algo/compile.log
+    echo -e "\e[0m"
+    exit 1
+fi
+
+echo -e "\e[1;32m✓ Skompilowano pomyślnie!\e[0m"
+echo -e "\e[1;33m▶ Program uruchomiony (wprowadź dane cin):\e[0m"
+echo -e "\e[0;90m---------------------------------------------------------\e[0m"
+
+./.algo/{p_id}
+RET=$?
+
+echo ""
+echo -e "\e[0;90m---------------------------------------------------------\e[0m"
+if [ "${{RET:-0}}" -eq 0 ]; then
+    echo -e "\e[1;32m✓ Program zakończony pomyślnie (kod: 0).\e[0m"
+else
+    echo -e "\e[1;31m❌ Program zakończony błędem (kod: ${{RET}}).\e[0m"
+fi
+"#,
+            p_dir_disp = p_dir.display(),
+            p_id = p_id
+        );
+        let _ = fs::write(&run_sh_path, run_content);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&run_sh_path, fs::Permissions::from_mode(0o755));
+        }
+
+        // 2. test.sh
+        let test_sh_path = algo_dir.join("test.sh");
+        let test_content = format!(
+            r#"#!/usr/bin/env bash
+set -o pipefail
+cd "{p_dir_disp}"
+
+VERBOSE=false
+WAIT_AT_END=false
+for arg in "$@"; do
+    case "$arg" in
+        -v|--verbose|-d|--details) VERBOSE=true ;;
+        -w|--wait) WAIT_AT_END=true ;;
+    esac
+done
+
+PROB="{p_id}"
+PROB_UPPER="{p_upper}"
+PROB_TITLE="{title}"
+TIME_LIMIT_MS={time_limit_ms}
+
+C_RESET="\e[0m"
+C_BOLD="\e[1m"
+C_DIM="\e[2m"
+C_GREEN="\e[1;32m"
+C_RED="\e[1;31m"
+C_YELLOW="\e[1;33m"
+C_BLUE="\e[1;34m"
+C_CYAN="\e[1;36m"
+C_MAGENTA="\e[1;35m"
+C_WHITE="\e[1;37m"
+C_GRAY="\e[0;90m"
+
+pad_left() {{
+    local text="$1"
+    local target_width="$2"
+    local len=${{#text}}
+    local pad_len=$(( target_width - len ))
+    if [ $pad_len -gt 0 ]; then
+        printf "%*s%s" "$pad_len" "" "$text"
+    else
+        printf "%s" "$text"
+    fi
+}}
+
+pad_right() {{
+    local text="$1"
+    local target_width="$2"
+    local len=${{#text}}
+    local extra=0
+    [[ "$text" =~ "✨" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "❌" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "⚠️" ]] && extra=$((extra + 1))
+    local visual_len=$(( len + extra ))
+    local pad_len=$(( target_width - visual_len ))
+    if [ $pad_len -gt 0 ]; then
+        printf "%s%*s" "$text" "$pad_len" ""
+    else
+        printf "%s" "$text"
+    fi
+}}
+
+box_line() {{
+    local text="$1"
+    local total_inner_width=78
+    local char_len=${{#text}}
+    local extra=0
+    [[ "$text" =~ "✨" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "❌" ]] && extra=$((extra + 1))
+    [[ "$text" =~ "⚠️" ]] && extra=$((extra + 1))
+    local visual_len=$(( char_len + extra ))
+    local pad=$(( total_inner_width - visual_len ))
+    [ $pad -lt 0 ] && pad=0
+    printf "║%s%*s║\n" "$text" "$pad" ""
+}}
+
+DIVIDER="$(printf "=%.0s" {{1..80}})"
+echo -e "${{C_CYAN}}${{C_BOLD}}${{DIVIDER}}${{C_RESET}}"
+echo -e "${{C_CYAN}}${{C_BOLD}}       ⚡ AlgoDeck Test Runner — ${{PROB_UPPER}} (${{PROB_TITLE}})${{C_RESET}}"
+echo -e "${{C_CYAN}}${{C_BOLD}}${{DIVIDER}}${{C_RESET}}"
+
+echo -ne "${{C_YELLOW}}⚡ Kompilacja ${{PROB}}.cpp (g++ -O3 -std=c++20)...${{C_RESET}} "
+mkdir -p .algo
+if ! g++ -O3 -std=c++20 "${{PROB}}.cpp" -o ".algo/${{PROB}}" 2>.algo/compile.log; then
+    echo -e "${{C_RED}}${{C_BOLD}}❌ BŁĄD KOMPILACJI!${{C_RESET}}"
+    echo -e "${{C_RED}}"
+    cat .algo/compile.log
+    echo -e "${{C_RESET}}"
+    notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ Błąd kompilacji!" 2>/dev/null || true
+    [ "$WAIT_AT_END" = true ] && read -p "Naciśnij Enter, aby zamknąć..."
+    exit 1
+fi
+echo -e "${{C_GREEN}}${{C_BOLD}}✓ OK${{C_RESET}}"
+echo ""
+
+TOTAL=0
+PASSED=0
+FAILED=0
+ERRORS=()
+
+TEST_FILES=($(ls -1 .algo/tests/*.in 2>/dev/null | sort -V))
+TOTAL=${{#TEST_FILES[@]}}
+
+if [ "$TOTAL" -eq 0 ]; then
+    echo -e "${{C_YELLOW}}⚠️  Brak plików z testami w .algo/tests/${{C_RESET}}"
+    echo -e "${{C_DIM}}Dodaj testy w panelu AlgoDeck lub wklej pliki .in do .algo/tests/${{C_RESET}}"
+    exit 0
+fi
+
+printf "${{C_GRAY}}┌───────┬────────────────────────────────┬────────────┬────────────────────────┐${{C_RESET}}\n"
+printf "${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%-5s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%-30s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%10s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}} ${{C_WHITE}}${{C_BOLD}}%-22s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}}\n" "NR" "TEST" "CZAS" "STATUS"
+printf "${{C_GRAY}}├───────┼────────────────────────────────┼────────────┼────────────────────────┤${{C_RESET}}\n"
+
+IDX=0
+for in_file in "${{TEST_FILES[@]}}"; do
+    IDX=$((IDX + 1))
+    base=$(basename "$in_file" .in)
+    out_file=".algo/tests/$base.out"
+    my_out=".algo/tests/$base.my"
+    tag_file=".algo/tests/$base.tag"
+    tag_text=$(cat "$tag_file" 2>/dev/null || echo "")
+
+    display_name="$base"
+    if [ -n "$tag_text" ]; then
+        display_name="$base ($tag_text)"
+    fi
+    if [ ${{#display_name}} -gt 30 ]; then
+        display_name="${{display_name:0:27}}..."
+    fi
+
+    start=$(date +%s%N)
+    ./.algo/${{PROB}} < "$in_file" > "$my_out" 2>/dev/null
+    ret=$?
+    end=$(date +%s%N)
+    diff_ms=$(( (end - start) / 1000000 ))
+
+    raw_status=""
+    status_color=""
+    is_ok=false
+
+    if [ $ret -ne 0 ]; then
+        raw_status="💥 RTE (kod $ret)"
+        status_color="${{C_MAGENTA}}${{C_BOLD}}"
+        ERRORS+=("$base|RTE|Kod błędu: $ret (program uległ awarii)")
+    elif [ "$diff_ms" -gt "$TIME_LIMIT_MS" ] && [ "$TIME_LIMIT_MS" -gt 0 ]; then
+        raw_status="⏱️  TLE (>${{TIME_LIMIT_MS}}ms)"
+        status_color="${{C_YELLOW}}${{C_BOLD}}"
+        ERRORS+=("$base|TLE|Przekroczono limit czasu (${{diff_ms}} ms > ${{TIME_LIMIT_MS}} ms)")
+    elif [ -f "$out_file" ] && [ -s "$out_file" ]; then
+        if diff -q -w -B "$out_file" "$my_out" >/dev/null 2>&1; then
+            raw_status="✓ OK"
+            status_color="${{C_GREEN}}${{C_BOLD}}"
+            is_ok=true
+        else
+            raw_status="❌ WA (Zły wynik)"
+            status_color="${{C_RED}}${{C_BOLD}}"
+            ERRORS+=("$base|WA|diff")
+        fi
+    else
+        raw_status="✓ OK (brak out)"
+        status_color="${{C_GREEN}}${{C_BOLD}}"
+        is_ok=true
+    fi
+
+    if [ "$is_ok" = true ]; then
+        PASSED=$((PASSED + 1))
+    else
+        FAILED=$((FAILED + 1))
+    fi
+
+    time_str="${{diff_ms}} ms"
+
+    c1=$(pad_right "$IDX" 5)
+    c2=$(pad_right "$display_name" 30)
+    c3=$(pad_left "$time_str" 10)
+    c4=$(pad_right "$raw_status" 22)
+
+    printf "${{C_GRAY}}│${{C_RESET}} %s ${{C_GRAY}}│${{C_RESET}} %s ${{C_GRAY}}│${{C_RESET}} %s ${{C_GRAY}}│${{C_RESET}} ${{status_color}}%s${{C_RESET}} ${{C_GRAY}}│${{C_RESET}}\n" "$c1" "$c2" "$c3" "$c4"
+
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${{C_DIM}}--- Wejście ($base.in): ---${{C_RESET}}"
+        head -n 10 "$in_file"
+        echo -e "${{C_DIM}}--- Wyjście programu: ---${{C_RESET}}"
+        head -n 10 "$my_out"
+        if [ -f "$out_file" ]; then
+            echo -e "${{C_DIM}}--- Oczekiwane wyjście: ---${{C_RESET}}"
+            head -n 10 "$out_file"
+        fi
+        echo ""
+    fi
+done
+
+printf "${{C_GRAY}}└───────┴────────────────────────────────┴────────────┴────────────────────────┘${{C_RESET}}\n"
+echo ""
+
+PCT=0
+if [ "$TOTAL" -gt 0 ]; then
+    PCT=$(( PASSED * 100 / TOTAL ))
+fi
+
+BOX_TOP="╔$(printf "═%.0s" {{1..78}})╗"
+BOX_BOT="╚$(printf "═%.0s" {{1..78}})╝"
+
+if [ "$PASSED" -eq "$TOTAL" ]; then
+    echo -e "${{C_GREEN}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
+    echo -ne "${{C_GREEN}}${{C_BOLD}}"
+    box_line "  ✨ 100% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WSZYSTKO POPRAWNIE!"
+    echo -e "${{C_GREEN}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
+    notify-send "AlgoDeck (${{PROB_UPPER}})" "✨ 100% ZALICZONE ($PASSED/$TOTAL)" 2>/dev/null || true
+elif [ "$PASSED" -eq 0 ]; then
+    echo -e "${{C_RED}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
+    echo -ne "${{C_RED}}${{C_BOLD}}"
+    box_line "  ❌ 0% TESTÓW ZALICZONYCH (0/$TOTAL) — WSZYSTKIE TESTY OBLANE!"
+    echo -e "${{C_RED}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
+    notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ 0% ZALICZONE (0/$TOTAL)" 2>/dev/null || true
+else
+    echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
+    echo -ne "${{C_YELLOW}}${{C_BOLD}}"
+    box_line "  ⚠️  $PCT% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WYKRYTO BŁĘDY ($FAILED OBLANE)"
+    echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
+    notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "⚠️  $PCT% ZALICZONE ($PASSED/$TOTAL)" 2>/dev/null || true
+fi
+
+if [ "${{#ERRORS[@]}}" -gt 0 ] && [ "$VERBOSE" = false ]; then
+    echo ""
+    echo -e "${{C_RED}}${{C_BOLD}}🔍 SZCZEGÓŁY OBLANYCH TESTÓW:${{C_RESET}}"
+    for err in "${{ERRORS[@]}}"; do
+        IFS='|' read -r t_name t_type t_info <<< "$err"
+        echo -e "${{C_RED}}--------------------------------------------------------------------------------${{C_RESET}}"
+        echo -e "${{C_WHITE}}${{C_BOLD}}Test: $t_name [Typ: $t_type]${{C_RESET}}"
+        if [ "$t_type" = "WA" ]; then
+            out_file=".algo/tests/$t_name.out"
+            my_out=".algo/tests/$t_name.my"
+            echo -e "${{C_CYAN}}Oczekiwano (wzorzec):${{C_RESET}}"
+            head -n 5 "$out_file" | sed 's/^/  /'
+            echo -e "${{C_YELLOW}}Otrzymano (Twój program):${{C_RESET}}"
+            head -n 5 "$my_out" | sed 's/^/  /'
+        else
+            echo -e "  $t_info"
+        fi
+    done
+    echo -e "${{C_RED}}--------------------------------------------------------------------------------${{C_RESET}}"
+fi
+
+echo ""
+echo -e "${{C_GRAY}}💡 Wskazówka: uruchom 'bash .algo/test.sh -v' aby zobaczyć pełne wejścia/wyjścia.${{C_RESET}}"
+
+if [ "$WAIT_AT_END" = true ]; then
+    echo ""
+    read -p "Naciśnij Enter, aby zakończyć..."
+fi
+"#,
+            p_dir_disp = p_dir.display(),
+            p_id = p_id,
+            p_upper = p_id.to_uppercase(),
+            title = title,
+            time_limit_ms = time_limit_ms
+        );
+        let _ = fs::write(&test_sh_path, test_content);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&test_sh_path, fs::Permissions::from_mode(0o755));
+        }
+
+        // 3. kill.sh
+        let kill_sh_path = algo_dir.join("kill.sh");
+        let kill_content = format!(
+            r#"#!/usr/bin/env bash
+PROB="{p_id}"
+PROB_UPPER="{p_upper}"
+
+pgrep -x "${{PROB}}" 2>/dev/null | while read -r p; do
+    kill -9 "$p" 2>/dev/null || true
+done
+
+pgrep -f "${{PROB}}/\.algo/run\.sh" 2>/dev/null | while read -r p; do
+    [ "$p" != "$$" ] && kill -9 "$p" 2>/dev/null || true
+done
+
+pgrep -f "${{PROB}}/\.algo/test\.sh" 2>/dev/null | while read -r p; do
+    [ "$p" != "$$" ] && kill -9 "$p" 2>/dev/null || true
+done
+
+notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program / testy" 2>/dev/null || true
+"#,
+            p_id = p_id,
+            p_upper = p_id.to_uppercase()
+        );
+        let _ = fs::write(&kill_sh_path, kill_content);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&kill_sh_path, fs::Permissions::from_mode(0o755));
+        }
+
+        // 4. accept.sh
+        let accept_sh_path = algo_dir.join("accept.sh");
+        let accept_content = r#"#!/usr/bin/env bash
+TEST_NAME="${1:-}"
+if [ -z "$TEST_NAME" ]; then
+    echo "Użycie: bash .algo/accept.sh <nazwa_testu> (np. test_1)"
+    exit 1
+fi
+if [ -f ".algo/tests/$TEST_NAME.my" ]; then
+    cp ".algo/tests/$TEST_NAME.my" ".algo/tests/$TEST_NAME.out"
+    echo "✓ Zaktualizowano wzorzec dla $TEST_NAME wyjściem Twojego programu!"
+else
+    echo "Błąd: Brak pliku .algo/tests/$TEST_NAME.my (najpierw uruchom testy!)"
+fi
+"#;
+        let _ = fs::write(&accept_sh_path, accept_content);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&accept_sh_path, fs::Permissions::from_mode(0o755));
+        }
+
+        // 5. Problem .vscode/tasks.json
+        let p_vscode = p_dir.join(".vscode");
+        let _ = fs::create_dir_all(&p_vscode);
+        let p_tasks_path = p_vscode.join("tasks.json");
+        let p_tasks_json = r#"{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "AlgoDeck: ODPAL",
+            "type": "shell",
+            "command": "bash ${workspaceFolder}/.algo/run.sh",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "focus": true,
+                "clear": true
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "AlgoDeck: TESTUJ",
+            "type": "shell",
+            "command": "bash ${workspaceFolder}/.algo/test.sh",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "focus": true,
+                "clear": true
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        }
+    ]
+}"#;
+        let _ = fs::write(p_tasks_path, p_tasks_json);
+
+        // 6. Ensure Root Workspace .vscode/tasks.json
+        Self::ensure_root_workspace_tasks(workspace_dir);
+    }
+
+    pub fn ensure_root_workspace_tasks(workspace_dir: &Path) {
+        let root_vscode = workspace_dir.join(".vscode");
+        let _ = fs::create_dir_all(&root_vscode);
+        let root_tasks_path = root_vscode.join("tasks.json");
+        let root_tasks_json = r#"{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "AlgoDeck: ODPAL",
+            "type": "shell",
+            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/run.sh\" || bash \"${fileDirname}/.algo/run.sh\"",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "focus": true,
+                "clear": true
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "AlgoDeck: TESTUJ",
+            "type": "shell",
+            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/test.sh\" || bash \"${fileDirname}/.algo/test.sh\"",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "focus": true,
+                "clear": true
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        }
+    ]
+}"#;
+        let _ = fs::write(root_tasks_path, root_tasks_json);
     }
 }

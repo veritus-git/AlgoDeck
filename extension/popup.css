@@ -117,28 +117,37 @@ html, body {
    STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — BEZ BIAŁEJ RAMKI
    ========================================================================== */
 body.detected-mode {
-  width: 380px;
-  min-height: 145px;
-  background-color: var(--bg-main) !important;
+  width: 360px;
+  height: 130px;
+  min-height: 130px;
+  background: linear-gradient(145deg, #121a2c, #0d1322) !important;
+  border-top: 2px solid #0284c7;
   overflow: hidden;
-}
-
-.view-detected {
-  padding: 10px;
-  background-color: var(--bg-main);
-  min-height: 100%;
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
 }
 
-.detected-box-card {
-  background: linear-gradient(145deg, #121a2c, #0d1322);
-  border: 1.5px solid #0284c7;
-  box-shadow: 0 8px 24px rgba(2, 132, 199, 0.25);
-  border-radius: 10px;
-  padding: 14px 16px;
+.view-detected {
+  padding: 12px 14px;
+  background: transparent;
+  min-height: 100%;
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  justify-content: center;
+}
+
+.detected-box-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .det-top-row {

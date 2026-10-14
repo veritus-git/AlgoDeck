@@ -226,6 +226,8 @@ fn run_daemon(port: u16) {
                         .arg(&sol_file)
                         .env("DISPLAY", &display)
                         .env("XAUTHORITY", &xauthority)
+                        .env("ALGODECK_PDF_POS", &settings.pdf_position)
+                        .env("ALGODECK_SPLIT_RATIO", settings.editor_split_ratio.to_string())
                         .spawn();
                     if res.is_ok() {
                         script_launched = true;

@@ -370,6 +370,11 @@ impl StreamDeckEngine {
         self.set_active_problem_with_meta(problem_id, 1, 1);
     }
 
+    pub fn get_active_problem_id(&self) -> Option<String> {
+        let state = self.state.lock().unwrap();
+        state.active_problem_id.clone()
+    }
+
     // ----------------- 3. EKRAN GALERII ZADAŃ: ALGO_MENU -----------------
     pub fn set_menu_screen(&self, problems: &[String], page: usize) {
         let mut state = self.state.lock().unwrap();

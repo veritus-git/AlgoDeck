@@ -316,3 +316,34 @@ async fn test_settings_serving_and_brightness_endpoint() {
     shutdown_signal.store(true, Ordering::SeqCst);
     let _ = server_task.await;
 }
+
+#[test]
+fn test_workspace_scripts_and_tasks_generation() {
+    use algodeck::workspace::WorkspaceManager;
+    let ws_path = std::env::temp_dir().join(format!("algodeck_test_ws_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&ws_path);
+    let _ = std::fs::create_dir_all(&ws_path);
+
+    WorkspaceManager::ensure_problem_scripts(&ws_path, "chw", "Chwasty", 1.0);
+
+    let p_dir = ws_path.join("chw");
+    let algo_dir = p_dir.join(".algo");
+    assert!(algo_dir.join("run.sh").exists(), "run.sh musi istnieć");
+    assert!(algo_dir.join("test.sh").exists(), "test.sh musi istnieć");
+    assert!(algo_dir.join("kill.sh").exists(), "kill.sh musi istnieć");
+    assert!(algo_dir.join("accept.sh").exists(), "accept.sh musi istnieć");
+    assert!(p_dir.join(".vscode/tasks.json").exists(), "problem tasks.json musi istnieć");
+    assert!(ws_path.join(".vscode/tasks.json").exists(), "root workspace tasks.json musi istnieć");
+
+    let run_content = std::fs::read_to_string(algo_dir.join("run.sh")).unwrap();
+    assert!(run_content.contains("chw.cpp"));
+    assert!(run_content.contains("-std=c++20"));
+
+    let test_content = std::fs::read_to_string(algo_dir.join("test.sh")).unwrap();
+    assert!(test_content.contains("AlgoDeck Test Runner"));
+    assert!(test_content.contains("CHW"));
+
+    let _ = std::fs::remove_dir_all(&ws_path);
+}
+
+

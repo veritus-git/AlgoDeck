@@ -2,7 +2,7 @@ use crate::config::AppSettings;
 use crate::pdf::{PdfParser, ProblemAnalysis, TestCase};
 use crate::runner::{CompileResult, RunAllSummary, TestExecutor, TestResult};
 use crate::streamdeck::{StreamDeckEngine, StreamDeckState};
-use crate::workspace::{ProblemManifest, ProblemSummary, WorkspaceManager};
+use crate::workspace::{ProblemManifest, WorkspaceManager};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Multipart, Path as AxumPath, State};
@@ -194,8 +194,8 @@ fn find_file_in_candidates(filename: &str) -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            candidates.push(PathBuf::from(local).join("AlgoDeck/extension").join(filename));
-            candidates.push(PathBuf::from(local).join("AlgoDeck/frontend").join(filename));
+            candidates.push(PathBuf::from(&local).join("AlgoDeck/extension").join(filename));
+            candidates.push(PathBuf::from(&local).join("AlgoDeck/frontend").join(filename));
         }
         if let Ok(appdata) = std::env::var("APPDATA") {
             candidates.push(PathBuf::from(appdata).join("AlgoDeck/extension").join(filename));
@@ -280,10 +280,14 @@ async fn open_gui() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "success": true }))
 }
 
-async fn get_problems(State(state): State<AppState>) -> Json<Vec<ProblemSummary>> {
+async fn get_problems(State(state): State<AppState>) -> Json<serde_json::Value> {
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
     let list = WorkspaceManager::list_problems(&ws_dir);
-    Json(list)
+    let active = state.streamdeck.get_active_problem_id();
+    Json(serde_json::json!({
+        "problems": list,
+        "active": active
+    }))
 }
 
 async fn get_problem(
@@ -401,11 +405,11 @@ async fn auto_import_pdf(
                 }
                 state.streamdeck.set_active_problem(&analysis.problem_id);
                 let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-                let (split_pdf, pdf_pos) = {
+                let (split_pdf, pdf_pos, split_ratio) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone())
+                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone(), s.editor_split_ratio)
                 };
-                open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos);
+                open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
                 Json(serde_json::json!({
                     "success": true,
                     "problem_id": analysis.problem_id,
@@ -459,7 +463,11 @@ async fn create_manual(
     match WorkspaceManager::create_problem(&ws_dir, &analysis, None) {
         Ok(_) => {
             state.streamdeck.set_active_problem(&pid);
-            open_in_vscode_internal(&pid, &ws_dir, false, "right");
+            let (split_pdf, pdf_pos, split_ratio) = {
+                let s = state.settings.read().unwrap();
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+            };
+            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio);
             Json(serde_json::json!({ "success": true, "problem_id": pid }))
         }
         Err(e) => Json(serde_json::json!({ "success": false, "detail": e })),
@@ -715,11 +723,11 @@ async fn start_staged(
 
             state.streamdeck.set_active_problem(&analysis.problem_id);
             let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-            let (split_pdf, pdf_pos) = {
+            let (split_pdf, pdf_pos, split_ratio) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone())
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
             };
-            open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos);
+            open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
             let _ = clear_staged(None).await;
 
             return Json(serde_json::json!({
@@ -757,7 +765,11 @@ async fn start_staged(
 
         state.streamdeck.set_active_problem(&analysis.problem_id);
         let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-        open_in_vscode_internal(&analysis.problem_id, &ws_dir, false, "right");
+        let (split_pdf, pdf_pos, split_ratio) = {
+            let s = state.settings.read().unwrap();
+            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+        };
+        open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
         let _ = clear_staged(None).await;
 
         return Json(serde_json::json!({
@@ -787,15 +799,15 @@ async fn open_vscode(
     AxumPath(id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
-    let (split_pdf, pdf_pos) = {
+    let (split_pdf, pdf_pos, split_ratio) = {
         let s = state.settings.read().unwrap();
-        (s.open_pdf_in_vscode, s.pdf_position.clone())
+        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
     };
-    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos);
+    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
     Json(serde_json::json!({ "success": true }))
 }
 
-fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bool, pdf_position: &str) {
+fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bool, pdf_position: &str, split_ratio: u8) {
     let p_dir = WorkspaceManager::get_problem_dir(workspace_dir, problem_id);
     let sol_file = p_dir.join(format!("{}.cpp", problem_id));
     let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
@@ -810,6 +822,9 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
 
     let temp_task_file = std::env::temp_dir().join("algodeck_active_task.txt");
     let _ = std::fs::write(&temp_task_file, problem_id.to_uppercase());
+
+    // Upewnij się, że zadanie posiada skrypty i .vscode/tasks.json
+    WorkspaceManager::ensure_problem_scripts(workspace_dir, problem_id, problem_id, 1.0);
 
     let pdf_on_left = pdf_position == "left";
 
@@ -865,6 +880,8 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
                     .arg(&sol_file)
                     .env("DISPLAY", &display)
                     .env("XAUTHORITY", &xauthority)
+                    .env("ALGODECK_PDF_POS", pdf_position)
+                    .env("ALGODECK_SPLIT_RATIO", split_ratio.to_string())
                     .spawn();
                 if res.is_ok() {
                     launched = true;
@@ -977,11 +994,11 @@ async fn run_single_test_task(
 
 async fn kill_task(
     State(state): State<AppState>,
-    AxumPath(id): AxumPath<String>,
+    AxumPath(_id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("pkill").arg("-f").arg(&id).output();
+        let _ = std::process::Command::new("pkill").arg("-f").arg(&_id).output();
     }
     state.streamdeck.update_key_status(8, "DANGER", Some("KILLED"));
     Json(serde_json::json!({ "success": true }))
@@ -1042,21 +1059,21 @@ async fn press_streamdeck_key(
             let problems = WorkspaceManager::list_problems(&ws_dir);
             let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
             state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
-            let (split_pdf, pdf_pos) = {
+            let (split_pdf, pdf_pos, split_ratio) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone())
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
             };
-            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos);
+            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio);
             return Json(serde_json::json!({ "success": true, "action": action }));
         }
 
         match action.as_str() {
             "open_vscode" => {
-                let (split_pdf, pdf_pos) = {
+                let (split_pdf, pdf_pos, split_ratio) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode, s.pdf_position.clone())
+                    (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
                 };
-                open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos);
+                open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
             }
             "run_all" => {
                 let _ = state.runner.run_all_tests(&active_id);
@@ -1104,11 +1121,11 @@ async fn press_streamdeck_key(
                 let problems = WorkspaceManager::list_problems(&ws_dir);
                 if let Some(first) = problems.first() {
                     state.streamdeck.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
-                    let (split_pdf, pdf_pos) = {
+                    let (split_pdf, pdf_pos, split_ratio) = {
                         let s = state.settings.read().unwrap();
-                        (s.open_pdf_in_vscode, s.pdf_position.clone())
+                        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
                     };
-                    open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos);
+                    open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
                 } else {
                     let _ = open::that("http://127.0.0.1:8080/");
                 }
