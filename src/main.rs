@@ -307,6 +307,9 @@ fn run_daemon(port: u16) {
             }
             "run_all" => {
                 if !active_id.is_empty() {
+                    if !server::is_vscode_open_for_problem(&active_id) {
+                        open_in_vscode(&settings_clone, &active_id);
+                    }
                     let sd_test = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_test_vscode.sh"));
                     let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
                     if let Some(ref s) = sd_test {
@@ -331,6 +334,9 @@ fn run_daemon(port: u16) {
             }
             "run_interactive" => {
                 if !active_id.is_empty() {
+                    if !server::is_vscode_open_for_problem(&active_id) {
+                        open_in_vscode(&settings_clone, &active_id);
+                    }
                     let sd_run = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_run_vscode.sh"));
                     let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
                     if let Some(ref s) = sd_run {
@@ -400,12 +406,10 @@ fn run_daemon(port: u16) {
             }
             "kill_process" => {
                 if !active_id.is_empty() {
-                    let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
-                    let kill_script = p_dir.join(".algo").join("kill.sh");
-                    if kill_script.exists() {
-                        let _ = std::process::Command::new("bash").arg(kill_script).spawn();
+                    if !server::is_vscode_open_for_problem(&active_id) {
+                        open_in_vscode(&settings_clone, &active_id);
                     }
-                    let _ = std::process::Command::new("pkill").arg("-f").arg(&active_id).output();
+                    server::safe_kill_problem_process(&active_id, &ws_dir);
                     streamdeck_clone.update_key_status(8, "DANGER", Some("KILLED"));
                 }
             }

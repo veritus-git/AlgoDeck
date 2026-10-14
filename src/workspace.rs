@@ -88,9 +88,13 @@ impl WorkspaceManager {
 
         // 2. Copy PDF statement if available
         if let Some(pdf) = original_pdf {
-            if pdf.exists() {
-                let target_pdf = algo_dir.join("statement.pdf");
-                let _ = fs::copy(pdf, target_pdf);
+            let target_pdf = algo_dir.join("statement.pdf");
+            if pdf.exists() && pdf != target_pdf {
+                if let Ok(meta) = fs::metadata(pdf) {
+                    if meta.len() > 0 {
+                        let _ = fs::copy(pdf, target_pdf);
+                    }
+                }
             }
         }
 

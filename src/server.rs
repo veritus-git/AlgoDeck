@@ -101,6 +101,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/settings", get(serve_settings_html))
         .route("/settings.css", get(serve_settings_css))
         .route("/settings.js", get(serve_settings_js))
+        .route("/favicon.ico", get(serve_favicon))
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::permissive())
         .with_state(app_state);
@@ -243,6 +244,18 @@ async fn serve_settings_js() -> impl IntoResponse {
         }
     }
     (StatusCode::NOT_FOUND, "JS not found").into_response()
+}
+
+async fn serve_favicon() -> impl IntoResponse {
+    if let Some(p) = find_file_in_candidates("favicon.ico")
+        .or_else(|| find_file_in_candidates("icons/icon48.png"))
+        .or_else(|| find_file_in_candidates("icon48.png"))
+    {
+        if let Ok(bytes) = fs::read(p) {
+            return ([(axum::http::header::CONTENT_TYPE, "image/png")], bytes).into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, "Favicon not found").into_response()
 }
 
 async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
@@ -924,6 +937,77 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
     }
 }
 
+pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
+    if problem_id.is_empty() {
+        return false;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(output) = std::process::Command::new("wmctrl").arg("-l").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let line_lower = line.to_lowercase();
+                if (line_lower.contains("visual studio code") || line_lower.contains(" - code"))
+                    && line_lower.contains(&problem_id.to_lowercase())
+                {
+                    return true;
+                }
+            }
+        }
+        if let Ok(output) = std::process::Command::new("pgrep").args(["-f", &format!("code.*{}", problem_id)]).output() {
+            if output.status.success() && !output.stdout.is_empty() {
+                return true;
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("tasklist").args(["/FI", "IMAGENAME eq Code.exe"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.contains("Code.exe") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn ensure_vscode_open_for_problem(problem_id: &str, state: &AppState) {
+    if problem_id.is_empty() {
+        return;
+    }
+    if !is_vscode_open_for_problem(problem_id) {
+        let ws_dir = state.settings.read().unwrap().get_workspace_path();
+        let (split_pdf, pdf_pos, split_ratio) = {
+            let s = state.settings.read().unwrap();
+            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+        };
+        open_in_vscode_internal(problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+    }
+}
+
+pub fn safe_kill_problem_process(problem_id: &str, ws_dir: &std::path::Path) {
+    if problem_id.is_empty() {
+        return;
+    }
+    let p_dir = WorkspaceManager::get_problem_dir(ws_dir, problem_id);
+    let kill_script = p_dir.join(".algo").join("kill.sh");
+    if kill_script.exists() {
+        let _ = std::process::Command::new("bash").arg(kill_script).output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Dokładna nazwa pliku binarnego (nigdy -f ze słowem kluczowym, bo to ubiłoby VS Code!)
+        let _ = std::process::Command::new("pkill").arg("-x").arg(problem_id).output();
+        let _ = std::process::Command::new("pkill").arg("-f").arg(format!("{}/\\.algo/run\\.sh", problem_id)).output();
+        let _ = std::process::Command::new("pkill").arg("-f").arg(format!("{}/\\.algo/test\\.sh", problem_id)).output();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", &format!("{}.exe", problem_id)]).output();
+    }
+}
+
 async fn switch_task(
     State(state): State<AppState>,
     AxumPath(direction): AxumPath<String>,
@@ -960,6 +1044,7 @@ async fn compile_task(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Json<CompileResult> {
+    ensure_vscode_open_for_problem(&id, &state);
     state.streamdeck.update_key_status(5, "RUNNING", Some("COMPILING..."));
     let res = state.runner.compile(&id, false);
     if res.success {
@@ -974,6 +1059,7 @@ async fn run_all_task(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Json<RunAllSummary> {
+    ensure_vscode_open_for_problem(&id, &state);
     state.streamdeck.update_key_status(6, "RUNNING", Some("TESTING..."));
     let res = state.runner.run_all_tests(&id);
     if res.all_passed {
@@ -996,10 +1082,9 @@ async fn kill_task(
     State(state): State<AppState>,
     AxumPath(_id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("pkill").arg("-f").arg(&_id).output();
-    }
+    ensure_vscode_open_for_problem(&_id, &state);
+    let ws_dir = state.settings.read().unwrap().get_workspace_path();
+    safe_kill_problem_process(&_id, &ws_dir);
     state.streamdeck.update_key_status(8, "DANGER", Some("KILLED"));
     Json(serde_json::json!({ "success": true }))
 }
@@ -1076,9 +1161,11 @@ async fn press_streamdeck_key(
                 open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
             }
             "run_all" => {
+                ensure_vscode_open_for_problem(&active_id, &state);
                 let _ = state.runner.run_all_tests(&active_id);
             }
             "run_interactive" => {
+                ensure_vscode_open_for_problem(&active_id, &state);
                 #[cfg(not(target_os = "windows"))]
                 {
                     let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
@@ -1090,7 +1177,8 @@ async fn press_streamdeck_key(
             }
             "kill_process" => {
                 if !active_id.is_empty() {
-                    let _ = std::process::Command::new("pkill").arg("-f").arg(&active_id).output();
+                    ensure_vscode_open_for_problem(&active_id, &state);
+                    safe_kill_problem_process(&active_id, &ws_dir);
                     state.streamdeck.update_key_status(8, "DANGER", Some("KILLED"));
                 }
             }

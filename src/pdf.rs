@@ -62,12 +62,30 @@ impl PdfParser {
     pub fn parse_heuristics(full_text: &str) -> ProblemAnalysis {
         let lines: Vec<&str> = full_text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
 
-        // 1. Kod zadania
+        // 1. Kod zadania i Tytuł (jeśli są w jednej linii np. 'Chwasty Kod zadania: chw')
         let mut problem_id = String::new();
+        let mut title = String::new();
 
-        let re_code = Regex::new(r"(?i)Kod zadania:\s*([a-zA-Z0-9_]+)").unwrap();
-        if let Some(caps) = re_code.captures(full_text) {
-            problem_id = caps.get(1).map_or("", |m| m.as_str()).to_lowercase();
+        let re_title_code = Regex::new(r"(?i)^(.+?)\s+Kod zadania:\s*([a-zA-Z0-9_]+)").unwrap();
+        for line in lines.iter().take(8) {
+            if let Some(caps) = re_title_code.captures(line) {
+                let cand_title = caps.get(1).map_or("", |m| m.as_str()).trim();
+                let cand_id = caps.get(2).map_or("", |m| m.as_str()).to_lowercase();
+                if !cand_title.is_empty() && cand_title.len() < 40 && !cand_title.ends_with('.') {
+                    title = cand_title.to_string();
+                }
+                if !cand_id.is_empty() {
+                    problem_id = cand_id;
+                }
+                break;
+            }
+        }
+
+        if problem_id.is_empty() {
+            let re_code = Regex::new(r"(?i)Kod zadania:\s*([a-zA-Z0-9_]+)").unwrap();
+            if let Some(caps) = re_code.captures(full_text) {
+                problem_id = caps.get(1).map_or("", |m| m.as_str()).to_lowercase();
+            }
         }
 
         if problem_id.is_empty() {
@@ -87,16 +105,15 @@ impl PdfParser {
             }
         }
 
-        // 2. Tytuł zadania
-        let mut title = String::new();
-        let re_task_line = Regex::new(r"(?i)^Zadanie:\s*[a-zA-Z0-9_]+").unwrap();
-        let re_bad_title = Regex::new(r"(?i)(etap|plik|dostępna|pamięć|punktów)").unwrap();
-
-        for (i, line) in lines.iter().take(12).enumerate() {
-            if re_task_line.is_match(line) {
-                if let Some(next_line) = lines.get(i + 1) {
-                    if !re_bad_title.is_match(next_line) {
-                        title = next_line.to_string();
+        // 2. Tytuł zadania (jeśli nie wyekstrahowany z linii 'Tytuł Kod zadania: ...')
+        if title.is_empty() {
+            let re_task_header = Regex::new(r"(?i)^Zadanie:\s*([a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ _-]{2,35})$").unwrap();
+            for line in lines.iter().take(12) {
+                if let Some(caps) = re_task_header.captures(line) {
+                    let cand = caps.get(1).map_or("", |m| m.as_str()).trim();
+                    let cand_lower = cand.to_lowercase();
+                    if !cand_lower.contains("próbne") && !cand_lower.contains("otwarte") && !cand_lower.contains("zgłoszen") {
+                        title = cand.to_string();
                         break;
                     }
                 }
@@ -104,9 +121,10 @@ impl PdfParser {
         }
 
         if title.is_empty() {
-            let re_skip = Regex::new(r"(?i)(kod|limit|etap|oij|oi|strona|zawody|punkty|zadanie|www|©)").unwrap();
+            let re_skip = Regex::new(r"(?i)(kod|limit|etap|oij|oi|strona|zawody|punkty|zadanie|www|©|zgłoszen|otwart|sprawdz|bajtazar|danych|wejście|wyjście|ocenianie)").unwrap();
             for line in lines.iter().take(10) {
-                if !re_skip.is_match(line) && line.len() < 45 {
+                // Tytuł zadania olimpijskiego to czyste słowo / fraza bez kropki na końcu i bez słów ze stop-listy
+                if !re_skip.is_match(line) && line.len() >= 2 && line.len() <= 40 && !line.ends_with('.') && !line.ends_with(':') && !line.ends_with(',') {
                     title = line.to_string();
                     break;
                 }
@@ -114,7 +132,15 @@ impl PdfParser {
         }
 
         if title.is_empty() {
-            title = "Zadanie".to_string();
+            title = if !problem_id.is_empty() {
+                let mut c = problem_id.chars();
+                match c.next() {
+                    None => "Zadanie".to_string(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            } else {
+                "Zadanie".to_string()
+            };
         }
 
         // Fallback na kod zadania
@@ -154,86 +180,105 @@ impl PdfParser {
         // 4. Testy
         let mut tests: Vec<TestCase> = Vec::new();
 
+        // Wyszukujemy sekcję przykładów, aby nie pomylić wejścia/wyjścia ze specyfikacji zadania
+        let re_examples_section = Regex::new(r"(?im)^\s*Przykład(?:y)?\b").unwrap();
+        let examples_text = if let Some(m) = re_examples_section.find(full_text) {
+            &full_text[m.start()..]
+        } else {
+            full_text
+        };
+
         // Wzorzec A: Format OIJ 'Wejście dla testu chw0a:' lub 'Wejście:\n...\nWyjście:\n...'
-        let re_oij = Regex::new(
-            r"(?is)Wejście\s*(?:dla\s*testu\s*|\s*dla\s*testu)?([a-zA-Z0-9_]*):\s*\n(.*?)\nWyjście\s*(?:dla\s*testu\s*|\s*dla\s*testu)?[a-zA-Z0-9_]*:\s*\n(.*?)(?:\nWejście|\nWyjaśnienie|\nOcenianie|\z)",
-        ).unwrap();
+        let re_in_header = Regex::new(r"(?im)^\s*Wejście\s*(?:dla\s*testu\s*|\s*dla\s*testu)?([a-zA-Z0-9_]*):?\s*$").unwrap();
+        let re_out_header = Regex::new(r"(?im)^\s*Wyjście\s*(?:dla\s*testu\s*|\s*dla\s*testu)?[a-zA-Z0-9_]*:?\s*$").unwrap();
+        let re_cut = Regex::new(r"(?im)^\s*(?:Wyjaśnienie|Testy|Ocenianie|©|Chwasty)").unwrap();
 
-        let re_cut = Regex::new(r"(?is)\nWyjaśnienie|\nTesty|\nOcenianie").unwrap();
+        let in_matches: Vec<(usize, usize, String)> = re_in_header
+            .captures_iter(examples_text)
+            .filter_map(|c| {
+                let m = c.get(0)?;
+                let tag = c.get(1).map_or("", |t| t.as_str()).trim().to_string();
+                Some((m.start(), m.end(), tag))
+            })
+            .collect();
 
-        for caps in re_oij.captures_iter(full_text) {
-            let raw_tag = caps.get(1).map_or("", |m| m.as_str()).trim();
-            let test_tag = if raw_tag.is_empty() {
-                format!("test_{}", tests.len() + 1)
-            } else {
-                raw_tag.to_string()
-            };
-            let inp = caps.get(2).map_or("", |m| m.as_str()).trim();
-            let mut out = caps.get(3).map_or("", |m| m.as_str()).trim();
-            if let Some(m) = re_cut.find(out) {
-                out = &out[..m.start()].trim();
-            }
+        if !in_matches.is_empty() {
+            for (idx, &(_start_pos, end_pos, ref tag)) in in_matches.iter().enumerate() {
+                let next_test_start = if idx + 1 < in_matches.len() {
+                    in_matches[idx + 1].0
+                } else {
+                    examples_text.len()
+                };
 
-            if !inp.is_empty() && !out.is_empty() {
-                tests.push(TestCase {
-                    id: test_tag.clone(),
-                    name: format!("Przykład {}", test_tag),
-                    input: inp.to_string(),
-                    expected_output: out.to_string(),
-                    is_edge_case: false,
-                    tag: "[OFICJALNY Z TREŚCI]".to_string(),
-                });
+                let block = &examples_text[end_pos..next_test_start];
+                if let Some(out_cap) = re_out_header.captures(block) {
+                    let out_m = out_cap.get(0).unwrap();
+                    let input_part = block[..out_m.start()].trim();
+                    let mut output_part = block[out_m.end()..].trim();
+
+                    if let Some(cut_m) = re_cut.find(output_part) {
+                        output_part = output_part[..cut_m.start()].trim();
+                    }
+
+                    if !input_part.is_empty() && !output_part.is_empty() {
+                        let test_tag = if tag.is_empty() {
+                            format!("test_{}", tests.len() + 1)
+                        } else {
+                            tag.clone()
+                        };
+                        tests.push(TestCase {
+                            id: test_tag.clone(),
+                            name: format!("Przykład {}", test_tag),
+                            input: input_part.to_string(),
+                            expected_output: output_part.to_string(),
+                            is_edge_case: false,
+                            tag: "[OFICJALNY Z TREŚCI]".to_string(),
+                        });
+                    }
+                }
             }
         }
 
         // Wzorzec B: Format OI 'Dla danych wejściowych:\n...\npoprawnym wynikiem jest:\n...'
         if tests.is_empty() {
-            let re_oi = Regex::new(
-                r"(?is)Dla\s+danych\s+wejściowych:\s*\n(.*?)\npoprawnym\s+wynikiem\s+jest:\s*\n(.*?)(?:\nWyjaśnienie|\nTesty|\nOcenianie|\z)",
-            ).unwrap();
+            let re_oi_in = Regex::new(r"(?im)^\s*Dla\s+danych\s+wejściowych:?\s*$").unwrap();
+            let re_oi_out = Regex::new(r"(?im)^\s*poprawnym\s+wynikiem\s+jest:?\s*$").unwrap();
 
-            for (i, caps) in re_oi.captures_iter(full_text).enumerate() {
-                let inp = caps.get(1).map_or("", |m| m.as_str()).trim();
-                let mut out = caps.get(2).map_or("", |m| m.as_str()).trim();
-                if let Some(m) = re_cut.find(out) {
-                    out = &out[..m.start()].trim();
-                }
+            let oi_matches: Vec<(usize, usize)> = re_oi_in
+                .captures_iter(examples_text)
+                .filter_map(|c| {
+                    let m = c.get(0)?;
+                    Some((m.start(), m.end()))
+                })
+                .collect();
 
-                if !inp.is_empty() && !out.is_empty() {
-                    tests.push(TestCase {
-                        id: format!("test_{}", i + 1),
-                        name: format!("Przykład {}", i + 1),
-                        input: inp.to_string(),
-                        expected_output: out.to_string(),
-                        is_edge_case: false,
-                        tag: "[OFICJALNY Z TREŚCI]".to_string(),
-                    });
-                }
-            }
-        }
+            for (idx, &(_start_pos, end_pos)) in oi_matches.iter().enumerate() {
+                let next_test_start = if idx + 1 < oi_matches.len() {
+                    oi_matches[idx + 1].0
+                } else {
+                    examples_text.len()
+                };
 
-        // Wzorzec C: Format Szkopuł / Prosty 'Przykład\nWejście\n...\nWyjście\n...'
-        if tests.is_empty() {
-            let re_std = Regex::new(
-                r"(?is)Przykład(?:y)?\s*\n+Wejście:?\s*\n(.*?)\nWyjście:?\s*\n(.*?)(?:\nWyjaśnienie|\nTesty|\nOcenianie|\nPrzykład|\z)",
-            ).unwrap();
+                let block = &examples_text[end_pos..next_test_start];
+                if let Some(out_cap) = re_oi_out.captures(block) {
+                    let out_m = out_cap.get(0).unwrap();
+                    let input_part = block[..out_m.start()].trim();
+                    let mut output_part = block[out_m.end()..].trim();
 
-            for (i, caps) in re_std.captures_iter(full_text).enumerate() {
-                let inp = caps.get(1).map_or("", |m| m.as_str()).trim();
-                let mut out = caps.get(2).map_or("", |m| m.as_str()).trim();
-                if let Some(m) = re_cut.find(out) {
-                    out = &out[..m.start()].trim();
-                }
+                    if let Some(cut_m) = re_cut.find(output_part) {
+                        output_part = output_part[..cut_m.start()].trim();
+                    }
 
-                if !inp.is_empty() && !out.is_empty() {
-                    tests.push(TestCase {
-                        id: format!("test_{}", i + 1),
-                        name: format!("Przykład {}", i + 1),
-                        input: inp.to_string(),
-                        expected_output: out.to_string(),
-                        is_edge_case: false,
-                        tag: "[OFICJALNY Z TREŚCI]".to_string(),
-                    });
+                    if !input_part.is_empty() && !output_part.is_empty() {
+                        tests.push(TestCase {
+                            id: format!("test_{}", tests.len() + 1),
+                            name: format!("Przykład {}", tests.len() + 1),
+                            input: input_part.to_string(),
+                            expected_output: output_part.to_string(),
+                            is_edge_case: false,
+                            tag: "[OFICJALNY Z TREŚCI]".to_string(),
+                        });
+                    }
                 }
             }
         }
@@ -245,6 +290,29 @@ impl PdfParser {
             memory_limit_mb: memory_limit,
             tests,
             used_engine: "Lokalny parser zadań olimpijskich MAP/OI (100% offline Rust)".to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_chw_statement() {
+        let path = Path::new("/home/linux/AlgoDeckWorkspace/chw/.algo/statement.pdf");
+        if path.exists() {
+            let text = PdfParser::extract_text_from_file(path).expect("Failed to read statement.pdf");
+            for (idx, line) in text.lines().take(15).enumerate() {
+                println!("Line {}: {:?}", idx, line);
+            }
+            let analysis = PdfParser::parse_heuristics(&text);
+            println!("Analysis result: id={}, title={}, tests={}", analysis.problem_id, analysis.title, analysis.tests.len());
+            for t in &analysis.tests {
+                println!("Found test: id={}, name={}\nin={:?}\nout={:?}", t.id, t.name, t.input, t.expected_output);
+            }
+            assert_eq!(analysis.title, "Chwasty");
+            assert_eq!(analysis.problem_id, "chw");
         }
     }
 }

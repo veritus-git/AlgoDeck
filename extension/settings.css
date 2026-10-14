@@ -36,6 +36,21 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input, select, textarea, a {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus, button:focus-visible,
+input:focus, input:focus-visible,
+select:focus, select:focus-visible,
+textarea:focus, textarea:focus-visible,
+a:focus, a:focus-visible {
+  outline: none !important;
 }
 
 html {

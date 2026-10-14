@@ -316,7 +316,7 @@ function createDedicatedPopup(filename) {
       url: targetUrl,
       type: "popup",
       width: 360,
-      height: 140,
+      height: 122,
       focused: true
     }, (win) => {
       isOpeningWindow = false;

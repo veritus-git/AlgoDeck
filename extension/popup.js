@@ -204,6 +204,7 @@ async function checkDetectedMode() {
 
   if (!autoPdf) return false;
 
+  document.documentElement.classList.add("detected-mode");
   document.body.classList.add("detected-mode");
   viewOffline.classList.add("hidden");
   viewMain.classList.add("hidden");

@@ -31,6 +31,22 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input, select, textarea, a, .tab-btn {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus, button:focus-visible,
+input:focus, input:focus-visible,
+select:focus, select:focus-visible,
+textarea:focus, textarea:focus-visible,
+a:focus, a:focus-visible,
+.tab-btn:focus, .tab-btn:focus-visible {
+  outline: none !important;
 }
 
 html, body {
@@ -114,32 +130,48 @@ html, body {
 }
 
 /* ==========================================================================
-   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — BEZ BIAŁEJ RAMKI
+   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — JEDNOLITE TŁO BEZ PASKÓW
    ========================================================================== */
+html.detected-mode,
 body.detected-mode {
-  width: 360px;
-  height: 130px;
-  min-height: 130px;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: 100% !important;
   background: linear-gradient(145deg, #121a2c, #0d1322) !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+body.detected-mode {
   border-top: 2px solid #0284c7;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
 }
 
-.view-detected {
-  padding: 12px 14px;
-  background: transparent;
-  min-height: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+body.detected-mode .app-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  background: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 
-.detected-box-card {
+body.detected-mode .view-detected {
+  width: 100% !important;
+  height: 100% !important;
+  padding: 10px 14px 10px 14px !important;
+  box-sizing: border-box !important;
+  background: transparent !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+}
+
+body.detected-mode .detected-box-card {
   background: transparent;
   border: none;
   box-shadow: none;
@@ -147,7 +179,10 @@ body.detected-mode {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 7px;
+  width: 100%;
+  height: 100%;
 }
 
 .det-top-row {
