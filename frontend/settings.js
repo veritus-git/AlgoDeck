@@ -22,6 +22,14 @@ const elements = {
   // VS Code
   vscodeMode: document.getElementById("cfg-vscode-mode"),
   splitPdf: document.getElementById("cfg-split-pdf"),
+  splitOptionsBox: document.getElementById("split-pdf-options"),
+  pdfPosition: document.getElementById("cfg-pdf-position"),
+  splitRatio: document.getElementById("cfg-split-ratio"),
+  ratioLeftSeg: document.getElementById("ratio-left-seg"),
+  ratioRightSeg: document.getElementById("ratio-right-seg"),
+  ratioLeftLabel: document.getElementById("ratio-left-label"),
+  ratioRightLabel: document.getElementById("ratio-right-label"),
+  splitRatioValLabel: document.getElementById("split-ratio-val-label"),
 
   // Compiler & Flags
   compiler: document.getElementById("cfg-compiler"),
@@ -63,6 +71,8 @@ let currentSettings = {
   default_time_limit: 1.0,
   default_memory_limit: 128,
   streamdeck_brightness: 85,
+  pdf_position: "right",
+  editor_split_ratio: 60,
   auto_detect_downloads: true,
   notifications: true
 };
@@ -166,8 +176,41 @@ function applySettingsToForm(s) {
     elements.sdBrightness.value = s.streamdeck_brightness;
     elements.brightnessValLabel.textContent = `${s.streamdeck_brightness}%`;
   }
+  if (s.pdf_position) elements.pdfPosition.value = s.pdf_position;
+  if (s.editor_split_ratio) elements.splitRatio.value = s.editor_split_ratio;
   if (s.auto_detect_downloads !== undefined) elements.autoDetect.checked = Boolean(s.auto_detect_downloads);
   if (s.notifications !== undefined) elements.notifications.checked = Boolean(s.notifications);
+  updateSplitRatioVisual();
+}
+
+function updateSplitRatioVisual() {
+  const isSplit = elements.splitPdf.checked;
+  if (elements.splitOptionsBox) {
+    if (isSplit) {
+      elements.splitOptionsBox.classList.remove("hidden");
+    } else {
+      elements.splitOptionsBox.classList.add("hidden");
+    }
+  }
+
+  const ratio = parseInt(elements.splitRatio.value, 10) || 60;
+  const isPdfLeft = elements.pdfPosition.value === "left";
+  const codeRatio = ratio;
+  const pdfRatio = 100 - ratio;
+
+  if (isPdfLeft) {
+    elements.ratioLeftSeg.style.width = `${pdfRatio}%`;
+    elements.ratioRightSeg.style.width = `${codeRatio}%`;
+    elements.ratioLeftLabel.textContent = `📄 PDF ${pdfRatio}%`;
+    elements.ratioRightLabel.textContent = `💻 Kod ${codeRatio}%`;
+    elements.splitRatioValLabel.textContent = `${pdfRatio}/${codeRatio}`;
+  } else {
+    elements.ratioLeftSeg.style.width = `${codeRatio}%`;
+    elements.ratioRightSeg.style.width = `${pdfRatio}%`;
+    elements.ratioLeftLabel.textContent = `💻 Kod ${codeRatio}%`;
+    elements.ratioRightLabel.textContent = `📄 PDF ${pdfRatio}%`;
+    elements.splitRatioValLabel.textContent = `${codeRatio}/${pdfRatio}`;
+  }
 }
 
 function collectSettingsFromForm() {
@@ -176,6 +219,8 @@ function collectSettingsFromForm() {
     workspace_dir: elements.workspaceDir.value.trim(),
     vscode_mode: elements.vscodeMode.value,
     open_pdf_in_vscode: elements.splitPdf.checked,
+    pdf_position: elements.pdfPosition.value,
+    editor_split_ratio: parseInt(elements.splitRatio.value, 10) || 60,
     cxx_compiler: elements.compiler.value,
     cpp_standard: elements.cppStd.value,
     sanitize_enabled: elements.sanitizer.checked,
@@ -427,6 +472,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const isWin = navigator.userAgent.includes("Windows");
     elements.workspaceDir.value = isWin ? "C:\\AlgoDeckWorkspace" : "/home/linux/AlgoDeckWorkspace";
   });
+
+  // Zmiana proporcji podziału ekranu PDF / Kod
+  elements.splitPdf.addEventListener("change", updateSplitRatioVisual);
+  elements.pdfPosition.addEventListener("change", updateSplitRatioVisual);
+  elements.splitRatio.addEventListener("input", updateSplitRatioVisual);
 
   // Jasność Stream Decka
   elements.sdBrightness.addEventListener("input", (e) => {

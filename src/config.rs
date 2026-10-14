@@ -42,6 +42,20 @@ pub struct AppSettings {
 
     #[serde(default = "default_streamdeck_brightness")]
     pub streamdeck_brightness: u8,
+
+    #[serde(default = "default_pdf_position")]
+    pub pdf_position: String,
+
+    #[serde(default = "default_editor_split_ratio")]
+    pub editor_split_ratio: u8,
+}
+
+fn default_pdf_position() -> String {
+    "right".to_string()
+}
+
+fn default_editor_split_ratio() -> u8 {
+    60
 }
 
 fn default_streamdeck_brightness() -> u8 {
@@ -112,6 +126,8 @@ impl Default for AppSettings {
             default_time_limit: default_time_limit(),
             default_memory_limit: default_memory_limit(),
             streamdeck_brightness: default_streamdeck_brightness(),
+            pdf_position: default_pdf_position(),
+            editor_split_ratio: default_editor_split_ratio(),
         }
     }
 }

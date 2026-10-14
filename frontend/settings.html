@@ -119,13 +119,54 @@
           <div class="setting-row switch-row">
             <div class="setting-info">
               <span class="setting-title">Dzielony widok PDF (Split Screen View)</span>
-              <p class="setting-desc">Automatycznie otwiera treść zadania (<code>zadanie.pdf</code>) w prawej kolumnie edytora bezpośrednio obok kodu źródłowego <code>code.cpp</code>.</p>
+              <p class="setting-desc">Otwiera treść zadania (<code>zadanie.pdf</code>) w kolumnie obok kodu źródłowego <code>code.cpp</code>.</p>
             </div>
             <div class="setting-control">
               <label class="doc-switch">
                 <input type="checkbox" id="cfg-split-pdf">
                 <span class="switch-slider"></span>
               </label>
+            </div>
+          </div>
+
+          <!-- Zaawansowane sterowanie stroną i proporcją podziału okien -->
+          <div id="split-pdf-options" class="split-options-box">
+            <div class="divider"></div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <label for="cfg-pdf-position" class="setting-title">Układ kolumn (Strona PDF i Kodu):</label>
+                <p class="setting-desc">Wybierz, po której stronie ma być wyświetlany edytor kodu, a po której treść zadania PDF.</p>
+              </div>
+              <div class="setting-control">
+                <select id="cfg-pdf-position" class="doc-select">
+                  <option value="right">💻 Kod po lewej &bull; 📄 PDF po prawej (Domyślne)</option>
+                  <option value="left">📄 PDF po lewej &bull; 💻 Kod po prawej</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <label for="cfg-split-ratio" class="setting-title">Proporcje podziału przestrzeni ekranu:</label>
+                <p class="setting-desc">Płynne zarządzanie szerokością edytora kodu oraz podglądu treści zadania (np. 60% / 40%).</p>
+              </div>
+              <div class="setting-control split-ratio-control">
+                <div class="split-ratio-preview" id="split-ratio-bar">
+                  <div class="ratio-segment ratio-left" id="ratio-left-seg" style="width: 60%;">
+                    <span id="ratio-left-label">💻 Kod 60%</span>
+                  </div>
+                  <div class="ratio-segment ratio-right" id="ratio-right-seg" style="width: 40%;">
+                    <span id="ratio-right-label">📄 PDF 40%</span>
+                  </div>
+                </div>
+                <div class="slider-with-label">
+                  <input type="range" id="cfg-split-ratio" min="30" max="70" step="5" value="60" class="doc-slider">
+                  <span id="split-ratio-val-label" class="slider-val code-font">60/40</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

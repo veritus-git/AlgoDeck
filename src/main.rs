@@ -175,10 +175,16 @@ fn run_daemon(port: u16) {
             } else {
                 args.push(ws_dir.to_string_lossy().to_string());
             }
+            let pdf_on_left = settings.pdf_position == "left";
+            if settings.open_pdf_in_vscode && pdf_on_left {
+                if let Some(ref p) = actual_pdf {
+                    args.push(p.to_string_lossy().to_string());
+                }
+            }
             if sol_file.exists() {
                 args.push(sol_file.to_string_lossy().to_string());
             }
-            if settings.open_pdf_in_vscode {
+            if settings.open_pdf_in_vscode && !pdf_on_left {
                 if let Some(ref p) = actual_pdf {
                     args.push(p.to_string_lossy().to_string());
                 }
@@ -240,10 +246,16 @@ fn run_daemon(port: u16) {
                 } else {
                     cmd.arg(&ws_dir);
                 }
+                let pdf_on_left = settings.pdf_position == "left";
+                if settings.open_pdf_in_vscode && pdf_on_left {
+                    if let Some(ref p) = actual_pdf {
+                        cmd.arg(p);
+                    }
+                }
                 if sol_file.exists() {
                     cmd.arg(&sol_file);
                 }
-                if settings.open_pdf_in_vscode {
+                if settings.open_pdf_in_vscode && !pdf_on_left {
                     if let Some(ref p) = actual_pdf {
                         cmd.arg(p);
                     }
