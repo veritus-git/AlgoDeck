@@ -451,7 +451,10 @@ async fn set_active(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
-    state.streamdeck.set_active_problem(&id);
+    let ws_dir = state.settings.read().unwrap().get_workspace_path();
+    let problems = WorkspaceManager::list_problems(&ws_dir);
+    let cur_idx = problems.iter().position(|p| p.problem_id == id).unwrap_or(0) + 1;
+    state.streamdeck.set_active_problem_with_meta(&id, cur_idx, problems.len().max(1));
     let _ = state.ws_sender.send(format!("active:{}", id));
     Json(serde_json::json!({ "success": true, "problem_id": id }))
 }
@@ -469,18 +472,64 @@ async fn open_vscode(
 fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bool) {
     let p_dir = WorkspaceManager::get_problem_dir(workspace_dir, problem_id);
     let sol_file = p_dir.join(format!("{}.cpp", problem_id));
-    let pdf_file = p_dir.join(".algo").join("statement.pdf");
+    let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
+    let pdf_fallback = p_dir.join(".algo").join("statement.pdf");
+    let actual_pdf = if pdf_file.exists() {
+        Some(pdf_file)
+    } else if pdf_fallback.exists() {
+        Some(pdf_fallback)
+    } else {
+        None
+    };
 
-    let mut cmd = std::process::Command::new("code");
-    cmd.arg("--reuse-window");
-    cmd.arg(workspace_dir);
-    cmd.arg(&sol_file);
+    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+    let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
 
-    if split_pdf && pdf_file.exists() {
-        cmd.arg(&pdf_file);
+    let _ = std::fs::write("/tmp/algodeck_active_task.txt", problem_id.to_uppercase());
+
+    let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
+    let mut launched = false;
+    if let Some(ref script) = sd_code {
+        if script.exists() {
+            let res = std::process::Command::new(script)
+                .arg(&p_dir)
+                .arg(&sol_file)
+                .env("DISPLAY", &display)
+                .env("XAUTHORITY", &xauthority)
+                .spawn();
+            if res.is_ok() {
+                launched = true;
+            }
+        }
     }
 
-    let _ = cmd.spawn();
+    if !launched {
+        let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
+            "/usr/bin/code"
+        } else {
+            "code"
+        };
+        let mut cmd = std::process::Command::new(code_bin);
+        cmd.arg("--reuse-window");
+        cmd.arg(workspace_dir);
+        if sol_file.exists() {
+            cmd.arg(&sol_file);
+        }
+        if split_pdf {
+            if let Some(ref p) = actual_pdf {
+                cmd.arg(p);
+            }
+        }
+        cmd.env("DISPLAY", &display);
+        cmd.env("XAUTHORITY", &xauthority);
+        let _ = cmd.spawn();
+    }
+
+    let _ = std::process::Command::new("notify-send")
+        .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
+        .env("DISPLAY", &display)
+        .env("XAUTHORITY", &xauthority)
+        .spawn();
 }
 
 async fn switch_task(
@@ -509,7 +558,7 @@ async fn switch_task(
     };
 
     let next_id = &problems[next_idx].problem_id;
-    state.streamdeck.set_active_problem(next_id);
+    state.streamdeck.set_active_problem_with_meta(next_id, next_idx + 1, problems.len());
     let _ = state.ws_sender.send(format!("active:{}", next_id));
 
     Json(serde_json::json!({ "success": true, "problem_id": next_id }))
@@ -598,16 +647,49 @@ async fn press_streamdeck_key(
 
     if !action.is_empty() {
         let active_id = state.streamdeck.get_state().active_problem_id.unwrap_or_default();
+        let ws_dir = state.settings.read().unwrap().get_workspace_path();
+
+        if action.starts_with("select_task:") {
+            let pid = action.trim_start_matches("select_task:").to_string();
+            let problems = WorkspaceManager::list_problems(&ws_dir);
+            let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
+            state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
+            open_in_vscode_internal(&pid, &ws_dir, state.settings.read().unwrap().open_pdf_in_vscode);
+            return Json(serde_json::json!({ "success": true, "action": action }));
+        }
+
         match action.as_str() {
             "open_vscode" => {
-                let ws_dir = state.settings.read().unwrap().get_workspace_path();
                 open_in_vscode_internal(&active_id, &ws_dir, true);
             }
             "run_all" => {
                 let _ = state.runner.run_all_tests(&active_id);
             }
             "open_menu" => {
-                let _ = open_gui().await;
+                let problems = WorkspaceManager::list_problems(&ws_dir);
+                let pids: Vec<String> = problems.into_iter().map(|p| p.problem_id).collect();
+                state.streamdeck.set_menu_screen(&pids, 0);
+            }
+            "back_to_task" => {
+                if !active_id.is_empty() {
+                    let problems = WorkspaceManager::list_problems(&ws_dir);
+                    let cur_idx = problems.iter().position(|p| p.problem_id == active_id).unwrap_or(0) + 1;
+                    state.streamdeck.set_active_problem_with_meta(&active_id, cur_idx, problems.len().max(1));
+                } else {
+                    state.streamdeck.set_idle_screen();
+                }
+            }
+            "exit_to_idle" => {
+                state.streamdeck.set_idle_screen();
+            }
+            "start_or_resume" => {
+                let problems = WorkspaceManager::list_problems(&ws_dir);
+                if let Some(first) = problems.first() {
+                    state.streamdeck.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
+                    open_in_vscode_internal(&first.problem_id, &ws_dir, true);
+                } else {
+                    let _ = open_gui().await;
+                }
             }
             "prev_task" => {
                 let _ = switch_task(State(state.clone()), AxumPath("prev".to_string())).await;

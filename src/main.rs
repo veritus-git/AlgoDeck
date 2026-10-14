@@ -127,20 +127,127 @@ fn run_daemon(port: u16) {
     let streamdeck_clone = streamdeck.clone();
     let settings_clone = settings.clone();
 
+    fn open_in_vscode(settings: &config::AppSettings, problem_id: &str) {
+        if problem_id.is_empty() {
+            return;
+        }
+        let ws_dir = settings.get_workspace_path();
+        let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, problem_id);
+        let sol_file = p_dir.join(format!("{}.cpp", problem_id));
+        let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
+        let pdf_fallback = p_dir.join(".algo").join("statement.pdf");
+        let actual_pdf = if pdf_file.exists() {
+            Some(pdf_file)
+        } else if pdf_fallback.exists() {
+            Some(pdf_fallback)
+        } else {
+            None
+        };
+
+        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+        let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
+
+        // Zapisz /tmp/algodeck_active_task.txt
+        let _ = std::fs::write("/tmp/algodeck_active_task.txt", problem_id.to_uppercase());
+
+        // 1. Sprawdź czy skrypt sd_algo_code.sh jest dostępny
+        let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
+        let mut script_launched = false;
+        if let Some(ref script) = sd_code {
+            if script.exists() {
+                let res = std::process::Command::new(script)
+                    .arg(&p_dir)
+                    .arg(&sol_file)
+                    .env("DISPLAY", &display)
+                    .env("XAUTHORITY", &xauthority)
+                    .spawn();
+                if res.is_ok() {
+                    script_launched = true;
+                }
+            }
+        }
+
+        // 2. Bezpośrednie wywołanie VS Code jako niezawodny fallback
+        if !script_launched {
+            let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
+                "/usr/bin/code"
+            } else {
+                "code"
+            };
+            let mut cmd = std::process::Command::new(code_bin);
+            cmd.arg("--reuse-window");
+            if settings.vscode_mode == "separate_windows" {
+                cmd.arg(&p_dir);
+            } else {
+                cmd.arg(&ws_dir);
+            }
+            if sol_file.exists() {
+                cmd.arg(&sol_file);
+            }
+            if settings.open_pdf_in_vscode {
+                if let Some(ref p) = actual_pdf {
+                    cmd.arg(p);
+                }
+            }
+            cmd.env("DISPLAY", &display);
+            cmd.env("XAUTHORITY", &xauthority);
+            let _ = cmd.spawn();
+        }
+
+        // 3. Powiadomienie na pulpicie
+        let _ = std::process::Command::new("notify-send")
+            .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
+            .env("DISPLAY", &display)
+            .env("XAUTHORITY", &xauthority)
+            .spawn();
+    }
+
     let action_callback = Arc::new(move |action: String, _key_idx: usize| {
         let active_id = streamdeck_clone.get_state().active_problem_id.unwrap_or_default();
+        let ws_dir = settings_clone.get_workspace_path();
+        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+        let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
+
+        if action.starts_with("select_task:") {
+            let pid = action.trim_start_matches("select_task:").to_string();
+            let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
+            let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
+            streamdeck_clone.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
+            open_in_vscode(&settings_clone, &pid);
+            return;
+        }
+
+        if action.starts_with("menu_page:") {
+            if let Ok(page) = action.trim_start_matches("menu_page:").parse::<usize>() {
+                let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
+                let pids: Vec<String> = problems.into_iter().map(|p| p.problem_id).collect();
+                streamdeck_clone.set_menu_screen(&pids, page);
+                return;
+            }
+        }
+
         match action.as_str() {
             "open_vscode" => {
                 if !active_id.is_empty() {
-                    let _ = std::process::Command::new("code")
-                        .arg("--reuse-window")
-                        .arg(&settings_clone.workspace_dir)
-                        .arg(format!("{}/{}/{}.cpp", settings_clone.workspace_dir, active_id, active_id))
-                        .spawn();
+                    open_in_vscode(&settings_clone, &active_id);
                 }
             }
             "run_all" => {
                 if !active_id.is_empty() {
+                    let sd_test = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_test_vscode.sh"));
+                    let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
+                    if let Some(ref s) = sd_test {
+                        if s.exists() {
+                            let _ = std::process::Command::new(s)
+                                .arg(&p_dir)
+                                .arg(&active_id)
+                                .env("DISPLAY", &display)
+                                .env("XAUTHORITY", &xauthority)
+                                .spawn();
+                            return;
+                        }
+                    }
+
                     let r = runner_clone.run_all_tests(&active_id);
                     if r.all_passed {
                         streamdeck_clone.update_key_status(6, "OK", Some(&format!("{:.0}ms", r.total_time_ms)));
@@ -151,14 +258,76 @@ fn run_daemon(port: u16) {
             }
             "run_interactive" => {
                 if !active_id.is_empty() {
-                    let _ = std::process::Command::new("x-terminal-emulator")
-                        .args(["-e", &format!("algodeck run {}", active_id)])
-                        .spawn();
+                    let sd_run = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_run_vscode.sh"));
+                    let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
+                    if let Some(ref s) = sd_run {
+                        if s.exists() {
+                            let _ = std::process::Command::new(s)
+                                .arg(&p_dir)
+                                .arg(&active_id)
+                                .env("DISPLAY", &display)
+                                .env("XAUTHORITY", &xauthority)
+                                .spawn();
+                            return;
+                        }
+                    }
+
+                    let mut cmd = std::process::Command::new("x-terminal-emulator");
+                    cmd.args(["-e", &format!("algodeck run {}", active_id)]);
+                    cmd.env("DISPLAY", &display);
+                    cmd.env("XAUTHORITY", &xauthority);
+                    let _ = cmd.spawn();
+                }
+            }
+            "new_task" => {
+                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/home/linux/.local/bin/algodeck"));
+                let mut cmd = std::process::Command::new(self_exe);
+                cmd.arg("--tab=new");
+                cmd.env("DISPLAY", &display);
+                cmd.env("XAUTHORITY", &xauthority);
+                let _ = cmd.spawn();
+            }
+            "open_settings" => {
+                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/home/linux/.local/bin/algodeck"));
+                let mut cmd = std::process::Command::new(self_exe);
+                cmd.arg("--tab=settings");
+                cmd.env("DISPLAY", &display);
+                cmd.env("XAUTHORITY", &xauthority);
+                let _ = cmd.spawn();
+            }
+            "open_menu" => {
+                let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
+                let pids: Vec<String> = problems.into_iter().map(|p| p.problem_id).collect();
+                streamdeck_clone.set_menu_screen(&pids, 0);
+            }
+            "back_to_task" => {
+                if !active_id.is_empty() {
+                    let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
+                    let cur_idx = problems.iter().position(|p| p.problem_id == active_id).unwrap_or(0) + 1;
+                    streamdeck_clone.set_active_problem_with_meta(&active_id, cur_idx, problems.len().max(1));
+                } else {
+                    streamdeck_clone.set_idle_screen();
+                }
+            }
+            "exit_to_idle" => {
+                streamdeck_clone.set_idle_screen();
+            }
+            "start_or_resume" => {
+                let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
+                if let Some(first) = problems.first() {
+                    streamdeck_clone.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
+                    open_in_vscode(&settings_clone, &first.problem_id);
+                } else {
+                    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/home/linux/.local/bin/algodeck"));
+                    let mut cmd = std::process::Command::new(self_exe);
+                    cmd.arg("--tab=new");
+                    cmd.env("DISPLAY", &display);
+                    cmd.env("XAUTHORITY", &xauthority);
+                    let _ = cmd.spawn();
                 }
             }
             "next_task" | "prev_task" => {
-                let ws_path = settings_clone.get_workspace_path();
-                let problems = workspace::WorkspaceManager::list_problems(&ws_path);
+                let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
                 if !problems.is_empty() {
                     let cur_idx = problems.iter().position(|p| p.problem_id == active_id).unwrap_or(0);
                     let new_idx = if action == "next_task" {
@@ -166,15 +335,18 @@ fn run_daemon(port: u16) {
                     } else {
                         (cur_idx + problems.len() - 1) % problems.len()
                     };
-                    streamdeck_clone.set_active_problem(&problems[new_idx].problem_id);
+                    let new_pid = &problems[new_idx].problem_id;
+                    streamdeck_clone.set_active_problem_with_meta(new_pid, new_idx + 1, problems.len());
+                    open_in_vscode(&settings_clone, new_pid);
                 }
-            }
-            "open_menu" => {
-                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
-                let _ = std::process::Command::new(self_exe).spawn();
             }
             "kill_process" => {
                 if !active_id.is_empty() {
+                    let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
+                    let kill_script = p_dir.join(".algo").join("kill.sh");
+                    if kill_script.exists() {
+                        let _ = std::process::Command::new("bash").arg(kill_script).spawn();
+                    }
                     let _ = std::process::Command::new("pkill").arg("-f").arg(&active_id).output();
                     streamdeck_clone.update_key_status(8, "DANGER", Some("KILLED"));
                 }
@@ -186,8 +358,16 @@ fn run_daemon(port: u16) {
     // Ustaw początkowe aktywne zadanie na Stream Decku jeśli istnieje w workspace
     let ws_path = settings.get_workspace_path();
     let problems = workspace::WorkspaceManager::list_problems(&ws_path);
-    if let Some(first) = problems.first() {
-        streamdeck.set_active_problem(&first.problem_id);
+    if !problems.is_empty() {
+        let mut target_idx = 0;
+        if let Ok(saved) = std::fs::read_to_string("/tmp/algodeck_active_task.txt") {
+            let saved_clean = saved.trim().to_lowercase();
+            if let Some(pos) = problems.iter().position(|p| p.problem_id == saved_clean) {
+                target_idx = pos;
+            }
+        }
+        let prob = &problems[target_idx];
+        streamdeck.set_active_problem_with_meta(&prob.problem_id, target_idx + 1, problems.len());
     } else {
         streamdeck.set_idle_screen();
     }
