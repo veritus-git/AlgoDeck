@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AlgoDeck</title>
   <link rel="stylesheet" href="popup.css">
+  <script>
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get("auto_pdf")) {
+        document.documentElement.classList.add("detected-mode");
+      }
+    } catch (_) {}
+  </script>
 </head>
 <body>
   <div class="app-container">

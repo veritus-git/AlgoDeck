@@ -57,6 +57,12 @@ enum Commands {
 }
 
 fn main() {
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.iter().any(|a| a.starts_with("chrome-extension://")) {
+        native_host::run_native_host();
+        return;
+    }
+
     let cli = Cli::parse();
 
     match cli.command {

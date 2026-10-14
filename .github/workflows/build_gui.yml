@@ -91,9 +91,45 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Package icons
+      - name: Package Release Bundles
         run: |
-          cd frontend && zip -r ../dist/icons.zip icons && cd ..
+          # 1. Ogólna paczka assetów
+          zip -r dist/algodeck-assets.zip frontend extension
+
+          # 2. Samodzielna paczka dla Linux x86_64
+          mkdir -p dist/pkg-linux
+          cp dist/algodeck-linux-x86_64 dist/pkg-linux/algodeck
+          cp bootstrap.sh dist/pkg-linux/install.sh
+          chmod +x dist/pkg-linux/algodeck dist/pkg-linux/install.sh
+          cp -r frontend extension dist/pkg-linux/
+          tar -czf dist/algodeck-linux-x86_64.tar.gz -C dist/pkg-linux .
+          rm -rf dist/pkg-linux
+
+          # 3. Samodzielna paczka dla macOS Apple Silicon (arm64)
+          mkdir -p dist/pkg-macos-arm64
+          cp dist/algodeck-macos-arm64 dist/pkg-macos-arm64/algodeck
+          cp install_mac.sh dist/pkg-macos-arm64/install.sh
+          chmod +x dist/pkg-macos-arm64/algodeck dist/pkg-macos-arm64/install.sh
+          cp -r frontend extension dist/pkg-macos-arm64/
+          tar -czf dist/algodeck-macos-arm64.tar.gz -C dist/pkg-macos-arm64 .
+          rm -rf dist/pkg-macos-arm64
+
+          # 4. Samodzielna paczka dla macOS Intel (x86_64)
+          mkdir -p dist/pkg-macos-x86_64
+          cp dist/algodeck-macos-x86_64 dist/pkg-macos-x86_64/algodeck
+          cp install_mac.sh dist/pkg-macos-x86_64/install.sh
+          chmod +x dist/pkg-macos-x86_64/algodeck dist/pkg-macos-x86_64/install.sh
+          cp -r frontend extension dist/pkg-macos-x86_64/
+          tar -czf dist/algodeck-macos-x86_64.tar.gz -C dist/pkg-macos-x86_64 .
+          rm -rf dist/pkg-macos-x86_64
+
+          # 5. Samodzielna paczka dla Windows x86_64
+          mkdir -p dist/pkg-win
+          cp dist/algodeck-windows-x86_64.exe dist/pkg-win/algodeck.exe
+          cp install_win.ps1 install.bat dist/pkg-win/
+          cp -r frontend extension dist/pkg-win/
+          (cd dist/pkg-win && zip -r ../algodeck-windows-x86_64.zip .)
+          rm -rf dist/pkg-win
 
       - name: Verify artifacts
         run: ls -la dist/
@@ -118,11 +154,19 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release_tag.outputs.name }}
           body: |
-            Natywne pojedyncze binarki AlgoDeck (100% Rust) skompilowane dla wszystkich platform:
-            - **Linux x86_64:** `algodeck-linux-x86_64`
-            - **macOS Apple Silicon:** `algodeck-macos-arm64`
-            - **macOS Intel:** `algodeck-macos-x86_64`
-            - **Windows x86_64:** `algodeck-windows-x86_64.exe`
+            ### ⚡ AlgoDeck v2.0.0 — 100% Rust Olympic Programming Engine & Stream Deck Controller
+
+            Natywne pakiety instalacyjne i binarki dla wszystkich platform:
+            - **Linux x86_64 (Samodzielna paczka z instalatorem):** `algodeck-linux-x86_64.tar.gz`
+            - **macOS Apple Silicon (Samodzielna paczka z instalatorem):** `algodeck-macos-arm64.tar.gz`
+            - **macOS Intel (Samodzielna paczka z instalatorem):** `algodeck-macos-x86_64.tar.gz`
+            - **Windows x86_64 (Samodzielna paczka z instalatorem):** `algodeck-windows-x86_64.zip`
+            
+            Pojedyncze binarki:
+            - `algodeck-linux-x86_64`
+            - `algodeck-macos-arm64`
+            - `algodeck-macos-x86_64`
+            - `algodeck-windows-x86_64.exe`
             
             Wersja: `${{ steps.release_tag.outputs.tag }}`
             Commit: `${{ github.sha }}`

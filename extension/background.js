@@ -315,8 +315,8 @@ function createDedicatedPopup(filename) {
     chrome.windows.create({
       url: targetUrl,
       type: "popup",
-      width: 395,
-      height: 185,
+      width: 405,
+      height: 215,
       focused: true
     }, (win) => {
       isOpeningWindow = false;

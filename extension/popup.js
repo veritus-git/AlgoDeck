@@ -76,6 +76,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const isDetected = await checkDetectedMode();
   if (!isDetected) {
+    document.documentElement.classList.remove("detected-mode");
     document.body.classList.remove("detected-mode");
     viewDetected.classList.add("hidden");
 
@@ -305,6 +306,7 @@ async function checkDetectedMode() {
     if (urlParams.get("auto_pdf")) {
       window.close();
     } else {
+      document.documentElement.classList.remove("detected-mode");
       document.body.classList.remove("detected-mode");
       viewDetected.classList.add("hidden");
       viewMain.classList.remove("hidden");
