@@ -98,8 +98,7 @@ mkdir -p "$HOME/.local/bin"
 mkdir -p "$HOME/.local/share/algodeck"
 
 (cd "$REPO_DIR" && cargo build --release)
-cp "$REPO_DIR/target/release/algodeck" "$HOME/.local/bin/algodeck"
-chmod +x "$HOME/.local/bin/algodeck"
+install -m 755 "$REPO_DIR/target/release/algodeck" "$HOME/.local/bin/algodeck"
 echo -e "${GREEN}✓ Binarka algodeck zainstalowana w ~/.local/bin/algodeck (35MB, 0 runtime dependencies).${NC}"
 
 # 5. Uprawnienia USB HID dla Stream Decka (udev)

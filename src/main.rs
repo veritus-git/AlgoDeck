@@ -150,7 +150,8 @@ fn run_daemon(port: u16) {
                 }
             }
             "open_menu" => {
-                let _ = std::process::Command::new("algodeck").spawn();
+                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
+                let _ = std::process::Command::new(self_exe).spawn();
             }
             "kill_process" => {
                 if !active_id.is_empty() {
@@ -207,6 +208,22 @@ fn start_detached_daemon() {
         Err(_) => {}
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::process::Command::new("systemctl")
+            .args(["--user", "start", "algodeck.service"])
+            .status();
+        if let Ok(s) = status {
+            if s.success() {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(500)).call().is_ok() {
+                    println!("✓ Usługa algodeck.service została uruchomiona przez systemd!");
+                    return;
+                }
+            }
+        }
+    }
+
     println!("⚡ Uruchamianie daemona AlgoDeck w tle...");
     let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
     match std::process::Command::new(self_exe).arg("daemon").spawn() {
@@ -224,6 +241,7 @@ fn stop_daemon() {
     let _ = ureq::post("http://127.0.0.1:8080/api/shutdown").timeout(std::time::Duration::from_millis(800)).call();
     #[cfg(target_os = "linux")]
     {
+        let _ = std::process::Command::new("systemctl").args(["--user", "stop", "algodeck.service"]).output();
         let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck daemon").output();
         let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck-gui").output();
     }

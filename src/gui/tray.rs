@@ -150,13 +150,15 @@ pub fn acquire_tray_lock() -> bool {
 }
 
 pub fn open_control_panel() {
-    let _ = Command::new("algodeck").spawn();
+    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
+    let _ = Command::new(self_exe).spawn();
 }
 
 pub fn stop_algodeck() {
     let pid_file = std::env::temp_dir().join("algodeck_tray.pid");
     let _ = std::fs::remove_file(pid_file);
-    let _ = Command::new("algodeck").arg("stop").spawn();
+    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
+    let _ = Command::new(self_exe).arg("stop").spawn();
 }
 
 #[cfg(target_os = "linux")]

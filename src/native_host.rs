@@ -31,18 +31,19 @@ pub fn run_native_host() {
 
 fn handle_native_message(msg: &Value) -> Value {
     let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("start");
+    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
 
     match action {
         "start" => {
-            let _ = Command::new("algodeck").arg("start").spawn();
+            let _ = Command::new(&self_exe).arg("start").spawn();
             serde_json::json!({ "success": true, "status": "starting" })
         }
         "stop" => {
-            let _ = Command::new("algodeck").arg("stop").spawn();
+            let _ = Command::new(&self_exe).arg("stop").spawn();
             serde_json::json!({ "success": true, "status": "stopping" })
         }
         "gui" => {
-            let _ = Command::new("algodeck").spawn();
+            let _ = Command::new(&self_exe).spawn();
             serde_json::json!({ "success": true, "status": "gui_launched" })
         }
         "open_vscode" => {

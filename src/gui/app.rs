@@ -258,8 +258,12 @@ impl AlgoDeckGuiApp {
 
             if response.clicked() && !self.is_starting_daemon {
                 self.is_starting_daemon = true;
-                // Spawns daemon
-                let _ = Command::new("algodeck").arg("daemon").spawn();
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = Command::new("systemctl").args(["--user", "start", "algodeck.service"]).spawn();
+                }
+                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
+                let _ = Command::new(self_exe).arg("daemon").spawn();
                 self.set_status("Uruchamianie AlgoDeck i Stream Decka w tle...", false);
             }
         });
