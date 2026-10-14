@@ -170,6 +170,12 @@ impl AppSettings {
     }
 
     pub fn staging_dir() -> PathBuf {
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                return PathBuf::from(local).join("AlgoDeck").join("staging");
+            }
+        }
         if let Some(home) = dirs::home_dir() {
             home.join(".local").join("share").join("algodeck").join("staging")
         } else {

@@ -60,11 +60,9 @@ pub struct ManualTaskRequest {
     pub sample_cout: String,
 }
 
-#[derive(Deserialize)]
-pub struct StageFileRequest {
-    pub file_path: String,
-    #[allow(dead_code)]
-    pub file_type: String,
+#[derive(Deserialize, Default)]
+pub struct ClearStagedRequest {
+    pub file_type: Option<String>,
 }
 
 pub fn create_router(app_state: AppState) -> Router {
@@ -80,9 +78,10 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/create-manual", post(create_manual))
         .route("/staged-state", get(get_staged_state))
         .route("/stage-file", post(stage_file))
-        .route("/upload-staging", post(upload_staging))
+        .route("/upload-staging", post(stage_file))
         .route("/clear-staged", post(clear_staged))
         .route("/start-staged", post(start_staged))
+        .route("/create-from-staging", post(start_staged))
         .route("/set-active/:id", post(set_active))
         .route("/open-vscode/:id", post(open_vscode))
         .route("/switch-task/:direction", post(switch_task))
@@ -336,17 +335,43 @@ async fn auto_import_pdf(
     State(state): State<AppState>,
     Json(req): Json<AutoImportRequest>,
 ) -> Json<serde_json::Value> {
-    let path = Path::new(&req.file_path);
+    let mut path = PathBuf::from(&req.file_path);
     if !path.exists() {
-        return Json(serde_json::json!({ "success": false, "detail": "Plik PDF nie istnieje" }));
+        if let Some(fname) = Path::new(&req.file_path).file_name() {
+            if let Some(dl) = dirs::download_dir() {
+                let candidate = dl.join(fname);
+                if candidate.exists() {
+                    path = candidate;
+                }
+            }
+        }
     }
 
-    let text = match PdfParser::extract_text_from_file(path) {
-        Ok(t) => t,
-        Err(e) => return Json(serde_json::json!({ "success": false, "detail": e })),
+    if !path.exists() {
+        return Json(serde_json::json!({ "success": false, "detail": "Plik zadania nie istnieje na dysku" }));
+    }
+
+    let is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
+    let is_zip = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
+
+    let mut analysis = if is_pdf {
+        let text = match PdfParser::extract_text_from_file(&path) {
+            Ok(t) => t,
+            Err(e) => return Json(serde_json::json!({ "success": false, "detail": e })),
+        };
+        PdfParser::parse_heuristics(&text)
+    } else {
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("zad").to_lowercase();
+        ProblemAnalysis {
+            problem_id: stem.clone(),
+            title: stem,
+            time_limit_sec: 1.0,
+            memory_limit_mb: 128,
+            tests: Vec::new(),
+            used_engine: "Import z archiwum ZIP".to_string(),
+        }
     };
 
-    let mut analysis = PdfParser::parse_heuristics(&text);
     if let Some(pid) = req.problem_id {
         if !pid.trim().is_empty() {
             analysis.problem_id = pid.trim().to_lowercase();
@@ -366,11 +391,19 @@ async fn auto_import_pdf(
 
     if req.auto_create {
         let ws_dir = state.settings.read().unwrap().get_workspace_path();
-        match WorkspaceManager::create_problem(&ws_dir, &analysis, Some(path)) {
+        let pdf_arg = if is_pdf { Some(path.as_path()) } else { None };
+        match WorkspaceManager::create_problem(&ws_dir, &analysis, pdf_arg) {
             Ok(_) => {
+                if is_zip {
+                    if let Ok(bytes) = fs::read(&path) {
+                        let _ = WorkspaceManager::add_tests_from_zip(&ws_dir, &analysis.problem_id, &bytes);
+                    }
+                }
+                state.streamdeck.set_active_problem(&analysis.problem_id);
+                let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
                 let (split_pdf, pdf_pos) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode, s.pdf_position.clone())
+                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone())
                 };
                 open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos);
                 Json(serde_json::json!({
@@ -436,7 +469,9 @@ async fn create_manual(
 async fn get_staged_state() -> Json<serde_json::Value> {
     let stage_dir = AppSettings::staging_dir();
     let mut pdf_path: Option<String> = None;
+    let mut pdf_filename: Option<String> = None;
     let mut zip_path: Option<String> = None;
+    let mut zip_filename: Option<String> = None;
     let mut problem_id: Option<String> = None;
     let mut title: Option<String> = None;
     let mut time_limit_sec: Option<f64> = None;
@@ -450,6 +485,7 @@ async fn get_staged_state() -> Json<serde_json::Value> {
                 if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
                     if ext.eq_ignore_ascii_case("pdf") {
                         pdf_path = Some(p.to_string_lossy().to_string());
+                        pdf_filename = p.file_name().map(|f| f.to_string_lossy().to_string());
                         if let Ok(text) = PdfParser::extract_text_from_file(&p) {
                             let analysis = PdfParser::parse_heuristics(&text);
                             problem_id = Some(analysis.problem_id);
@@ -460,6 +496,19 @@ async fn get_staged_state() -> Json<serde_json::Value> {
                         }
                     } else if ext.eq_ignore_ascii_case("zip") {
                         zip_path = Some(p.to_string_lossy().to_string());
+                        zip_filename = p.file_name().map(|f| f.to_string_lossy().to_string());
+                        if let Ok(bytes) = fs::read(&p) {
+                            let reader = std::io::Cursor::new(bytes);
+                            if let Ok(mut archive) = zip::ZipArchive::new(reader) {
+                                for i in 0..archive.len() {
+                                    if let Ok(file) = archive.by_index(i) {
+                                        if file.name().to_lowercase().ends_with(".in") {
+                                            tests_count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -467,10 +516,15 @@ async fn get_staged_state() -> Json<serde_json::Value> {
     }
 
     Json(serde_json::json!({
+        "success": true,
+        "has_pdf": pdf_path.is_some(),
         "has_staged_pdf": pdf_path.is_some(),
-        "has_staged_zip": zip_path.is_some(),
         "pdf_path": pdf_path,
+        "pdf_filename": pdf_filename,
+        "has_zip": zip_path.is_some(),
+        "has_staged_zip": zip_path.is_some(),
         "zip_path": zip_path,
+        "zip_filename": zip_filename,
         "problem_id": problem_id,
         "title": title,
         "time_limit_sec": time_limit_sec.unwrap_or(1.0),
@@ -479,50 +533,125 @@ async fn get_staged_state() -> Json<serde_json::Value> {
     }))
 }
 
-async fn stage_file(Json(req): Json<StageFileRequest>) -> Json<serde_json::Value> {
-    let src = Path::new(&req.file_path);
-    if !src.exists() {
-        return Json(serde_json::json!({ "success": false, "error": "Plik źródłowy nie istnieje" }));
-    }
-
+async fn stage_file(
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let stage_dir = AppSettings::staging_dir();
     let _ = fs::create_dir_all(&stage_dir);
 
-    let fname = src.file_name().unwrap_or_default();
-    let dest = stage_dir.join(fname);
-    let _ = fs::copy(src, &dest);
-
-    Json(serde_json::json!({ "success": true, "path": dest.to_string_lossy() }))
-}
-
-async fn upload_staging(mut multipart: Multipart) -> Result<Json<serde_json::Value>, StatusCode> {
-    let stage_dir = AppSettings::staging_dir();
-    let _ = fs::create_dir_all(&stage_dir);
+    let mut saved_filename = String::new();
+    let mut file_type = String::new();
+    let mut target_path = PathBuf::new();
+    let mut file_bytes = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
-        let name = field.file_name().unwrap_or("upload").to_string();
-        let target = stage_dir.join(&name);
-        if let Ok(bytes) = field.bytes().await {
-            let _ = fs::write(target, bytes);
-        }
-    }
-
-    Ok(Json(serde_json::json!({ "success": true })))
-}
-
-async fn clear_staged() -> Json<serde_json::Value> {
-    let stage_dir = AppSettings::staging_dir();
-    if stage_dir.exists() {
-        if let Ok(entries) = fs::read_dir(&stage_dir) {
-            for e in entries.flatten() {
-                let _ = fs::remove_file(e.path());
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file_type" {
+            if let Ok(text) = field.text().await {
+                file_type = text.trim().to_lowercase();
+            }
+        } else if name == "file" || field.file_name().is_some() {
+            let fname = field.file_name().unwrap_or("staged_file").to_string();
+            let clean_fname = Path::new(&fname)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "staged_file".to_string());
+            saved_filename = clean_fname.clone();
+            target_path = stage_dir.join(&clean_fname);
+            if let Ok(bytes) = field.bytes().await {
+                file_bytes = bytes.to_vec();
+                let _ = fs::write(&target_path, &file_bytes);
             }
         }
     }
-    Json(serde_json::json!({ "success": true }))
+
+    if saved_filename.is_empty() || file_bytes.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "success": false, "detail": "Nie przesłano poprawnego pliku" })),
+        ));
+    }
+
+    let is_pdf = file_type == "pdf" || saved_filename.to_lowercase().ends_with(".pdf");
+    let is_zip = file_type == "zip" || saved_filename.to_lowercase().ends_with(".zip");
+
+    let mut problem_id = None;
+    let mut title = None;
+    let mut time_limit_sec = 1.0;
+    let mut memory_limit_mb = 128;
+    let mut tests_count = 0;
+
+    if is_pdf {
+        if let Ok(text) = PdfParser::extract_text_from_file(&target_path) {
+            let analysis = PdfParser::parse_heuristics(&text);
+            problem_id = Some(analysis.problem_id);
+            title = Some(analysis.title);
+            time_limit_sec = analysis.time_limit_sec;
+            memory_limit_mb = analysis.memory_limit_mb;
+            tests_count = analysis.tests.len();
+        }
+    } else if is_zip {
+        let reader = std::io::Cursor::new(&file_bytes);
+        if let Ok(mut archive) = zip::ZipArchive::new(reader) {
+            for i in 0..archive.len() {
+                if let Ok(file) = archive.by_index(i) {
+                    if file.name().to_lowercase().ends_with(".in") {
+                        tests_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "filename": saved_filename,
+        "file_type": if is_pdf { "pdf" } else if is_zip { "zip" } else { "other" },
+        "path": target_path.to_string_lossy(),
+        "has_pdf": is_pdf,
+        "has_staged_pdf": is_pdf,
+        "pdf_filename": if is_pdf { Some(&saved_filename) } else { None },
+        "has_zip": is_zip,
+        "has_staged_zip": is_zip,
+        "zip_filename": if is_zip { Some(&saved_filename) } else { None },
+        "problem_id": problem_id,
+        "title": title,
+        "time_limit_sec": time_limit_sec,
+        "memory_limit_mb": memory_limit_mb,
+        "tests_count": tests_count,
+    })))
 }
 
-async fn start_staged(State(state): State<AppState>) -> Json<serde_json::Value> {
+async fn clear_staged(
+    body: Option<Json<ClearStagedRequest>>,
+) -> Json<serde_json::Value> {
+    let stage_dir = AppSettings::staging_dir();
+    let filter_type = body.and_then(|b| b.file_type.clone());
+
+    if stage_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&stage_dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                let should_remove = match filter_type.as_deref() {
+                    Some("pdf") => ext == "pdf",
+                    Some("zip") => ext == "zip",
+                    _ => true,
+                };
+                if should_remove {
+                    let _ = fs::remove_file(p);
+                }
+            }
+        }
+    }
+
+    get_staged_state().await
+}
+
+async fn start_staged(
+    State(state): State<AppState>,
+    body: Option<Json<serde_json::Value>>,
+) -> Json<serde_json::Value> {
     let stage_dir = AppSettings::staging_dir();
     let mut pdf_file: Option<PathBuf> = None;
     let mut zip_file: Option<PathBuf> = None;
@@ -546,29 +675,52 @@ async fn start_staged(State(state): State<AppState>) -> Json<serde_json::Value> 
         return Json(serde_json::json!({ "success": false, "error": "Brak plików w stagingu" }));
     }
 
+    let mut custom_pid: Option<String> = None;
+    let mut custom_title: Option<String> = None;
+    if let Some(Json(ref b)) = body {
+        if let Some(pid) = b.get("problem_id").and_then(|v| v.as_str()) {
+            if !pid.trim().is_empty() {
+                custom_pid = Some(pid.trim().to_lowercase());
+            }
+        }
+        if let Some(t) = b.get("title").and_then(|v| v.as_str()) {
+            if !t.trim().is_empty() {
+                custom_title = Some(t.trim().to_string());
+            }
+        }
+    }
+
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
 
-    if let Some(pdf) = pdf_file {
-        if let Ok(text) = PdfParser::extract_text_from_file(&pdf) {
-            let analysis = PdfParser::parse_heuristics(&text);
-            let _p_dir = match WorkspaceManager::create_problem(&ws_dir, &analysis, Some(&pdf)) {
+    if let Some(ref pdf) = pdf_file {
+        if let Ok(text) = PdfParser::extract_text_from_file(pdf) {
+            let mut analysis = PdfParser::parse_heuristics(&text);
+            if let Some(ref pid) = custom_pid {
+                analysis.problem_id = pid.clone();
+            }
+            if let Some(ref t) = custom_title {
+                analysis.title = t.clone();
+            }
+
+            let _p_dir = match WorkspaceManager::create_problem(&ws_dir, &analysis, Some(pdf)) {
                 Ok(p) => p,
                 Err(e) => return Json(serde_json::json!({ "success": false, "error": e })),
             };
 
-            if let Some(zip) = zip_file {
-                if let Ok(bytes) = fs::read(&zip) {
+            if let Some(ref zip) = zip_file {
+                if let Ok(bytes) = fs::read(zip) {
                     let _ = WorkspaceManager::add_tests_from_zip(&ws_dir, &analysis.problem_id, &bytes);
                 }
             }
 
             state.streamdeck.set_active_problem(&analysis.problem_id);
+            let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
             let (split_pdf, pdf_pos) = {
                 let s = state.settings.read().unwrap();
                 (s.open_pdf_in_vscode, s.pdf_position.clone())
             };
             open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos);
-            let _ = clear_staged().await;
+            let _ = clear_staged(None).await;
 
             return Json(serde_json::json!({
                 "success": true,
@@ -576,6 +728,43 @@ async fn start_staged(State(state): State<AppState>) -> Json<serde_json::Value> 
                 "title": analysis.title,
             }));
         }
+    } else if let Some(ref zip) = zip_file {
+        let fallback_pid = custom_pid.unwrap_or_else(|| {
+            zip.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("zad")
+                .to_lowercase()
+        });
+        let fallback_title = custom_title.unwrap_or_else(|| fallback_pid.clone());
+
+        let analysis = ProblemAnalysis {
+            problem_id: fallback_pid.clone(),
+            title: fallback_title.clone(),
+            time_limit_sec: 1.0,
+            memory_limit_mb: 128,
+            tests: Vec::new(),
+            used_engine: "Import z archiwum ZIP".to_string(),
+        };
+
+        let _p_dir = match WorkspaceManager::create_problem(&ws_dir, &analysis, None) {
+            Ok(p) => p,
+            Err(e) => return Json(serde_json::json!({ "success": false, "error": e })),
+        };
+
+        if let Ok(bytes) = fs::read(zip) {
+            let _ = WorkspaceManager::add_tests_from_zip(&ws_dir, &analysis.problem_id, &bytes);
+        }
+
+        state.streamdeck.set_active_problem(&analysis.problem_id);
+        let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
+        open_in_vscode_internal(&analysis.problem_id, &ws_dir, false, "right");
+        let _ = clear_staged(None).await;
+
+        return Json(serde_json::json!({
+            "success": true,
+            "problem_id": analysis.problem_id,
+            "title": analysis.title,
+        }));
     }
 
     Json(serde_json::json!({ "success": false, "error": "Nie udało się sparsować pliku" }))

@@ -280,25 +280,77 @@ async function processDownload(downloadId) {
         });
       }
     } catch (e) {}
+
+    // Automatyczne otwarcie dedykowanego okienka 1-kliknięcia
+    openDedicatedNotificationWindow(filename);
   });
+}
+
+function openDedicatedNotificationWindow(filename) {
+  if (!filename) return;
+  if (isOpeningWindow) return;
+
+  if (activeNotificationWindowId !== null) {
+    if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.get) {
+      chrome.windows.get(activeNotificationWindowId, (win) => {
+        if (!chrome.runtime.lastError && win) {
+          chrome.windows.update(activeNotificationWindowId, { focused: true });
+        } else {
+          activeNotificationWindowId = null;
+          createDedicatedPopup(filename);
+        }
+      });
+      return;
+    }
+  }
+
+  createDedicatedPopup(filename);
+}
+
+function createDedicatedPopup(filename) {
+  isOpeningWindow = true;
+  const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}`);
+  
+  if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.create) {
+    chrome.windows.create({
+      url: targetUrl,
+      type: "popup",
+      width: 390,
+      height: 185,
+      focused: true
+    }, (win) => {
+      isOpeningWindow = false;
+      if (win && win.id) {
+        activeNotificationWindowId = win.id;
+      }
+    });
+  } else {
+    isOpeningWindow = false;
+  }
 }
 
 // Obsługa kliknięcia w powiadomienie Chrome
 if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {
   chrome.notifications.onClicked.addListener((notifId) => {
-    if (notifId.startsWith("algodeck_")) {
+    if (notifId && notifId.startsWith("algodeck_")) {
       chrome.notifications.clear(notifId);
       try {
         if (chrome.action && chrome.action.setBadgeText) {
           chrome.action.setBadgeText({ text: "" });
         }
       } catch (_) {}
-      chrome.windows.create({
-        url: chrome.runtime.getURL("popup.html"),
-        type: "popup",
-        width: 440,
-        height: 620,
-        focused: true
+      chrome.storage.local.get(["auto_pdf"], (data) => {
+        if (data && data.auto_pdf) {
+          openDedicatedNotificationWindow(data.auto_pdf);
+        } else {
+          chrome.windows.create({
+            url: chrome.runtime.getURL("popup.html"),
+            type: "popup",
+            width: 390,
+            height: 600,
+            focused: true
+          });
+        }
       });
     }
   });
@@ -371,17 +423,6 @@ if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onChan
     } else if (delta.filename && !delta.filename.current.endsWith(".crdownload")) {
       processDownload(delta.id);
     }
-  });
-}
-
-// Kliknięcie w powiadomienie systemowe
-if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {
-  chrome.notifications.onClicked.addListener((notifId) => {
-    chrome.storage.local.get(["auto_pdf"], (data) => {
-      if (data.auto_pdf) {
-        openDedicatedNotificationWindow(data.auto_pdf);
-      }
-    });
   });
 }
 

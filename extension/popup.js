@@ -184,11 +184,24 @@ async function checkDaemonHealth() {
 // ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
   const urlParams = new URLSearchParams(window.location.search);
-  const autoPdf = urlParams.get("auto_pdf");
+  let autoPdf = urlParams.get("auto_pdf");
 
-  // KLUCZOWE: Wyświetlaj widok wykrytego zadania TYLKO i WYŁĄCZNIE wtedy,
-  // gdy to okno zostało bezpośrednio otwarte jako powiadomienie z parametrem ?auto_pdf=...
-  // Zwykłe kliknięcie w ikonę rozszerzenia NIGDY nie wyświetla fałszywego powiadomienia!
+  // Jeśli brak parametru w URL (np. kliknięcie w ikonę rozszerzenia na pasku),
+  // sprawdź czy w storage jest świeżo wykryte pobranie zadania (< 90 sekund)
+  if (!autoPdf) {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
+        if (stored.auto_pdf && stored.auto_pdf_ts) {
+          const age = Date.now() - stored.auto_pdf_ts;
+          if (age < 90000) {
+            autoPdf = stored.auto_pdf;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   if (!autoPdf) return false;
 
   document.body.classList.add("detected-mode");
@@ -197,14 +210,19 @@ async function checkDetectedMode() {
   viewDetected.classList.remove("hidden");
 
   const baseName = autoPdf.replace(/^.*[\\\/]/, '');
+  const isZip = baseName.toLowerCase().endsWith(".zip");
   const cleanStem = baseName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().slice(0, 5);
   let problemCode = cleanStem.toUpperCase() || "ZAD";
 
+  const detBoxTitle = document.getElementById("det-box-title");
   const detFilenameText = document.getElementById("det-filename-text");
   const detCodeText = document.getElementById("det-code-text");
   const btnDetClose = document.getElementById("btn-det-close");
   const btnDetOneclick = document.getElementById("btn-det-oneclick");
 
+  if (detBoxTitle) {
+    detBoxTitle.textContent = isZip ? "Wykryto archiwum z testami (.zip)" : "Wykryto nowe zadanie PDF";
+  }
   detFilenameText.textContent = baseName;
   detCodeText.textContent = problemCode;
 
@@ -252,10 +270,13 @@ async function checkDetectedMode() {
         btnDetOneclick.innerHTML = `<span>✓ Otwarto zadanie [${pid.toUpperCase()}] w VS Code!</span>`;
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
           chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
+          if (chrome.action && chrome.action.setBadgeText) {
+            chrome.action.setBadgeText({ text: "" });
+          }
         }
         setTimeout(() => window.close(), 1200);
       } else {
-        alert(data.detail || "Błąd podczas tworzenia workspace");
+        alert(data.detail || data.error || "Błąd podczas tworzenia workspace");
         btnDetOneclick.disabled = false;
         btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
       }
@@ -276,8 +297,19 @@ async function checkDetectedMode() {
     } catch (_) {}
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
       chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip", "algodeck_staged_pdf", "algodeck_staged_zip"]);
+      if (chrome.action && chrome.action.setBadgeText) {
+        chrome.action.setBadgeText({ text: "" });
+      }
     }
-    window.close();
+    if (urlParams.get("auto_pdf")) {
+      window.close();
+    } else {
+      document.body.classList.remove("detected-mode");
+      viewDetected.classList.add("hidden");
+      viewMain.classList.remove("hidden");
+      checkDaemonHealth();
+      loadExistingStagedState();
+    }
   };
 
   return true;
@@ -378,7 +410,7 @@ function setupStaging() {
     btnSubmitFiles.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace i VS Code...`;
 
     try {
-      const res = await fetch(`${API_BASE}/api/create-from-staging`, {
+      const res = await fetch(`${API_BASE}/api/start-staged`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({})
@@ -403,7 +435,7 @@ function setupStaging() {
         btnSubmitFiles.innerHTML = `<span>✓ Otwarto zadanie [${pid.toUpperCase()}] w VS Code!</span>`;
         setTimeout(() => window.close(), 1200);
       } else {
-        showToast(data.detail || "Błąd tworzenia workspace z plików.", true);
+        showToast(data.error || data.detail || "Błąd tworzenia workspace z plików.", true);
         btnSubmitFiles.disabled = false;
         btnSubmitFiles.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code`;
       }
@@ -499,7 +531,7 @@ async function uploadStagedFile(file, type) {
     const data = await res.json();
     progressEl.classList.add("hidden");
 
-    if (res.ok) {
+    if (res.ok && (data.success || data.path)) {
       if (isPdf) {
         nameEl.textContent = file.name;
         hasPdfStaged = true;
@@ -516,7 +548,7 @@ async function uploadStagedFile(file, type) {
       updateFilesSubmitBtn();
     } else {
       bodyEl.classList.remove("hidden");
-      showToast(data.detail || "Błąd podczas przesyłania pliku.", true);
+      showToast(data.detail || data.error || "Błąd podczas przesyłania pliku.", true);
     }
   } catch (err) {
     progressEl.classList.add("hidden");
@@ -530,9 +562,10 @@ async function loadExistingStagedState() {
     const res = await fetch(`${API_BASE}/api/staged-state`);
     if (res.ok) {
       const state = await res.json();
-      if (state.has_pdf) {
+      const hasPdf = state.has_pdf || state.has_staged_pdf;
+      if (hasPdf) {
         hasPdfStaged = true;
-        const pdfName = state.pdf_filename || "zadanie.pdf";
+        const pdfName = state.pdf_filename || (state.pdf_path ? state.pdf_path.replace(/^.*[\\\/]/, '') : "zadanie.pdf");
         stagedPdfName.textContent = pdfName;
         dropPdfBody.classList.add("hidden");
         stagedPdfPill.classList.remove("hidden");
@@ -544,9 +577,11 @@ async function loadExistingStagedState() {
         clearStagedStorage("pdf");
       }
 
-      if (state.has_zip) {
+      const hasZip = state.has_zip || state.has_staged_zip;
+      if (hasZip) {
         hasZipStaged = true;
-        const zipName = `${state.zip_filename || "testy.zip"} (${state.tests_count || 0} testów)`;
+        const zipFile = state.zip_filename || (state.zip_path ? state.zip_path.replace(/^.*[\\\/]/, '') : "testy.zip");
+        const zipName = `${zipFile} (${state.tests_count || 0} testów)`;
         stagedZipName.textContent = zipName;
         dropZipBody.classList.add("hidden");
         stagedZipPill.classList.remove("hidden");
