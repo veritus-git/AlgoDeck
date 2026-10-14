@@ -41,7 +41,7 @@ elif command -v sudo &> /dev/null; then
         HAS_SUDO=true
     else
         echo -e "${YELLOW}Weryfikacja uprawnień administratora (sudo) dla pakietów i udev...${NC}"
-        if sudo -v 2>/dev/null; then
+        if sudo -v </dev/tty 2>/dev/null; then
             HAS_SUDO=true
             while true; do sudo -n true; sleep 40; kill -0 "$$" || exit; done 2>/dev/null &
         else

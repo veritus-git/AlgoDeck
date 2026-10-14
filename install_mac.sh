@@ -26,7 +26,7 @@ echo ""
 echo "       ⚡  K O Ł O   M A P   -   O L I M P I C K I E   C + +  ⚡"
 echo "       ⚡       100% RUST ENGINE  |  STREAM DECK HID        ⚡"
 echo -e "${NC}"
-echo -e "${BOLD}AlgoDeck ⚡ Koło MAP - Oficjalny Instalator dla macOS (100% Rust)$${NC}"
+echo -e "${BOLD}AlgoDeck ⚡ Koło MAP - Oficjalny Instalator dla macOS (100% Rust)${NC}"
 echo -e "Weryfikacja kompilatora C++, Stream Deck USB HID, VS Code, daemona i rozszerzenia...\n"
 
 if [ "$(uname -s)" != "Darwin" ]; then
