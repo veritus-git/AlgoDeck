@@ -143,13 +143,7 @@ async fn post_settings(
 }
 
 async fn open_gui() -> Json<serde_json::Value> {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("algodeck || ~/.local/bin/algodeck || target/release/algodeck &")
-            .spawn();
-    }
+    let _ = open::that("http://127.0.0.1:8080/");
     Json(serde_json::json!({ "success": true }))
 }
 
@@ -497,13 +491,15 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
             }
         }
 
-        let win_code_cmd = std::env::var("LOCALAPPDATA")
-            .map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd"))
-            .ok();
+        let win_candidates = [
+            std::env::var("LOCALAPPDATA").ok().map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd")),
+            std::env::var("ProgramFiles").ok().map(|p| std::path::PathBuf::from(p).join("Microsoft VS Code/bin/code.cmd")),
+            std::env::var("ProgramFiles(x86)").ok().map(|p| std::path::PathBuf::from(p).join("Microsoft VS Code/bin/code.cmd")),
+        ];
 
-        if let Some(ref code_path) = win_code_cmd {
-            if code_path.exists() {
-                let _ = std::process::Command::new(code_path).args(&args).spawn();
+        for cand in win_candidates.into_iter().flatten() {
+            if cand.exists() {
+                let _ = std::process::Command::new(cand).args(&args).spawn();
                 return;
             }
         }
@@ -704,6 +700,28 @@ async fn press_streamdeck_key(
             "run_all" => {
                 let _ = state.runner.run_all_tests(&active_id);
             }
+            "run_interactive" => {
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+                    let _ = std::process::Command::new("x-terminal-emulator")
+                        .args(["-e", &format!("algodeck run {}", active_id)])
+                        .env("DISPLAY", &display)
+                        .spawn();
+                }
+            }
+            "kill_process" => {
+                if !active_id.is_empty() {
+                    let _ = std::process::Command::new("pkill").arg("-f").arg(&active_id).output();
+                    state.streamdeck.update_key_status(8, "DANGER", Some("KILLED"));
+                }
+            }
+            "new_task" => {
+                let _ = open::that("http://127.0.0.1:8080/#new");
+            }
+            "open_settings" => {
+                let _ = open::that("http://127.0.0.1:8080/settings");
+            }
             "open_menu" => {
                 let problems = WorkspaceManager::list_problems(&ws_dir);
                 let pids: Vec<String> = problems.into_iter().map(|p| p.problem_id).collect();
@@ -727,7 +745,7 @@ async fn press_streamdeck_key(
                     state.streamdeck.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
                     open_in_vscode_internal(&first.problem_id, &ws_dir, true);
                 } else {
-                    let _ = open_gui().await;
+                    let _ = open::that("http://127.0.0.1:8080/");
                 }
             }
             "prev_task" => {

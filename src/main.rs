@@ -183,13 +183,15 @@ fn run_daemon(port: u16) {
                 }
             }
 
-            let win_code_cmd = std::env::var("LOCALAPPDATA")
-                .map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd"))
-                .ok();
+            let win_candidates = [
+                std::env::var("LOCALAPPDATA").ok().map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd")),
+                std::env::var("ProgramFiles").ok().map(|p| std::path::PathBuf::from(p).join("Microsoft VS Code/bin/code.cmd")),
+                std::env::var("ProgramFiles(x86)").ok().map(|p| std::path::PathBuf::from(p).join("Microsoft VS Code/bin/code.cmd")),
+            ];
 
-            if let Some(ref code_path) = win_code_cmd {
-                if code_path.exists() {
-                    let _ = std::process::Command::new(code_path).args(&args).spawn();
+            for cand in win_candidates.into_iter().flatten() {
+                if cand.exists() {
+                    let _ = std::process::Command::new(cand).args(&args).spawn();
                     return;
                 }
             }
@@ -336,20 +338,10 @@ fn run_daemon(port: u16) {
                 }
             }
             "new_task" => {
-                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/home/linux/.local/bin/algodeck"));
-                let mut cmd = std::process::Command::new(self_exe);
-                cmd.arg("--tab=new");
-                cmd.env("DISPLAY", &display);
-                cmd.env("XAUTHORITY", &xauthority);
-                let _ = cmd.spawn();
+                let _ = open::that("http://127.0.0.1:8080/#new");
             }
             "open_settings" => {
-                let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/home/linux/.local/bin/algodeck"));
-                let mut cmd = std::process::Command::new(self_exe);
-                cmd.arg("--tab=settings");
-                cmd.env("DISPLAY", &display);
-                cmd.env("XAUTHORITY", &xauthority);
-                let _ = cmd.spawn();
+                let _ = open::that("http://127.0.0.1:8080/settings");
             }
             "open_menu" => {
                 let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
@@ -374,12 +366,7 @@ fn run_daemon(port: u16) {
                     streamdeck_clone.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
                     open_in_vscode(&settings_clone, &first.problem_id);
                 } else {
-                    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/home/linux/.local/bin/algodeck"));
-                    let mut cmd = std::process::Command::new(self_exe);
-                    cmd.arg("--tab=new");
-                    cmd.env("DISPLAY", &display);
-                    cmd.env("XAUTHORITY", &xauthority);
-                    let _ = cmd.spawn();
+                    let _ = open::that("http://127.0.0.1:8080/");
                 }
             }
             "next_task" | "prev_task" => {
@@ -416,7 +403,8 @@ fn run_daemon(port: u16) {
     let problems = workspace::WorkspaceManager::list_problems(&ws_path);
     if !problems.is_empty() {
         let mut target_idx = 0;
-        if let Ok(saved) = std::fs::read_to_string("/tmp/algodeck_active_task.txt") {
+        let active_file = std::env::temp_dir().join("algodeck_active_task.txt");
+        if let Ok(saved) = std::fs::read_to_string(&active_file) {
             let saved_clean = saved.trim().to_lowercase();
             if let Some(pos) = problems.iter().position(|p| p.problem_id == saved_clean) {
                 target_idx = pos;
@@ -432,6 +420,7 @@ fn run_daemon(port: u16) {
     streamdeck.clone().start_hardware_thread(action_callback);
 
     let streamdeck_shutdown = streamdeck.clone();
+    let shutdown_signal_clone = shutdown_signal.clone();
     let app_state = server::AppState {
         settings: Arc::new(RwLock::new(settings)),
         streamdeck,
@@ -454,19 +443,36 @@ fn run_daemon(port: u16) {
             }
         };
 
-        let server_future = axum::serve(listener, router);
+        let shutdown_rx = shutdown_signal_clone.clone();
+        let server_future = axum::serve(listener, router).with_graceful_shutdown(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+            loop {
+                interval.tick().await;
+                if shutdown_rx.load(std::sync::atomic::Ordering::Relaxed) {
+                    println!("\n⏹ Zatrzymywanie serwera HTTP AlgoDeck (sygnał wyłączenia)...");
+                    break;
+                }
+            }
+        });
 
         tokio::select! {
-            _ = server_future => {},
+            res = server_future => {
+                if let Err(e) = res {
+                    eprintln!("Błąd serwera: {}", e);
+                }
+            }
             _ = tokio::signal::ctrl_c() => {
                 println!("\n⏹ Zatrzymywanie daemona AlgoDeck (Ctrl+C)...");
-                streamdeck_shutdown.stop();
+                shutdown_signal_clone.store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
     });
 
-    // Zawsze wygaszamy ekran fizycznego kontrolera przy wyjściu
+    // Zatrzymanie wątku sprzętowego i bezpośrednie wygaszenie oraz zwolnienie kontrolera USB HID
+    streamdeck_shutdown.stop();
     StreamDeckEngine::blank_device_if_connected();
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    println!("✓ AlgoDeck został zatrzymany, kontroler Stream Deck zwolniony.");
 }
 
 fn start_detached_daemon() {
@@ -573,6 +579,9 @@ fn run_cli_interactive(problem_id: &str) {
     }
 
     let p_dir = WorkspaceManager::get_problem_dir(&settings.get_workspace_path(), problem_id);
+    #[cfg(target_os = "windows")]
+    let bin = p_dir.join(format!("{}.exe", problem_id));
+    #[cfg(not(target_os = "windows"))]
     let bin = p_dir.join(problem_id);
     println!("▶ Uruchamianie {} (wprowadź dane wejściowe, zakończ Ctrl+D):\n", problem_id);
     let _ = std::process::Command::new(bin).status();

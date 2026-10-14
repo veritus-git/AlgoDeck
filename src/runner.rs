@@ -68,7 +68,12 @@ impl TestExecutor {
         } else {
             p_id.clone()
         };
-        let target_path = p_dir.join(&target_name);
+        #[cfg(target_os = "windows")]
+        let target_file = format!("{}.exe", target_name);
+        #[cfg(not(target_os = "windows"))]
+        let target_file = target_name.clone();
+
+        let target_path = p_dir.join(&target_file);
 
         let flags_str = if debug_mode {
             &self.settings.cxx_debug_flags
@@ -85,7 +90,7 @@ impl TestExecutor {
         }
         cmd.arg(format!("{}.cpp", p_id));
         cmd.arg("-o");
-        cmd.arg(&target_name);
+        cmd.arg(&target_file);
 
         let start = Instant::now();
         let output = match cmd.output() {
@@ -138,7 +143,12 @@ impl TestExecutor {
         } else {
             p_id.clone()
         };
-        let binary_path = p_dir.join(&target_name);
+        #[cfg(target_os = "windows")]
+        let binary_file = format!("{}.exe", target_name);
+        #[cfg(not(target_os = "windows"))]
+        let binary_file = target_name;
+
+        let binary_path = p_dir.join(&binary_file);
 
         if !binary_path.exists() {
             let comp = self.compile(&p_id, is_debug);

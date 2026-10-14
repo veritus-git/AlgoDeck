@@ -74,28 +74,53 @@ impl StreamDeckEngine {
     }
 
     fn find_icon_file(name: &str) -> Option<PathBuf> {
-        let exe_icons = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("icons").join(name)));
-        let exe_frontend = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("../frontend/icons").join(name)));
-        let home_icons = dirs::home_dir().map(|h| h.join(".local/share/algodeck/icons").join(name));
-        let win_local = std::env::var("LOCALAPPDATA").ok().map(|l| PathBuf::from(l).join("AlgoDeck/icons").join(name));
-        let win_appdata = std::env::var("APPDATA").ok().map(|a| PathBuf::from(a).join("AlgoDeck/icons").join(name));
+        let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf()));
+        let env_icons = std::env::var("ALGODECK_ICONS_DIR").ok().map(PathBuf::from);
 
-        let candidates = [
-            exe_icons,
-            exe_frontend,
-            win_local,
-            win_appdata,
-            home_icons,
-            Some(PathBuf::from("/home/linux/.local/share/algodeck/icons").join(name)),
-            Some(PathBuf::from("/home/linux/.gemini/antigravity-ide/scratch/algodeck/frontend/icons").join(name)),
-            dirs::data_dir().map(|d| d.join("algodeck/icons").join(name)),
-            Some(PathBuf::from("frontend/icons").join(name)),
-            Some(PathBuf::from("icons").join(name)),
-            Some(PathBuf::from("/usr/local/share/algodeck/icons").join(name)),
-            Some(PathBuf::from("/usr/share/algodeck/icons").join(name)),
-        ];
+        let mut candidates = Vec::new();
 
-        for c in candidates.into_iter().flatten() {
+        if let Some(ref env_dir) = env_icons {
+            candidates.push(env_dir.join(name));
+        }
+
+        if let Some(ref exe) = exe_dir {
+            candidates.push(exe.join("icons").join(name));
+            candidates.push(exe.join("../icons").join(name));
+            candidates.push(exe.join("frontend/icons").join(name));
+            candidates.push(exe.join("../frontend/icons").join(name));
+            candidates.push(exe.join("../../frontend/icons").join(name));
+        }
+
+        // Ścieżki systemowe per OS
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                candidates.push(PathBuf::from(local).join("AlgoDeck/icons").join(name));
+            }
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                candidates.push(PathBuf::from(appdata).join("AlgoDeck/icons").join(name));
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(home) = dirs::home_dir() {
+                candidates.push(home.join(".local/share/algodeck/icons").join(name));
+                candidates.push(home.join(".local/share/algodeck/frontend/icons").join(name));
+            }
+            candidates.push(PathBuf::from("/usr/local/share/algodeck/icons").join(name));
+            candidates.push(PathBuf::from("/usr/share/algodeck/icons").join(name));
+        }
+
+        if let Some(data) = dirs::data_dir() {
+            candidates.push(data.join("algodeck/icons").join(name));
+        }
+
+        // Ścieżki względne z bieżącego katalogu roboczego
+        candidates.push(PathBuf::from("frontend/icons").join(name));
+        candidates.push(PathBuf::from("icons").join(name));
+
+        for c in candidates {
             if c.exists() {
                 return Some(c);
             }
@@ -394,7 +419,7 @@ impl StreamDeckEngine {
 
     // ----------------- RENDEROWANIE PRZYCISKU (NA PURE BLACK #000000) -----------------
     pub fn render_key_image(&self, key: &StreamDeckKey) -> DynamicImage {
-        // Jeśli mamy bezpośredni plik ikony, wczytaj go
+        // 1. Jeśli mamy bezpośredni plik ikony na dysku, wczytaj go
         if !key.icon_name.is_empty() {
             let img = self.load_icon(&key.icon_name);
             // Jeśli ikona istnieje i nie jest pustym czarnym kwadratem, zwróć ją
@@ -403,13 +428,201 @@ impl StreamDeckEngine {
             }
         }
 
-        // Jeśli klawisz ma custom_label (np. w menu zadań lub numerze 1/4)
+        // 2. Jeśli klawisz ma custom_label (np. w menu zadań lub numerze 1/4)
         if let Some(ref label) = key.custom_label {
             return Self::render_label_button(label, &key.status);
         }
 
-        // Domyślny całkowicie czarny ekran OLED (#000000)
+        // 3. Proceduralny generator awaryjny (fallback) na tle OLED black jeśli plik PNG nie istnieje
+        if !key.icon_name.is_empty() || !key.action.is_empty() {
+            return Self::render_fallback_tile(&key.icon_name, &key.action, &key.status);
+        }
+
+        // 4. Domyślny całkowicie czarny ekran OLED (#000000)
         DynamicImage::ImageRgb8(RgbImage::from_pixel(72, 72, Rgb([0, 0, 0])))
+    }
+
+    pub fn render_fallback_tile(icon_name: &str, action: &str, status: &str) -> DynamicImage {
+        let mut base = RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]));
+
+        // Litera zadania np. "letter_s.png"
+        if icon_name.starts_with("letter_") {
+            let char_part = icon_name.trim_start_matches("letter_").trim_end_matches(".png");
+            let c = char_part.chars().next().unwrap_or('-').to_ascii_uppercase();
+            let start_x = (72 - 5 * 3) / 2;
+            let start_y = (72 - 7 * 3) / 2;
+            Self::draw_scaled_text(&mut base, &c.to_string(), start_x, start_y, 3, Rgb([56, 189, 248]));
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        // Znak "="
+        if icon_name == "icon_equals.png" {
+            for y in [28, 29, 30, 42, 43, 44] {
+                for x in 18..54 {
+                    base.put_pixel(x, y, Rgb([56, 189, 248]));
+                }
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        // Ekran powitalny: ALGO / BOLT / DECK
+        if icon_name == "idle_logo_algo.png" {
+            return Self::render_badge_tile("ALGO", Rgb([56, 189, 248]), Rgb([248, 250, 252]));
+        }
+        if icon_name == "idle_logo_bolt.png" {
+            Self::draw_bolt(&mut base, Rgb([250, 204, 21]));
+            return DynamicImage::ImageRgb8(base);
+        }
+        if icon_name == "idle_logo_deck.png" {
+            return Self::render_badge_tile("DECK", Rgb([56, 189, 248]), Rgb([248, 250, 252]));
+        }
+
+        // Przycisk "+" (nowe zadanie)
+        if icon_name == "icon_plus.png" || action == "new_task" {
+            for y in 33..39 {
+                for x in 18..54 {
+                    base.put_pixel(x, y, Rgb([16, 185, 129]));
+                }
+            }
+            for x in 33..39 {
+                for y in 18..54 {
+                    base.put_pixel(x, y, Rgb([16, 185, 129]));
+                }
+            }
+            for x in 10..62 {
+                base.put_pixel(x, 10, Rgb([5, 150, 105]));
+                base.put_pixel(x, 61, Rgb([5, 150, 105]));
+            }
+            for y in 10..62 {
+                base.put_pixel(10, y, Rgb([5, 150, 105]));
+                base.put_pixel(61, y, Rgb([5, 150, 105]));
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        // Testy: run_all
+        if icon_name == "icon_test_sec.png" || action == "run_all" {
+            let (col, txt) = match status {
+                "OK" => (Rgb([34, 197, 94]), "OK"),
+                "WA" => (Rgb([239, 68, 68]), "WA"),
+                "RUNNING" => (Rgb([234, 179, 8]), "RUN"),
+                _ => (Rgb([56, 189, 248]), "TEST"),
+            };
+            return Self::render_badge_tile(txt, col, Rgb([255, 255, 255]));
+        }
+
+        // Interaktywne uruchomienie: run_interactive
+        if icon_name == "icon_play_sec.png" || action == "run_interactive" {
+            for x in 26..48 {
+                let half_h = (x - 26) * 4 / 5;
+                for y in (36 - half_h)..=(36 + half_h) {
+                    base.put_pixel(x as u32, y as u32, Rgb([96, 165, 250]));
+                }
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        // Kill process
+        if icon_name == "icon_kill_sec.png" || action == "kill_process" {
+            for y in 24..48 {
+                for x in 24..48 {
+                    base.put_pixel(x, y, Rgb([239, 68, 68]));
+                }
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        // Menu zadań
+        if icon_name == "icon_task_sec.png" || action == "open_menu" {
+            for (bx, by) in [(18, 18), (38, 18), (18, 38), (38, 38)] {
+                for y in by..(by + 16) {
+                    for x in bx..(bx + 16) {
+                        base.put_pixel(x, y, Rgb([56, 189, 248]));
+                    }
+                }
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        // Ustawienia
+        if icon_name == "icon_settings.png" || action == "open_settings" {
+            return Self::render_badge_tile("SET", Rgb([148, 163, 184]), Rgb([248, 250, 252]));
+        }
+
+        // Strzałki nawigacji
+        if icon_name.contains("arrow_left") || action == "prev_task" || action == "back_to_task" {
+            for y in 18..54 {
+                let dist = (y as i32 - 36).abs();
+                let start_x = 24 + dist;
+                for x in start_x..=(start_x + 5) {
+                    if x < 54 {
+                        base.put_pixel(x as u32, y as u32, Rgb([148, 163, 184]));
+                    }
+                }
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        if icon_name.contains("arrow_right") || action == "next_task" {
+            for y in 18..54 {
+                let dist = (y as i32 - 36).abs();
+                let end_x = 48 - dist;
+                for x in (end_x - 5)..=end_x {
+                    if x >= 18 {
+                        base.put_pixel(x as u32, y as u32, Rgb([148, 163, 184]));
+                    }
+                }
+            }
+            return DynamicImage::ImageRgb8(base);
+        }
+
+        DynamicImage::ImageRgb8(base)
+    }
+
+    fn draw_bolt(img: &mut RgbImage, color: Rgb<u8>) {
+        // Precyzyjny kształt błyskawicy ⚡
+        let points = [
+            (40, 14), (39, 15), (38, 16), (37, 17), (36, 18), (35, 19), (34, 20),
+            (33, 21), (32, 22), (31, 23), (30, 24), (29, 25), (28, 26), (27, 27),
+            (26, 28), (25, 29), (24, 30), (23, 31), (22, 32), (21, 33), (20, 34),
+            (21, 35), (22, 35), (23, 35), (24, 35), (25, 35), (26, 35), (27, 35),
+            (28, 35), (29, 35), (30, 35), (31, 35), (32, 35), (33, 35), (34, 35),
+            (35, 35), (36, 35), (37, 35), (38, 35), (39, 35), (40, 35), (41, 35),
+            (36, 36), (35, 37), (34, 38), (33, 39), (32, 40), (31, 41), (30, 42),
+            (29, 43), (28, 44), (27, 45), (26, 46), (25, 47), (24, 48), (23, 49),
+            (22, 50), (21, 51), (20, 52), (19, 53), (18, 54), (17, 55), (16, 56),
+        ];
+        for &(px, py) in &points {
+            for dx in 0..3 {
+                for dy in 0..2 {
+                    let nx = px + dx + 10;
+                    let ny = py + dy;
+                    if nx < 72 && ny < 72 {
+                        img.put_pixel(nx, ny, color);
+                    }
+                }
+            }
+        }
+    }
+
+    fn render_badge_tile(text: &str, border_color: Rgb<u8>, text_color: Rgb<u8>) -> DynamicImage {
+        let mut base = RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]));
+        for x in 8..64 {
+            base.put_pixel(x, 10, border_color);
+            base.put_pixel(x, 61, border_color);
+        }
+        for y in 14..58 {
+            base.put_pixel(6, y, border_color);
+            base.put_pixel(65, y, border_color);
+        }
+        let len = text.chars().count() as i32;
+        let scale = if len <= 4 { 2 } else { 1 };
+        let char_w = 5 * scale + scale;
+        let total_w = len * char_w - scale;
+        let start_x = ((72 - total_w) / 2).max(8);
+        let start_y = (72 - 7 * scale) / 2;
+        Self::draw_scaled_text(&mut base, text, start_x, start_y, scale, text_color);
+        DynamicImage::ImageRgb8(base)
     }
 
     fn is_non_black(img: &DynamicImage) -> bool {
