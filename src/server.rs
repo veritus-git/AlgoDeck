@@ -660,6 +660,10 @@ async fn exit_screen(State(state): State<AppState>) -> Json<serde_json::Value> {
 async fn shutdown_server(State(state): State<AppState>) -> Json<serde_json::Value> {
     state.shutdown_signal.store(true, Ordering::Relaxed);
     state.streamdeck.stop();
+    tokio::task::spawn_blocking(|| {
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        StreamDeckEngine::blank_device_if_connected();
+    });
     Json(serde_json::json!({ "success": true }))
 }
 

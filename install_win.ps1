@@ -27,15 +27,20 @@ Write-Host $banner -ForegroundColor Cyan
 # Katalog instalacyjny
 $InstallDir = "$env:LOCALAPPDATA\AlgoDeck"
 $IconsDir = "$InstallDir\icons"
+$ExtensionDir = "$InstallDir\extension"
+
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 if (-not (Test-Path $IconsDir)) {
     New-Item -ItemType Directory -Path $IconsDir -Force | Out-Null
 }
+if (-not (Test-Path $ExtensionDir)) {
+    New-Item -ItemType Directory -Path $ExtensionDir -Force | Out-Null
+}
 
 # 1. Sprawdzenie kompilatora C++ (MinGW / MSVC)
-Write-Host "`n[1/4] Sprawdzanie środowiska kompilatora C++..." -ForegroundColor Yellow
+Write-Host "`n[1/5] Sprawdzanie środowiska kompilatora C++..." -ForegroundColor Yellow
 $hasCompiler = (Get-Command g++ -ErrorAction SilentlyContinue) -or (Get-Command cl -ErrorAction SilentlyContinue)
 if (-not $hasCompiler) {
     Write-Host "Brak wykrytego kompilatora C++. Próba instalacji MinGW-w64 (MSYS2)..." -ForegroundColor Yellow
@@ -53,7 +58,7 @@ if (-not $hasCompiler) {
 }
 
 # 2. Pobieranie / Instalacja binarki AlgoDeck
-Write-Host "`n[2/4] Instalacja silnika AlgoDeck..." -ForegroundColor Yellow
+Write-Host "`n[2/5] Instalacja silnika AlgoDeck..." -ForegroundColor Yellow
 $BinaryPath = "$InstallDir\algodeck.exe"
 $installed = $false
 
@@ -91,49 +96,65 @@ if (-not $installed) {
     }
 }
 
-# 3. Konfiguracja zestawu ikon dla Stream Decka
-Write-Host "`n[3/4] Konfiguracja grafik i ikon dla Stream Decka..." -ForegroundColor Yellow
-$copiedIcons = $false
+# 3. Konfiguracja zestawu ikon i rozszerzenia przeglądarki
+Write-Host "`n[3/5] Konfiguracja grafik Stream Decka oraz rozszerzenia..." -ForegroundColor Yellow
+$copiedAssets = $false
 
 if ($MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
-    $LocalIcons = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "frontend\icons"
-    if (Test-Path $LocalIcons) {
+    $LocalBase = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $LocalIcons = Join-Path $LocalBase "frontend\icons"
+    $LocalExt = Join-Path $LocalBase "extension"
+    if ((Test-Path $LocalIcons) -and (Test-Path $LocalExt)) {
         Copy-Item "$LocalIcons\*" $IconsDir -Recurse -Force
-        Write-Host "✓ Skopiowano ikony z lokalnego repozytorium do $IconsDir" -ForegroundColor Green
-        $copiedIcons = $true
+        Copy-Item "$LocalExt\*" $ExtensionDir -Recurse -Force
+        Write-Host "✓ Skopiowano ikony i rozszerzenie z lokalnego repozytorium." -ForegroundColor Green
+        $copiedAssets = $true
     }
 }
 
-if (-not $copiedIcons) {
-    Write-Host "Pobieranie grafik Stream Decka z repozytorium..." -ForegroundColor Cyan
-    $ZipPath = "$env:TEMP\algodeck_icons_$PID.zip"
+if (-not $copiedAssets) {
+    Write-Host "Pobieranie zasobów z repozytorium GitHub..." -ForegroundColor Cyan
+    $ZipPath = "$env:TEMP\algodeck_assets_$PID.zip"
     $TempExtract = "$env:TEMP\algodeck_extract_$PID"
     try {
         Invoke-WebRequest -Uri "https://github.com/veritus-git/AlgoDeck/archive/refs/heads/main.zip" -OutFile $ZipPath -UseBasicParsing
         if (Test-Path $TempExtract) { Remove-Item $TempExtract -Recurse -Force }
         Expand-Archive -Path $ZipPath -DestinationPath $TempExtract -Force
+        
+        # Kopiuj ikony
         $ExtractedIcons = Get-ChildItem -Path $TempExtract -Recurse -Directory -Filter "icons" | Where-Object { $_.FullName -like "*frontend*icons*" } | Select-Object -First 1
         if ($ExtractedIcons) {
             Copy-Item "$($ExtractedIcons.FullName)\*" $IconsDir -Recurse -Force
             Write-Host "✓ Ikony zainstalowane w $IconsDir" -ForegroundColor Green
         }
+
+        # Kopiuj rozszerzenie
+        $ExtractedExt = Get-ChildItem -Path $TempExtract -Recurse -Directory -Filter "extension" | Where-Object { $_.FullName -like "*AlgoDeck*extension*" } | Select-Object -First 1
+        if ($ExtractedExt) {
+            Copy-Item "$($ExtractedExt.FullName)\*" $ExtensionDir -Recurse -Force
+            Write-Host "✓ Rozszerzenie zainstalowane w $ExtensionDir" -ForegroundColor Green
+        }
+
         Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
         Remove-Item $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
     } catch {
-        Write-Host "Ostrzeżenie: Nie udało się pobrać paczki ikon: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        Write-Host "Ostrzeżenie: Nie udało się pobrać paczki zasobów: $($_.Exception.Message)" -ForegroundColor DarkYellow
     }
 }
 
 # 4. Dodaj do PATH użytkownika
+Write-Host "`n[4/5] Konfiguracja zmiennych środowiskowych..." -ForegroundColor Yellow
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($UserPath -notlike "*$InstallDir*") {
     [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
     $env:Path = "$env:Path;$InstallDir"
     Write-Host "✓ Dodano $InstallDir do zmiennej środowiskowej PATH." -ForegroundColor Green
+} else {
+    Write-Host "✓ Ścieżka $InstallDir już znajduje się w PATH." -ForegroundColor Green
 }
 
 # 5. Rejestracja Native Messaging Host w Rejestrze Windows dla Chrome
-Write-Host "`n[4/4] Rejestracja Native Messaging Host dla Google Chrome..." -ForegroundColor Yellow
+Write-Host "`n[5/5] Rejestracja Native Messaging Host dla Google Chrome..." -ForegroundColor Yellow
 $ManifestPath = "$InstallDir\com.algodeck.launcher.json"
 $ManifestJson = @"
 {
@@ -157,5 +178,14 @@ Write-Host "`n==================================================================
 Write-Host "✓ AlgoDeck v2.0.0 (100% Rust) został pomyślnie zainstalowany!" -ForegroundColor Green
 Write-Host "• Uruchom 'algodeck' w PowerShellu lub Command Prompcie" -ForegroundColor White
 Write-Host "• Stream Deck: Bezpośrednia obsługa USB HID bez oficjalnej aplikacji Elgato" -ForegroundColor White
-Write-Host "• Konfiguracja i ikony: $InstallDir" -ForegroundColor White
+Write-Host "• Folder instalacyjny: $InstallDir" -ForegroundColor White
+Write-Host "==================================================================" -ForegroundColor Cyan
+
+Write-Host "`n🧩 JAK DODAĆ ROZSZERZENIE DO PRZEGLĄDARKI (Chrome / Brave / Edge):" -ForegroundColor Yellow
+Write-Host "1. Otwórz w przeglądarce stronę: chrome://extensions  (lub brave://extensions / edge://extensions)" -ForegroundColor White
+Write-Host "2. Włącz przełącznik 'Tryb programisty' (Developer mode) w prawym górnym rogu" -ForegroundColor White
+Write-Host "3. Kliknij w lewym górnym rogu przycisk 'Załaduj rozpakowane' (Load unpacked)" -ForegroundColor White
+Write-Host "4. W oknie wyboru folderu wklej i wskaż DOKŁADNIE ten folder:" -ForegroundColor White
+Write-Host "   $ExtensionDir" -ForegroundColor Cyan
+Write-Host "5. Gotowe! Przypnij ikonę ⚡ AlgoDeck na pasku narzędzi przeglądarki." -ForegroundColor Green
 Write-Host "==================================================================`n" -ForegroundColor Cyan

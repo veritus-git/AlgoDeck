@@ -98,6 +98,7 @@ fi
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$HOME")"
 mkdir -p "$HOME/.local/bin"
 mkdir -p "$HOME/.local/share/algodeck/icons"
+mkdir -p "$HOME/.local/share/algodeck/extension"
 
 # Jeśli uruchomiono w sklonowanym repozytorium z Cargo.toml
 if [ -f "$REPO_DIR/Cargo.toml" ] && command -v cargo &> /dev/null; then
@@ -107,24 +108,30 @@ if [ -f "$REPO_DIR/Cargo.toml" ] && command -v cargo &> /dev/null; then
     if [ -d "$REPO_DIR/frontend/icons" ]; then
         cp -r "$REPO_DIR/frontend/icons/"* "$HOME/.local/share/algodeck/icons/"
     fi
+    if [ -d "$REPO_DIR/extension" ]; then
+        cp -r "$REPO_DIR/extension/"* "$HOME/.local/share/algodeck/extension/"
+    fi
 else
     echo -e "${CYAN}Pobieranie natywnej binarki z GitHub Releases...${NC}"
     curl -fsSL -o "$HOME/.local/bin/algodeck" "https://github.com/veritus-git/AlgoDeck/releases/latest/download/algodeck-linux-x86_64" || true
     chmod +x "$HOME/.local/bin/algodeck"
-    # Pobierz ikony
-    echo -e "${CYAN}Pobieranie grafik Stream Decka...${NC}"
-    TMP_ZIP="/tmp/algodeck_icons_$$.zip"
+    # Pobierz ikony i rozszerzenie z repozytorium
+    echo -e "${CYAN}Pobieranie grafik i rozszerzenia AlgoDeck...${NC}"
+    TMP_ZIP="/tmp/algodeck_assets_$$.zip"
     TMP_DIR="/tmp/algodeck_extract_$$"
     curl -fsSL -o "$TMP_ZIP" "https://github.com/veritus-git/AlgoDeck/archive/refs/heads/main.zip" || true
     if [ -f "$TMP_ZIP" ]; then
-        unzip -q -o "$TMP_ZIP" "AlgoDeck-main/frontend/icons/*" -d "$TMP_DIR" 2>/dev/null || true
+        unzip -q -o "$TMP_ZIP" "AlgoDeck-main/frontend/icons/*" "AlgoDeck-main/extension/*" -d "$TMP_DIR" 2>/dev/null || true
         if [ -d "$TMP_DIR/AlgoDeck-main/frontend/icons" ]; then
             cp -r "$TMP_DIR/AlgoDeck-main/frontend/icons/"* "$HOME/.local/share/algodeck/icons/"
+        fi
+        if [ -d "$TMP_DIR/AlgoDeck-main/extension" ]; then
+            cp -r "$TMP_DIR/AlgoDeck-main/extension/"* "$HOME/.local/share/algodeck/extension/"
         fi
         rm -rf "$TMP_ZIP" "$TMP_DIR"
     fi
 fi
-echo -e "${GREEN}✓ Binarka algodeck oraz ikony zainstalowane (~/.local/bin/algodeck).${NC}"
+echo -e "${GREEN}✓ Binarka, ikony oraz rozszerzenie zainstalowane w ~/.local/share/algodeck/.${NC}"
 
 # 5. Uprawnienia USB HID dla Stream Decka (udev)
 echo -e "\n${CYAN}[5/6] Konfiguracja uprawnień USB HID dla kontrolerów Elgato Stream Deck...${NC}"
@@ -215,8 +222,17 @@ systemctl --user restart algodeck.service 2>/dev/null || true
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
 echo -e "${GREEN}${BOLD}       🎉 AlgoDeck v2.0.0 (100% Rust) zainstalowany i gotowy do pracy!        ${NC}"
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
-echo -e "• Daemon działa w tle (zużycie RAM: ~2 MB, czas startu: 10 ms)"
-echo -e "• Stream Deck: Bezpośrednia obsługa sprzętowa USB HID bez zewnętrznych apek"
-echo -e "• GUI: Uruchom 'algodeck' w terminalu lub kliknij ikonę w menu aplikacji"
+echo -e "• Daemon działa w tle jako usługa systemd (zużycie RAM: ~2 MB, czas startu: 10 ms)"
+echo -e "• Stream Deck: Bezpośrednia obsługa sprzętowa USB HID bez zewnętrznych aplikacji"
 echo -e "• Testy w konsoli: 'algodeck test <kod_zadania>'"
-echo -e "• Status: 'algodeck status'\n"
+echo -e "• Status: 'algodeck status'"
+echo -e "• Zatrzymanie / Wygaszenie Stream Decka: 'algodeck stop'"
+echo -e "${GREEN}${BOLD}==============================================================================${NC}"
+
+echo -e "\n${CYAN}${BOLD}🧩 JAK DODAĆ ROZSZERZENIE DO PRZEGLĄDARKI (Chrome / Brave / Chromium):${NC}"
+echo -e "1. Otwórz w przeglądarce: ${BOLD}chrome://extensions${NC} (lub brave://extensions)"
+echo -e "2. Włącz suwak ${BOLD}Tryb programisty${NC} (Developer mode) w prawym górnym rogu"
+echo -e "3. Kliknij w lewym górnym rogu: ${BOLD}Załaduj rozpakowane${NC} (Load unpacked)"
+echo -e "4. Wskaż DOKŁADNIE ten folder:"
+echo -e "   ${GREEN}${BOLD}$HOME/.local/share/algodeck/extension${NC}"
+echo -e "5. Gotowe! Przypnij ikonę ⚡ AlgoDeck na pasku narzędzi przeglądarki.\n"

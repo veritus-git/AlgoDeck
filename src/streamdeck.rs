@@ -631,6 +631,13 @@ impl StreamDeckEngine {
                         }
                     }
 
+                    // Wygaszenie i zresetowanie wszystkich 15 klawiszy do czerni przed odłączeniem
+                    let black_img = DynamicImage::ImageRgb8(RgbImage::new(72, 72));
+                    for i in 0..15 {
+                        let _ = deck.set_button_image(i as u8, black_img.clone());
+                    }
+                    let _ = deck.reset();
+
                     {
                         let mut state = self.state.lock().unwrap();
                         state.is_hardware_connected = false;
@@ -644,5 +651,24 @@ impl StreamDeckEngine {
 
     pub fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
+    }
+
+    /// Bezpośrednie połączenie z fizycznym kontrolerem USB HID i wyczyszczenie całego ekranu do czerni
+    pub fn blank_device_if_connected() {
+        let elgato_vid = 0x0fd9;
+        if let Ok(probes) = StreamDeck::probe() {
+            for res in probes {
+                if let Ok((_kind, pid)) = res {
+                    if let Ok(mut deck) = StreamDeck::connect(elgato_vid, pid, None) {
+                        let black_img = DynamicImage::ImageRgb8(RgbImage::new(72, 72));
+                        for i in 0..15 {
+                            let _ = deck.set_button_image(i as u8, black_img.clone());
+                        }
+                        let _ = deck.reset();
+                        break;
+                    }
+                }
+            }
+        }
     }
 }

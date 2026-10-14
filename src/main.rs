@@ -431,6 +431,7 @@ fn run_daemon(port: u16) {
     // Uruchom wątek sprzętowy Stream Deck USB HID
     streamdeck.clone().start_hardware_thread(action_callback);
 
+    let streamdeck_shutdown = streamdeck.clone();
     let app_state = server::AppState {
         settings: Arc::new(RwLock::new(settings)),
         streamdeck,
@@ -459,9 +460,13 @@ fn run_daemon(port: u16) {
             _ = server_future => {},
             _ = tokio::signal::ctrl_c() => {
                 println!("\n⏹ Zatrzymywanie daemona AlgoDeck (Ctrl+C)...");
+                streamdeck_shutdown.stop();
             }
         }
     });
+
+    // Zawsze wygaszamy ekran fizycznego kontrolera przy wyjściu
+    StreamDeckEngine::blank_device_if_connected();
 }
 
 fn start_detached_daemon() {
@@ -508,9 +513,15 @@ fn stop_daemon() {
     {
         let _ = std::process::Command::new("systemctl").args(["--user", "stop", "algodeck.service"]).output();
         let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck daemon").output();
-        let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck-gui").output();
     }
-    println!("✓ AlgoDeck zatrzymany.");
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "algodeck.exe"]).output();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    // Bezpośrednie wyczyszczenie ekranu Stream Decka przez USB HID
+    StreamDeckEngine::blank_device_if_connected();
+    println!("✓ AlgoDeck zatrzymany, ekran Stream Decka wygaszony.");
 }
 
 fn check_status() {
