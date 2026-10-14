@@ -35,6 +35,7 @@ pub struct StreamDeckEngine {
     mode: Arc<Mutex<ScreenMode>>,
     running: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
+    brightness: Arc<std::sync::atomic::AtomicU8>,
     icon_cache: Arc<Mutex<HashMap<String, DynamicImage>>>,
 }
 
@@ -62,11 +63,23 @@ impl StreamDeckEngine {
             mode: Arc::new(Mutex::new(ScreenMode::Idle)),
             running: Arc::new(AtomicBool::new(true)),
             dirty: Arc::new(AtomicBool::new(true)),
+            brightness: Arc::new(std::sync::atomic::AtomicU8::new(85)),
             icon_cache: Arc::new(Mutex::new(HashMap::new())),
         };
 
         engine.set_idle_screen();
         engine
+    }
+
+    pub fn set_brightness(&self, val: u8) {
+        let clamped = val.clamp(5, 100);
+        self.brightness.store(clamped, Ordering::SeqCst);
+        self.dirty.store(true, Ordering::SeqCst);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_brightness(&self) -> u8 {
+        self.brightness.load(Ordering::Relaxed)
     }
 
     pub fn get_state(&self) -> StreamDeckState {
@@ -797,8 +810,9 @@ impl StreamDeckEngine {
                         state.is_hardware_connected = true;
                     }
 
+                    let mut current_brightness = self.brightness.load(Ordering::Relaxed);
                     let _ = deck.reset();
-                    let _ = deck.set_brightness(85);
+                    let _ = deck.set_brightness(current_brightness);
 
                     // Pełne wyrenderowanie 15 klawiszy na starcie
                     {
@@ -813,6 +827,12 @@ impl StreamDeckEngine {
                     let mut last_buttons = vec![0u8; 15];
 
                     while self.running.load(Ordering::Relaxed) {
+                        let new_br = self.brightness.load(Ordering::Relaxed);
+                        if new_br != current_brightness {
+                            let _ = deck.set_brightness(new_br);
+                            current_brightness = new_br;
+                        }
+
                         if self.dirty.swap(false, Ordering::SeqCst) {
                             let state = self.state.lock().unwrap();
                             for key in &state.keys {

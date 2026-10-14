@@ -138,6 +138,7 @@ fn run_daemon(port: u16) {
     let settings = AppSettings::load();
     let runner = Arc::new(TestExecutor::new(settings.clone()));
     let streamdeck = Arc::new(StreamDeckEngine::new());
+    streamdeck.set_brightness(settings.streamdeck_brightness);
     let (ws_sender, _) = broadcast::channel(100);
     let shutdown_signal = Arc::new(AtomicBool::new(false));
 

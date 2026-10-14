@@ -94,10 +94,14 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/exit", post(exit_screen))
         .route("/shutdown", post(shutdown_server))
         .route("/streamdeck/state", get(get_streamdeck_state))
+        .route("/streamdeck/brightness", post(set_streamdeck_brightness))
         .route("/streamdeck/press/:key_id", post(press_streamdeck_key));
 
     let mut router = Router::new()
         .nest("/api", api_routes)
+        .route("/settings", get(serve_settings_html))
+        .route("/settings.css", get(serve_settings_css))
+        .route("/settings.js", get(serve_settings_js))
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::permissive())
         .with_state(app_state);
@@ -112,6 +116,87 @@ pub fn create_router(app_state: AppState) -> Router {
 }
 
 // ----------------- Handlers -----------------
+
+#[derive(Deserialize)]
+pub struct BrightnessRequest {
+    pub brightness: u8,
+}
+
+async fn set_streamdeck_brightness(
+    State(state): State<AppState>,
+    Json(req): Json<BrightnessRequest>,
+) -> Json<serde_json::Value> {
+    state.streamdeck.set_brightness(req.brightness);
+    {
+        let mut s = state.settings.write().unwrap();
+        s.streamdeck_brightness = req.brightness;
+        let _ = s.save();
+    }
+    Json(serde_json::json!({ "success": true, "brightness": req.brightness }))
+}
+
+fn find_file_in_candidates(filename: &str) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("extension").join(filename));
+            candidates.push(parent.join("../extension").join(filename));
+            candidates.push(parent.join("frontend").join(filename));
+        }
+    }
+
+    candidates.push(PathBuf::from("extension").join(filename));
+    candidates.push(PathBuf::from("frontend").join(filename));
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            candidates.push(PathBuf::from(local).join("AlgoDeck/extension").join(filename));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join(".local/share/algodeck/extension").join(filename));
+        }
+    }
+
+    for c in candidates {
+        if c.exists() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+async fn serve_settings_html() -> impl IntoResponse {
+    if let Some(p) = find_file_in_candidates("settings.html") {
+        if let Ok(content) = fs::read_to_string(p) {
+            return axum::response::Html(content).into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, "Settings page not found").into_response()
+}
+
+async fn serve_settings_css() -> impl IntoResponse {
+    if let Some(p) = find_file_in_candidates("settings.css") {
+        if let Ok(content) = fs::read_to_string(p) {
+            return ([(axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8")], content).into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, "CSS not found").into_response()
+}
+
+async fn serve_settings_js() -> impl IntoResponse {
+    if let Some(p) = find_file_in_candidates("settings.js") {
+        if let Ok(content) = fs::read_to_string(p) {
+            return ([(axum::http::header::CONTENT_TYPE, "application/javascript; charset=utf-8")], content).into_response();
+        }
+    }
+    (StatusCode::NOT_FOUND, "JS not found").into_response()
+}
 
 async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
     let settings = state.settings.read().unwrap().clone();
@@ -134,6 +219,7 @@ async fn post_settings(
     State(state): State<AppState>,
     Json(new_settings): Json<AppSettings>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    state.streamdeck.set_brightness(new_settings.streamdeck_brightness);
     let _ = new_settings.save();
     {
         let mut w = state.settings.write().unwrap();

@@ -39,6 +39,13 @@ pub struct AppSettings {
 
     #[serde(default = "default_memory_limit")]
     pub default_memory_limit: u64,
+
+    #[serde(default = "default_streamdeck_brightness")]
+    pub streamdeck_brightness: u8,
+}
+
+fn default_streamdeck_brightness() -> u8 {
+    85
 }
 
 fn default_workspace_dir() -> String {
@@ -104,6 +111,7 @@ impl Default for AppSettings {
             cxx_debug_flags: default_debug_flags(),
             default_time_limit: default_time_limit(),
             default_memory_limit: default_memory_limit(),
+            streamdeck_brightness: default_streamdeck_brightness(),
         }
     }
 }
