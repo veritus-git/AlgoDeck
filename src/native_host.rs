@@ -53,6 +53,21 @@ fn handle_native_message(msg: &Value) -> Value {
                 if src.exists() {
                     let stage_dir = crate::config::AppSettings::staging_dir();
                     let _ = std::fs::create_dir_all(&stage_dir);
+
+                    let is_pdf = file_path.to_lowercase().ends_with(".pdf");
+                    if is_pdf {
+                        if let Ok(entries) = std::fs::read_dir(&stage_dir) {
+                            for e in entries.flatten() {
+                                let p = e.path();
+                                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                                    if ext.eq_ignore_ascii_case("pdf") {
+                                        let _ = std::fs::remove_file(p);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let filename = src.file_name().unwrap_or_default();
                     let dst = stage_dir.join(filename);
                     if std::fs::copy(src, &dst).is_ok() {

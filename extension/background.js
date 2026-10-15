@@ -58,65 +58,21 @@ async function isDaemonRunning() {
   }
 }
 
-const SW_START_TIME = Date.now();
+// Czyszczenie starego stanu po ponownym uruchomieniu przeglądarki
+if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(async () => {
+    try {
+      console.log("[AlgoDeck] Start przeglądarki — czyszczenie starego stanu zadań.");
+      await chrome.storage.local.remove(["detected_task", "dismiss_oneclick", "last_downloaded_pdf"]);
+      if (chrome.action && chrome.action.setBadgeText) {
+        chrome.action.setBadgeText({ text: "" });
+      }
+      await fetch(`${API_BASE}/api/clear-staged`, { method: "POST" }).catch(() => {});
+    } catch (_) {}
+  });
+}
+
 const processedDownloads = new Set();
-let isStartupHistoryLoaded = false;
-
-// 1. Pobranie trwałej historii pobrań z chrome.storage.local
-async function getSeenHistory() {
-  try {
-    const data = await chrome.storage.local.get(["algodeck_seen_downloads_history"]);
-    return new Set(data.algodeck_seen_downloads_history || []);
-  } catch (_) {
-    return new Set();
-  }
-}
-
-// 2. Zapisanie pliku/pobrania do trwałej historii
-async function recordDownloadInHistory(downloadId, item) {
-  try {
-    const seen = await getSeenHistory();
-    if (downloadId) seen.add(String(downloadId));
-    if (item && item.id) seen.add(String(item.id));
-    if (item && item.filename) {
-      const clean = item.filename.toLowerCase();
-      seen.add(clean);
-      if (item.startTime) {
-        seen.add(`${clean}::${item.startTime}`);
-      }
-    }
-    const arr = Array.from(seen).slice(-500);
-    await chrome.storage.local.set({ algodeck_seen_downloads_history: arr });
-  } catch (_) {}
-}
-
-// 3. Przy starcie przeglądarki oznacz WSZYSTKIE istniejące pobrania w historii jako stare,
-// aby po ponownym uruchomieniu przeglądarki żaden stary plik nigdy nie wywołał popupu!
-async function initStartupDownloadHistory() {
-  try {
-    const seen = await getSeenHistory();
-    if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
-      const items = await chrome.downloads.search({});
-      if (items) {
-        for (const it of items) {
-          processedDownloads.add(it.id);
-          seen.add(String(it.id));
-          if (it.filename) {
-            const clean = it.filename.toLowerCase();
-            seen.add(clean);
-            if (it.startTime) {
-              seen.add(`${clean}::${it.startTime}`);
-            }
-          }
-        }
-      }
-    }
-    const arr = Array.from(seen).slice(-500);
-    await chrome.storage.local.set({ algodeck_seen_downloads_history: arr });
-  } catch (_) {}
-  isStartupHistoryLoaded = true;
-}
-initStartupDownloadHistory();
 
 // Obsługa zakończonego pobierania (wyłącznie świeże PDFy pobrane w tej sesji!)
 async function handleCompletedDownload(downloadId) {
@@ -125,15 +81,10 @@ async function handleCompletedDownload(downloadId) {
   if (processedDownloads.has(downloadId)) {
     return;
   }
-
-  if (!isStartupHistoryLoaded) {
-    await new Promise(r => setTimeout(r, 150));
-  }
-
-  const seen = await getSeenHistory();
-  if (seen.has(String(downloadId))) {
-    processedDownloads.add(downloadId);
-    return;
+  processedDownloads.add(downloadId);
+  if (processedDownloads.size > 200) {
+    const oldest = processedDownloads.values().next().value;
+    processedDownloads.delete(oldest);
   }
 
   try {
@@ -160,34 +111,18 @@ async function handleCompletedDownload(downloadId) {
 
     if (!item) return;
 
-    // 3. Sprawdź czas rozpoczęcia: ignoruj pobrania sprzed startu przeglądarki lub starsze niż 60s
+    // 3. Sprawdź czas rozpoczęcia: ignoruj stare pobrania z historii starsze niż 5 minut
     if (item.startTime) {
       const startTs = new Date(item.startTime).getTime();
-      if (startTs < SW_START_TIME - 3000 || (Date.now() - startTs > 60000)) {
+      if (Date.now() - startTs > 300000) {
         console.log("[AlgoDeck] Zignorowano stare pobranie z historii:", item.filename, item.startTime);
-        processedDownloads.add(downloadId);
-        await recordDownloadInHistory(downloadId, item);
         return;
       }
     }
 
     if (!isOlympicTaskFile(item)) {
-      processedDownloads.add(downloadId);
       return;
     }
-
-    // 4. Sprawdź sygnaturę pliku w trwałej historii
-    const cleanFn = (item.filename || "").toLowerCase();
-    const fileSig = `${cleanFn}::${item.startTime || ""}`;
-    if (seen.has(fileSig)) {
-      console.log("[AlgoDeck] Plik o tej sygnaturze był już wcześniej przetworzony:", fileSig);
-      processedDownloads.add(downloadId);
-      return;
-    }
-
-    // Zapisz do pamięci sesji i trwałej bazy historii
-    processedDownloads.add(downloadId);
-    await recordDownloadInHistory(downloadId, item);
 
     // Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
     try {
@@ -208,7 +143,7 @@ async function handleCompletedDownload(downloadId) {
 
     console.log("[AlgoDeck] Wykryto świeże pobranie zadania PDF:", filename);
 
-    // 5. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
+    // 4. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
     await chrome.storage.local.set({
       last_downloaded_pdf: filename,
       last_pdf_name: baseName,

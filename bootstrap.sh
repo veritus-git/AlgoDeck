@@ -245,6 +245,8 @@ CHROME_TARGETS=(
     "$HOME/.config/opera/NativeMessagingHosts"
 )
 
+LOCAL_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
+
 MANIFEST_CONTENT='{
   "name": "com.algodeck.launcher",
   "description": "AlgoDeck 100% Rust Native Messaging Host",
@@ -252,7 +254,8 @@ MANIFEST_CONTENT='{
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
-    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"
+    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/",
+    "chrome-extension://'"$LOCAL_EXT_ID"'/"
   ]
 }'
 

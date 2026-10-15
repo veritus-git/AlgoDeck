@@ -170,8 +170,8 @@ async function updatePopupViewState() {
       const stored = await chrome.storage.local.get(["dismiss_oneclick", "detected_task"]);
       isDismissed = Boolean(stored.dismiss_oneclick);
       if (stored.detected_task && stored.detected_task.ts) {
-        // Powiadomienie 1-Klik jest świeże tylko przez 2 minuty od pobrania pliku
-        isFresh = (Date.now() - stored.detected_task.ts < 120000);
+        // Powiadomienie 1-Klik jest świeże przez 5 minut od pobrania pliku
+        isFresh = (Date.now() - stored.detected_task.ts < 300000);
       }
     }
 
@@ -328,8 +328,7 @@ async function syncRecentDownloads() {
       const stored = await chrome.storage.local.get(["last_downloaded_pdf"]);
       if (stored.last_downloaded_pdf) {
         const filePath = stored.last_downloaded_pdf;
-        // Natychmiast usuń z pamięci podręcznej, aby nie dodawać go ponownie po usunięciu krzyżykiem
-        await chrome.storage.local.remove(["last_downloaded_pdf"]);
+        let success = false;
 
         try {
           const res = await fetch(`${API_BASE}/api/stage-by-path`, {
@@ -337,8 +336,23 @@ async function syncRecentDownloads() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ file_path: filePath })
           });
-          return res.ok;
+          if (res.ok) success = true;
         } catch (_) {}
+
+        if (!success) {
+          try {
+            if (chrome.runtime && chrome.runtime.sendNativeMessage) {
+              chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filePath }, () => {});
+              success = true;
+            }
+          } catch (_) {}
+        }
+
+        if (success) {
+          // Natychmiast usuń z pamięci podręcznej, aby nie dodawać go ponownie po usunięciu krzyżykiem
+          await chrome.storage.local.remove(["last_downloaded_pdf"]);
+          return true;
+        }
       }
     }
   } catch (e) {

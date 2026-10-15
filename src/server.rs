@@ -1358,6 +1358,18 @@ async fn shutdown_server(State(state): State<AppState>) -> Json<serde_json::Valu
         {
             let _ = std::process::Command::new("systemctl").args(["--user", "stop", "algodeck.service"]).output();
         }
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(home) = dirs::home_dir() {
+                let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
+                if plist.exists() {
+                    let _ = std::process::Command::new("launchctl")
+                        .args(["unload", "-w"])
+                        .arg(&plist)
+                        .output();
+                }
+            }
+        }
     });
     Json(serde_json::json!({ "success": true }))
 }

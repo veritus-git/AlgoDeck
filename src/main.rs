@@ -479,6 +479,24 @@ fn start_detached_daemon() {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
+            if plist.exists() {
+                let _ = std::process::Command::new("launchctl")
+                    .args(["load", "-w"])
+                    .arg(&plist)
+                    .output();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(500)).call().is_ok() {
+                    println!("✓ Usługa LaunchAgent (com.algodeck.daemon) została uruchomiona przez launchctl!");
+                    return;
+                }
+            }
+        }
+    }
+
     println!("⚡ Uruchamianie daemona AlgoDeck w tle...");
     let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
     match std::process::Command::new(self_exe).arg("daemon").spawn() {
@@ -497,6 +515,19 @@ fn stop_daemon() {
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("systemctl").args(["--user", "stop", "algodeck.service"]).output();
+        let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck daemon").output();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
+            if plist.exists() {
+                let _ = std::process::Command::new("launchctl")
+                    .args(["unload", "-w"])
+                    .arg(&plist)
+                    .output();
+            }
+        }
         let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck daemon").output();
     }
     #[cfg(target_os = "windows")]

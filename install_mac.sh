@@ -231,6 +231,9 @@ exec "$HOME/.local/bin/algodeck" native-host
 WRAPPER_EOF
 chmod +x "$WRAPPER_PATH"
 
+# Oblicz unikalny identyfikator rozszerzenia Chrome dla lokalnego folderu rozszerzenia
+MAC_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
+
 MANIFEST_CONTENT='{
   "name": "com.algodeck.launcher",
   "description": "AlgoDeck 100% Rust Native Messaging Host for macOS",
@@ -238,7 +241,8 @@ MANIFEST_CONTENT='{
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
-    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"
+    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/",
+    "chrome-extension://'"$MAC_EXT_ID"'/"
   ]
 }'
 
@@ -281,11 +285,6 @@ cat << PLIST_EOF > "$PLIST_FILE"
     </array>
     <key>RunAtLoad</key>
     <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
     <key>StandardOutPath</key>
     <string>$SHARE_DIR/daemon.log</string>
     <key>StandardErrorPath</key>
