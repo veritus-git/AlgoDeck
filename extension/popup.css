@@ -173,16 +173,15 @@ body.offline-mode .app-container {
 }
 
 /* ==========================================================================
-   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — JEDNOLITE TŁO BEZ PASKÓW
+   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — ULTRA-ŚCIŚNIĘTE NA OSI Y
    ========================================================================== */
 html.detected-mode,
 body.detected-mode {
-  width: 380px !important;
-  min-width: 380px !important;
-  max-width: 380px !important;
-  height: 100vh !important;
-  min-height: 100vh !important;
-  max-height: 100vh !important;
+  width: 370px !important;
+  min-width: 370px !important;
+  max-width: 370px !important;
+  height: auto !important;
+  min-height: 0 !important;
   background: linear-gradient(145deg, #121a2c, #0d1322) !important;
   overflow: hidden !important;
   margin: 0 !important;
@@ -195,64 +194,69 @@ body.detected-mode {
 }
 
 body.detected-mode .app-container {
-  width: 380px !important;
-  min-width: 380px !important;
-  max-width: 380px !important;
-  height: 100% !important;
-  min-height: 100% !important;
+  width: 370px !important;
+  min-width: 370px !important;
+  max-width: 370px !important;
+  height: auto !important;
+  min-height: 0 !important;
   background: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: center !important;
 }
 
 body.detected-mode .view-detected {
-  width: 380px !important;
-  min-width: 380px !important;
-  max-width: 380px !important;
-  height: 100% !important;
-  padding: 12px 14px !important;
+  width: 370px !important;
+  min-width: 370px !important;
+  max-width: 370px !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 8px 12px 9px 12px !important;
   box-sizing: border-box !important;
   background: transparent !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: center !important;
+  justify-content: flex-start !important;
+  gap: 0 !important;
 }
 
 body.detected-mode .detected-box-card {
   width: 100% !important;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  padding: 0;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: center !important;
-  gap: 8px;
+  justify-content: flex-start !important;
+  gap: 3px !important;
 }
 
 .det-top-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  line-height: 1.1;
+  margin: 0;
+  padding: 0;
 }
 
 .det-title-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .det-bolt {
   color: #38bdf8;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .det-title-text {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   color: #f8fafc;
 }
@@ -261,27 +265,33 @@ body.detected-mode .detected-box-card {
   background: transparent;
   border: none;
   color: #94a3b8;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 0 4px;
+  line-height: 1;
   border-radius: 4px;
+  transition: all 0.15s ease;
 }
 
 .det-btn-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   color: #fff;
 }
 
 .det-meta-row {
-  font-size: 12px;
+  font-size: 11px;
   color: #94a3b8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.2;
+  margin: 1px 0 3px 0;
+  padding: 0;
 }
 
 .det-meta-row strong {
   color: #38bdf8;
+  font-weight: 600;
 }
 
 .btn-det-oneclick {
@@ -289,20 +299,29 @@ body.detected-mode .detected-box-card {
   color: #fff;
   border: none;
   border-radius: 6px;
-  padding: 10px 14px;
-  font-size: 12.5px;
+  padding: 7px 12px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
+  line-height: 1.2;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
   transition: all 0.15s ease;
+  margin: 0;
 }
 
 .btn-det-oneclick:hover {
   background: linear-gradient(135deg, #0369a1, #075985);
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.5);
+  transform: translateY(-0.5px);
+}
+
+.btn-det-oneclick:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 /* ==========================================================================

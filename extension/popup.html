@@ -4,6 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AlgoDeck</title>
+  <script>
+    // Błyskawiczna ochrona przed zombi-oknami przywracanymi przez sesję przeglądarki
+    (function() {
+      try {
+        const p = new URLSearchParams(window.location.search);
+        if (p.get("oneclick") === "1") {
+          const t = parseInt(p.get("t") || "0", 10);
+          if (!t || (Date.now() - t) > 15000) {
+            window.close();
+          }
+        }
+      } catch (_) {}
+    })();
+  </script>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -18,6 +32,28 @@
         <span class="btn-spinner hidden" id="offline-spinner"></span>
         <span id="offline-btn-text">⚡ Uruchom AlgoDeck</span>
       </button>
+    </div>
+
+    <!-- =========================================================================
+         STAN 2: POWIADOMIENIE 1-KLIK (WYKRYTO ZADANIE PDF)
+         Wyświetlane w ultra-kompaktowym oknie podręcznym po pobraniu pliku PDF.
+         ========================================================================= -->
+    <div id="view-detected" class="view-detected hidden">
+      <div class="detected-box-card">
+        <div class="det-top-row">
+          <div class="det-title-group">
+            <span class="det-bolt">⚡</span>
+            <span class="det-title-text" id="det-box-title">Wykryto nowe zadanie PDF</span>
+          </div>
+          <button type="button" id="btn-det-close" class="det-btn-close" title="Zamknij (zostaw w kolejce na pasku)">✕</button>
+        </div>
+        <div class="det-meta-row">
+          Plik: <strong id="det-filename-text">zadanie.pdf</strong> &bull; Kod: <strong id="det-code-text">ZAD</strong>
+        </div>
+        <button type="button" id="btn-det-oneclick" class="btn-det-oneclick">
+          <span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)
+        </button>
+      </div>
     </div>
 
     <!-- =========================================================================

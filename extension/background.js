@@ -15,7 +15,7 @@ async function cleanupRestoredWindows() {
       for (const win of windows) {
         for (const tab of win.tabs || []) {
           if (tab.url && tab.url.includes("popup.html")) {
-            if (win.tabs.length === 1 || tab.url.includes("auto_pdf=")) {
+            if (win.type === "popup" || tab.url.includes("oneclick=") || tab.url.includes("auto_pdf=")) {
               console.log("[AlgoDeck] Zamykam przywrócone zombi-okno popup:", win.id);
               chrome.windows.remove(win.id).catch(() => {});
               break;
@@ -59,6 +59,8 @@ async function isDaemonRunning() {
   }
 }
 
+let activeNotificationWindowId = null;
+
 // Obsługa zakończonego pobierania (wyłącznie PDF)
 async function handleCompletedDownload(downloadId) {
   if (!downloadId) return;
@@ -81,6 +83,13 @@ async function handleCompletedDownload(downloadId) {
 
     const baseName = filename.replace(/^.*[\\\/]/, '');
 
+    // Kiedy usługa AlgoDeck jest wyłączona — nie podejmuj żadnych akcji
+    const isOnline = await isDaemonRunning();
+    if (!isOnline) {
+      console.log("[AlgoDeck] Demon wyłączony — pomijam zadanie:", baseName);
+      return;
+    }
+
     console.log("[AlgoDeck] Wykryto pobranie zadania PDF:", filename);
 
     // 1. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
@@ -92,21 +101,21 @@ async function handleCompletedDownload(downloadId) {
     // Nowe pobranie unieważnia ewentualne poprzednie wyczyszczenie
     await chrome.storage.local.remove(["cleared_pdf_name"]);
 
-    // 2. Jeśli usługa AlgoDeck działa, wyślij natychmiast do stagingu w tle!
-    const isOnline = await isDaemonRunning();
-    if (isOnline) {
-      try {
-        const res = await fetch(`${API_BASE}/api/stage-by-path`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_path: filename })
-        });
-        if (res.ok) {
-          console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni (staging) w tle:", filename);
-        }
-      } catch (err) {
-        console.warn("[AlgoDeck] Błąd przesyłania do /api/stage-by-path:", err);
+    // 2. Wyślij do Rust backendu (staging)
+    let problemId = "";
+    try {
+      const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_path: filename })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        problemId = data.problem_id || "";
+        console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni (staging) w Rust:", data);
       }
+    } catch (err) {
+      console.warn("[AlgoDeck] Błąd przesyłania do /api/stage-by-path:", err);
     }
 
     // 3. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
@@ -117,14 +126,17 @@ async function handleCompletedDownload(downloadId) {
       }
     } catch (_) {}
 
-    // 4. Powiadomienie systemowe
+    // 4. Otwórz okienko 1-Kliknięcia (singleton, na macOS/błędzie cichy fallback na kolejkę)
+    await openOneClickWindow(baseName, problemId);
+
+    // 5. Powiadomienie systemowe
     try {
       if (chrome.notifications && chrome.notifications.create) {
         chrome.notifications.create(`algodeck_${downloadId}_${Date.now()}`, {
           type: "basic",
           iconUrl: "icons/icon128.png",
-          title: "AlgoDeck ⚡ Zaciągnięto zadanie",
-          message: `Pobrano: ${baseName}\nPlik czeka w poczekalni AlgoDeck. Kliknij ikonę ⚡, aby otworzyć VS Code.`,
+          title: "AlgoDeck ⚡ Nowe zadanie",
+          message: `Pobrano: ${baseName}\nKliknij, aby utworzyć Workspace w VS Code.`,
           priority: 2,
           requireInteraction: false
         });
@@ -133,6 +145,47 @@ async function handleCompletedDownload(downloadId) {
   } catch (e) {
     console.warn("[AlgoDeck] Błąd handleCompletedDownload:", e);
   }
+}
+
+// Otwieranie ultra-kompaktowego okna 1-Klik (z zabezpieczeniem singleton)
+async function openOneClickWindow(baseName, problemId) {
+  try {
+    // Zamknij poprzednie okno powiadomienia, jeśli wciąż jest otwarte (singleton!)
+    if (activeNotificationWindowId !== null) {
+      try {
+        await chrome.windows.remove(activeNotificationWindowId);
+      } catch (_) {}
+      activeNotificationWindowId = null;
+    }
+
+    const popupUrl = chrome.runtime.getURL(
+      `popup.html?oneclick=1&t=${Date.now()}&file=${encodeURIComponent(baseName)}&code=${encodeURIComponent(problemId || "")}`
+    );
+
+    if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.create) {
+      const win = await chrome.windows.create({
+        url: popupUrl,
+        type: "popup",
+        width: 370,
+        height: 104,
+        focused: true
+      });
+      if (win && win.id) {
+        activeNotificationWindowId = win.id;
+      }
+    }
+  } catch (err) {
+    console.warn("[AlgoDeck] Błąd otwierania okna 1-Klik (np. macOS Safari) — plik pozostaje w kolejce:", err);
+    // Zadanie jest już bezpiecznie w poczekalni (staging) w Rust z zieloną odznaką "1"
+  }
+}
+
+if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.onRemoved) {
+  chrome.windows.onRemoved.addListener((windowId) => {
+    if (windowId === activeNotificationWindowId) {
+      activeNotificationWindowId = null;
+    }
+  });
 }
 
 // Nasłuchiwanie na żywo zdarzeń pobierania

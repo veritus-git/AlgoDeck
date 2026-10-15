@@ -66,6 +66,84 @@ let isStartingDaemon = false;
 
 // ---------------- Inicjalizacja ----------------
 document.addEventListener("DOMContentLoaded", async () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const isOneClickMode = urlParams.get("oneclick") === "1";
+
+  // STAN 2: Tryb powiadomienia 1-Klik po pobraniu PDF
+  if (isOneClickMode) {
+    document.documentElement.classList.add("detected-mode");
+    document.body.classList.add("detected-mode");
+    if (viewOffline) viewOffline.classList.add("hidden");
+    if (viewMain) viewMain.classList.add("hidden");
+    if (viewDetected) viewDetected.classList.remove("hidden");
+
+    const fileName = urlParams.get("file") || "zadanie.pdf";
+    const code = urlParams.get("code") || "";
+
+    const detFilenameText = document.getElementById("det-filename-text");
+    const detCodeText = document.getElementById("det-code-text");
+    const btnDetClose = document.getElementById("btn-det-close");
+    const btnDetOneclick = document.getElementById("btn-det-oneclick");
+
+    if (detFilenameText) detFilenameText.textContent = fileName;
+    if (detCodeText) detCodeText.textContent = code ? code.toUpperCase() : "ZAD";
+
+    // Obsługa zamknięcia krzyżykiem X — zamykamy TYLKO okno powiadomienia.
+    // Plik POZOSTAJE zakolejkowany w Rust (/api/staged-state) i czeka na pasku rozszerzenia!
+    if (btnDetClose) {
+      btnDetClose.addEventListener("click", () => {
+        window.close();
+      });
+    }
+
+    // Obsługa przycisku 1-Klik — tworzymy workspace i otwieramy VS Code
+    if (btnDetOneclick) {
+      btnDetOneclick.addEventListener("click", async () => {
+        btnDetOneclick.disabled = true;
+        btnDetOneclick.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace...`;
+
+        try {
+          const res = await fetch(`${API_BASE}/api/start-staged`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({})
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            const pid = (data.problem_id || "zad").toLowerCase();
+            try {
+              await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+            } catch (_) {}
+            try {
+              if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+                chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
+              }
+            } catch (_) {}
+
+            if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+              chrome.action.setBadgeText({ text: "" });
+            }
+            btnDetOneclick.innerHTML = `✓ Gotowe! Uruchomiono VS Code`;
+            setTimeout(() => {
+              window.close();
+            }, 600);
+          } else {
+            alert(`Błąd: ${data.error || data.detail || "Nie udało się utworzyć workspace"}`);
+            btnDetOneclick.disabled = false;
+            btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
+          }
+        } catch (e) {
+          alert("Błąd połączenia z AlgoDeck");
+          btnDetOneclick.disabled = false;
+          btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
+        }
+      });
+    }
+
+    return; // Nie inicjalizujemy reszty interfejsu w trybie 1-klik
+  }
+
+  // STAN STANDARDOWY: Normalny popup rozszerzenia
   restoreStagedStorage();
   setupTabs();
   setupStaging();
@@ -292,6 +370,9 @@ function setupStaging() {
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ cleared_pdf_name: removedName });
       chrome.storage.local.remove(["last_downloaded_pdf"]);
+    }
+    if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+      chrome.action.setBadgeText({ text: "" });
     }
     clearStagedStorage("pdf");
     stagedPdfPill.classList.add("hidden");
