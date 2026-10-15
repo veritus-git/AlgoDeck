@@ -150,6 +150,10 @@ elif [ -f "$REPO_DIR/algodeck" ]; then
     if [ -d "$REPO_DIR/extension" ]; then
         cp -r "$REPO_DIR/extension/"* "$SHARE_DIR/extension/"
     fi
+    if [ -d "$REPO_DIR/vscode_extension" ]; then
+        mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+        cp -r "$REPO_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+    fi
 fi
 
 # 4b. Jeśli nie zainstalowano z lokalnych plików — pobierz z GitHub Releases
@@ -172,6 +176,10 @@ if [ "$INSTALLED_BIN" = false ]; then
         fi
         if [ -d "$TMP_DIR/extension" ]; then
             cp -r "$TMP_DIR/extension/"* "$SHARE_DIR/extension/"
+        fi
+        if [ -d "$TMP_DIR/vscode_extension" ]; then
+            mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+            cp -r "$TMP_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
         fi
         rm -rf "$TMP_TAR" "$TMP_DIR"
         INSTALLED_BIN=true

@@ -26,10 +26,6 @@ test_workspace/
 *.env
 *.key
 
-# Stream Deck runtime dynamic icons
-frontend/icons/task_*
-frontend/icons/badge_*
-
 # Rust build artifacts
 target/
 gui/target/

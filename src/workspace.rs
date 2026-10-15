@@ -376,29 +376,29 @@ impl WorkspaceManager {
             r#"#!/usr/bin/env bash
 cd "{p_dir_disp}"
 
-echo -e "\e[1;36m[AlgoDeck] Kompilacja {p_id}.cpp (g++ -O3 -std=c++20)...\e[0m"
+echo -e "\033[1;36m[AlgoDeck] Kompilacja {p_id}.cpp (g++ -O3 -std=c++20)...\033[0m"
 mkdir -p .algo
 if ! g++ -O3 -std=c++20 "{p_id}.cpp" -o ".algo/{p_id}" 2>.algo/compile.log; then
-    echo -e "\e[1;31m❌ BŁĄD KOMPILACJI!\e[0m"
-    echo -e "\e[1;31m"
+    echo -e "\033[1;31m❌ BŁĄD KOMPILACJI!\033[0m"
+    echo -e "\033[1;31m"
     cat .algo/compile.log
-    echo -e "\e[0m"
+    echo -e "\033[0m"
     exit 1
 fi
 
-echo -e "\e[1;32m✓ Skompilowano pomyślnie!\e[0m"
-echo -e "\e[1;33m▶ Program uruchomiony (wprowadź dane cin):\e[0m"
-echo -e "\e[0;90m---------------------------------------------------------\e[0m"
+echo -e "\033[1;32m✓ Skompilowano pomyślnie!\033[0m"
+echo -e "\033[1;33m▶ Program uruchomiony (wprowadź dane cin):\033[0m"
+echo -e "\033[0;90m---------------------------------------------------------\033[0m"
 
 ./.algo/{p_id}
 RET=$?
 
 echo ""
-echo -e "\e[0;90m---------------------------------------------------------\e[0m"
+echo -e "\033[0;90m---------------------------------------------------------\033[0m"
 if [ "${{RET:-0}}" -eq 0 ]; then
-    echo -e "\e[1;32m✓ Program zakończony pomyślnie (kod: 0).\e[0m"
+    echo -e "\033[1;32m✓ Program zakończony pomyślnie (kod: 0).\033[0m"
 else
-    echo -e "\e[1;31m❌ Program zakończony błędem (kod: ${{RET}}).\e[0m"
+    echo -e "\033[1;31m❌ Program zakończony błędem (kod: ${{RET}}).\033[0m"
 fi
 "#,
             p_dir_disp = p_dir.display(),
@@ -432,17 +432,17 @@ PROB_UPPER="{p_upper}"
 PROB_TITLE="{title}"
 TIME_LIMIT_MS={time_limit_ms}
 
-C_RESET="\e[0m"
-C_BOLD="\e[1m"
-C_DIM="\e[2m"
-C_GREEN="\e[1;32m"
-C_RED="\e[1;31m"
-C_YELLOW="\e[1;33m"
-C_BLUE="\e[1;34m"
-C_CYAN="\e[1;36m"
-C_MAGENTA="\e[1;35m"
-C_WHITE="\e[1;37m"
-C_GRAY="\e[0;90m"
+C_RESET="\033[0m"
+C_BOLD="\033[1m"
+C_DIM="\033[2m"
+C_GREEN="\033[1;32m"
+C_RED="\033[1;31m"
+C_YELLOW="\033[1;33m"
+C_BLUE="\033[1;34m"
+C_CYAN="\033[1;36m"
+C_MAGENTA="\033[1;35m"
+C_WHITE="\033[1;37m"
+C_GRAY="\033[0;90m"
 
 pad_left() {{
     local text="$1"

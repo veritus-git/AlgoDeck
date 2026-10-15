@@ -9,7 +9,7 @@
     try {
       const q = new URLSearchParams(window.location.search);
       if (q.get("auto_pdf")) {
-        document.documentElement.classList.add("detected-mode");
+        window.close();
       }
     } catch (_) {}
   </script>

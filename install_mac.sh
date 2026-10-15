@@ -188,9 +188,18 @@ else
         if [ -n "$ROOT_EXTRACT" ] && [ -d "$ROOT_EXTRACT/extension" ]; then
             cp -r "$ROOT_EXTRACT/extension/"* "$EXT_DIR/"
         fi
+        if [ -n "$ROOT_EXTRACT" ] && [ -d "$ROOT_EXTRACT/vscode_extension" ]; then
+            mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+            cp -r "$ROOT_EXTRACT/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+        fi
         rm -rf "$TMP_ZIP" "$TMP_DIR"
         echo -e "${GREEN}✓ Zasoby Web Hub i rozszerzenia pomyślnie zsynchronizowane.${NC}"
     fi
+fi
+
+if [ -d "$REPO_DIR/vscode_extension" ]; then
+    mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+    cp -r "$REPO_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
 fi
 
 # ------------------------------------------------------------------------------

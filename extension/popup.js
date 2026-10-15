@@ -188,26 +188,22 @@ async function checkDaemonHealth() {
 
 // ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
-  // Jeśli AlgoDeck jest wyłączony (offline), autowykrywanie NIE MOŻE działać!
-  const isOnline = await checkDaemonHealth();
-  if (!isOnline) {
+  const urlParams = new URLSearchParams(window.location.search);
+  let autoPdf = urlParams.get("auto_pdf");
+
+  // 1. BEZWZGLĘDNE ZAMKNIĘCIE STARYCH OSOBNYCH OKIEN:
+  // AlgoDeck v2.0 korzysta wyłącznie z podmenu paska przeglądarki (Action Popup).
+  // Każde okno posiadające w URL ?auto_pdf= to relikt z poprzednich wersji - zamknij natychmiast!
+  if (autoPdf) {
+    console.log("[AlgoDeck] Wykryto osobne okno z parametrem auto_pdf. Zamykam natychmiast.");
+    try { window.close(); } catch (_) {}
     return false;
   }
 
-  const urlParams = new URLSearchParams(window.location.search);
-  let autoPdf = urlParams.get("auto_pdf");
-  const tParam = urlParams.get("t");
-
-  // 1. Zabezpieczenie przed zombi-oknami przywracanymi przez sesję przeglądarki (Session Restore):
-  // Jeśli to dedykowane okno powiadomienia, ale timestamp w URL jest przedawniony (> 20s) lub go brak:
-  if (autoPdf) {
-    const timestamp = parseInt(tParam || "0", 10);
-    const age = Date.now() - timestamp;
-    if (!timestamp || age > 20000 || age < -5000) {
-      console.log("[AlgoDeck] Wykryto zombi-okno powiadomienia ze starej sesji. Zamykam natychmiast.");
-      window.close();
-      return false;
-    }
+  // 2. Jeśli AlgoDeck jest wyłączony (offline), autowykrywanie NIE MOŻE działać!
+  const isOnline = await checkDaemonHealth();
+  if (!isOnline) {
+    return false;
   }
 
   // 2. Jeśli brak w URL (użytkownik kliknął ikonę rozszerzenia na pasku zadań),

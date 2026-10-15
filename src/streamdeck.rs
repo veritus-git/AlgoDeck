@@ -658,7 +658,15 @@ impl StreamDeckEngine {
         let mut base = RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]));
 
         if label.contains('/') {
-            // Wskaźnik numeru zadania np. "1/1" czy "2/5": DUŻY, CZYTELNY, OSTRY napis na OLED black (#000000)
+            // Wskaźnik numeru zadania np. "1/1" czy "2/5": Sprawdź czy mamy gotową wygładzoną ikonę PNG
+            let num_filename = format!("task_num_{}.png", label.replace('/', "_"));
+            if let Some(p) = Self::find_icon_file(&num_filename) {
+                if let Ok(loaded) = image::open(&p) {
+                    let resized = loaded.resize_exact(72, 72, imageops::FilterType::Lanczos3);
+                    return DynamicImage::ImageRgb8(resized.to_rgb8());
+                }
+            }
+
             let char_count = label.chars().count() as i32;
             let scale = if char_count <= 3 { 3 } else { 2 };
             let char_w = 5 * scale + scale;
