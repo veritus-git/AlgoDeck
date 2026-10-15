@@ -290,6 +290,7 @@ try {
 } catch {}
 
 $AllowedOrigins = @(
+    "chrome-extension://jglgkkeklbipodmhcncnmdnippdijjcp/",
     "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
     "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"
 )

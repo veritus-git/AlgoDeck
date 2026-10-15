@@ -226,11 +226,15 @@ function setupOfflineStarter() {
     offlineBtnText.textContent = "Uruchamianie AlgoDeck...";
 
     // 1. Wyślij komunikat przez native messaging host
+    let nativeErrMsg = null;
     try {
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
         chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "start" }, (resp) => {
           if (chrome.runtime.lastError) {
-            console.warn("[AlgoDeck] Native messaging fallback:", chrome.runtime.lastError.message);
+            nativeErrMsg = chrome.runtime.lastError.message || "Błąd komunikacji native host";
+            console.warn("[AlgoDeck] Native messaging fallback:", nativeErrMsg, "Ext ID:", chrome.runtime.id);
+          } else {
+            console.log("[AlgoDeck] Native host start response:", resp);
           }
         });
       }
@@ -282,7 +286,8 @@ function setupOfflineStarter() {
         btnStartAlgodeck.disabled = false;
         offlineSpinner.classList.add("hidden");
         offlineBtnText.textContent = "⚡ Spróbuj ponownie uruchomić";
-        alert("Nie udało się połączyć z serwerem AlgoDeck. Upewnij się, że instalacja została zakończona.");
+        const extraInfo = nativeErrMsg ? `\n\nKomunikat przeglądarki: ${nativeErrMsg}\nID Twojego rozszerzenia: ${chrome?.runtime?.id || "nieznane"}` : "";
+        alert(`Nie udało się połączyć z serwerem AlgoDeck.${extraInfo}\n\nMożesz też uruchomić AlgoDeck w terminalu poleceniem:\n  algodeck start`);
       }
     }, 300);
   });

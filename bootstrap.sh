@@ -249,6 +249,7 @@ CHROME_TARGETS=(
 LOCAL_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
 
 ALLOWED_ORIGINS='[
+    "chrome-extension://jglgkkeklbipodmhcncnmdnippdijjcp/",
     "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
     "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"'
 

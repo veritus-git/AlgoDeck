@@ -35,12 +35,16 @@ fn handle_native_message(msg: &Value) -> Value {
 
     match action {
         "start" => {
-            let _ = Command::new(&self_exe).arg("start").spawn();
-            serde_json::json!({ "success": true, "status": "starting" })
+            crate::server::start_detached_daemon();
+            let is_online = ureq::get("http://127.0.0.1:8080/api/status")
+                .timeout(std::time::Duration::from_millis(400))
+                .call()
+                .is_ok();
+            serde_json::json!({ "success": is_online, "status": if is_online { "online" } else { "starting" } })
         }
         "stop" => {
-            let _ = Command::new(&self_exe).arg("stop").spawn();
-            serde_json::json!({ "success": true, "status": "stopping" })
+            crate::server::stop_daemon();
+            serde_json::json!({ "success": true, "status": "stopped" })
         }
         "gui" => {
             let _ = Command::new(&self_exe).spawn();

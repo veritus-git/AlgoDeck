@@ -77,10 +77,10 @@ fn main() {
             run_daemon(port);
         }
         Some(Commands::Start) => {
-            start_detached_daemon();
+            server::start_detached_daemon();
         }
         Some(Commands::Stop) => {
-            stop_daemon();
+            server::stop_daemon();
         }
         Some(Commands::Status) => {
             check_status();
@@ -454,166 +454,7 @@ fn run_daemon(port: u16) {
     println!("✓ AlgoDeck został zatrzymany, kontroler Stream Deck zwolniony.");
 }
 
-fn start_detached_daemon() {
-    match ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(500)).call() {
-        Ok(_) => {
-            println!("⚡ AlgoDeck już działa w tle na porcie 8080.");
-            return;
-        }
-        Err(_) => {}
-    }
 
-    #[cfg(target_os = "linux")]
-    {
-        let status = std::process::Command::new("systemctl")
-            .args(["--user", "start", "algodeck.service"])
-            .status();
-        if let Ok(s) = status {
-            if s.success() {
-                std::thread::sleep(std::time::Duration::from_millis(300));
-                if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(500)).call().is_ok() {
-                    println!("✓ Usługa algodeck.service została uruchomiona przez systemd!");
-                    return;
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let uid = unsafe { libc::getuid() };
-        let service_target = format!("gui/{}/com.algodeck.daemon", uid);
-
-        // 1. Odblokuj usługę w launchd per-user domain
-        let _ = std::process::Command::new("launchctl")
-            .args(["enable", &service_target])
-            .output();
-
-        // 2. Jeśli usługa jest już zarejestrowana, uruchom ją natychmiast przez kickstart
-        let _ = std::process::Command::new("launchctl")
-            .args(["kickstart", "-k", &service_target])
-            .output();
-
-        // 3. Jeśli nie była zarejestrowana, załaduj plist
-        if let Some(home) = dirs::home_dir() {
-            let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
-            if plist.exists() {
-                let _ = std::process::Command::new("launchctl")
-                    .args(["bootstrap", &format!("gui/{}", uid)])
-                    .arg(&plist)
-                    .output();
-                let _ = std::process::Command::new("launchctl")
-                    .args(["load"])
-                    .arg(&plist)
-                    .output();
-                let _ = std::process::Command::new("launchctl")
-                    .args(["start", "com.algodeck.daemon"])
-                    .output();
-            }
-        }
-
-        for _ in 0..15 {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(300)).call().is_ok() {
-                println!("✓ Usługa LaunchAgent (com.algodeck.daemon) została pomyślnie uruchomiona przez launchctl!");
-                return;
-            }
-        }
-    }
-
-    println!("⚡ Uruchamianie daemona AlgoDeck w tle...");
-    let self_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"));
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let mut cmd = std::process::Command::new(&self_exe);
-        cmd.arg("daemon");
-        cmd.stdin(std::process::Stdio::null());
-
-        let log_dir = dirs::home_dir()
-            .map(|h| h.join(".local/share/algodeck"))
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-        let _ = std::fs::create_dir_all(&log_dir);
-        let log_path = log_dir.join("daemon.log");
-
-        if let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-            if let Ok(err_file) = file.try_clone() {
-                cmd.stdout(file);
-                cmd.stderr(err_file);
-            }
-        }
-
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
-
-        match cmd.spawn() {
-            Ok(_) => {
-                for _ in 0..15 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(300)).call().is_ok() {
-                        println!("✓ Daemon AlgoDeck został pomyślnie uruchomiony w tle!");
-                        return;
-                    }
-                }
-                println!("✓ Polecenie startu daemona wysłane. Sprawdź status poleceniem 'algodeck status'.");
-            }
-            Err(e) => {
-                eprintln!("Błąd startu daemona: {}", e);
-            }
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        match std::process::Command::new(self_exe).arg("daemon").spawn() {
-            Ok(_) => {
-                println!("✓ Daemon został pomyślnie uruchomiony w tle!");
-            }
-            Err(e) => {
-                eprintln!("Błąd startu daemona: {}", e);
-            }
-        }
-    }
-}
-
-fn stop_daemon() {
-    println!("⏹ Zatrzymywanie AlgoDeck...");
-    let _ = ureq::post("http://127.0.0.1:8080/api/shutdown").timeout(std::time::Duration::from_millis(800)).call();
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("systemctl").args(["--user", "stop", "algodeck.service"]).output();
-        let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck daemon").output();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let uid = unsafe { libc::getuid() };
-        let service_target = format!("gui/{}/com.algodeck.daemon", uid);
-        let _ = std::process::Command::new("launchctl").args(["bootout", &service_target]).output();
-        if let Some(home) = dirs::home_dir() {
-            let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
-            if plist.exists() {
-                let _ = std::process::Command::new("launchctl")
-                    .args(["unload"])
-                    .arg(&plist)
-                    .output();
-            }
-        }
-        let _ = std::process::Command::new("pkill").arg("-f").arg("algodeck daemon").output();
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "algodeck.exe"]).output();
-    }
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    // Bezpośrednie wyczyszczenie ekranu Stream Decka przez USB HID
-    StreamDeckEngine::blank_device_if_connected();
-    println!("✓ AlgoDeck zatrzymany, ekran Stream Decka wygaszony.");
-}
 
 fn check_status() {
     match ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(600)).call() {

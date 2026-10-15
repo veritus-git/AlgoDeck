@@ -256,14 +256,20 @@ xattr -cr "$WRAPPER_PATH" 2>/dev/null || true
 
 # Oblicz unikalny identyfikator rozszerzenia Chrome dla lokalnego folderu rozszerzenia
 MAC_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
+REPO_EXT_ID=$(python3 -c "import hashlib; p='$REPO_DIR/extension'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
 
 ALLOWED_ORIGINS='[
+    "chrome-extension://jglgkkeklbipodmhcncnmdnippdijjcp/",
     "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
     "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"'
 
 if [ -n "$MAC_EXT_ID" ]; then
     ALLOWED_ORIGINS="$ALLOWED_ORIGINS"',
     "chrome-extension://'"$MAC_EXT_ID"'/"'
+fi
+if [ -n "$REPO_EXT_ID" ] && [ "$REPO_EXT_ID" != "$MAC_EXT_ID" ]; then
+    ALLOWED_ORIGINS="$ALLOWED_ORIGINS"',
+    "chrome-extension://'"$REPO_EXT_ID"'/"'
 fi
 ALLOWED_ORIGINS="$ALLOWED_ORIGINS"'
   ]'
@@ -278,12 +284,15 @@ MANIFEST_CONTENT='{
 
 MAC_BROWSER_TARGETS=(
     "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+    "$HOME/Library/Application Support/Google/Chrome Canary/NativeMessagingHosts"
     "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
     "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
     "$HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
     "$HOME/Library/Application Support/Vivaldi/NativeMessagingHosts"
     "$HOME/Library/Application Support/Arc/User Data/NativeMessagingHosts"
+    "$HOME/Library/Application Support/Arc/NativeMessagingHosts"
     "$HOME/Library/Application Support/com.operasoftware.Opera/NativeMessagingHosts"
+    "$HOME/Library/Application Support/com.operasoftware.OperaGX/NativeMessagingHosts"
 )
 
 for TARGET_DIR in "${MAC_BROWSER_TARGETS[@]}"; do
@@ -368,14 +377,24 @@ else
     echo -e "${YELLOW}Uwaga: Serwer nie odpowiedział jeszcze na porcie 8080. Logi dostępne w: $SHARE_DIR/daemon.log${NC}"
 fi
 
-# Dodaj ~/.local/bin do powłok zsh i bash
-for RC in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+# Dodaj ~/.local/bin do powłok zsh i bash (upewnij się, że pliki istnieją!)
+for RC in "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
+    if [ ! -f "$RC" ]; then
+        touch "$RC" 2>/dev/null || true
+    fi
     if [ -f "$RC" ]; then
         if ! grep -q '\.local/bin' "$RC" 2>/dev/null; then
+            echo '' >> "$RC"
+            echo '# AlgoDeck CLI PATH' >> "$RC"
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$RC"
         fi
     fi
 done
+
+# Jeśli /usr/local/bin jest zapisywalne, utwórz symlink dla natychmiastowej dostępności w każdym oknie
+if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    ln -sf "$BIN_DIR/algodeck" "/usr/local/bin/algodeck" 2>/dev/null || true
+fi
 
 # ------------------------------------------------------------------------------
 # AUTOMATYZACJA ROZSZERZENIA: SCHOWEK, FINDER I PRZEGLĄDARKA
@@ -405,9 +424,11 @@ echo -e "${GREEN}${BOLD}       🎉 AlgoDeck v2.0.0 (100% Rust) pomyślnie zains
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
 echo -e "• Panel Web Hub:   ${CYAN}${BOLD}http://127.0.0.1:8080/${NC} lub kliknij ikonę rozszerzenia"
 echo -e "• Stream Deck:     Bezpośrednia obsługa USB HID bez oficjalnej aplikacji Elgato"
-echo -e "• Narzędzie CLI:   ${BOLD}algodeck status${NC} | ${BOLD}algodeck test <kod>${NC} | ${BOLD}algodeck stop${NC} | ${BOLD}algodeck extension${NC}"
+echo -e "• Narzędzie CLI:   ${BOLD}algodeck status${NC} | ${BOLD}algodeck start${NC} | ${BOLD}algodeck stop${NC} | ${BOLD}algodeck test <kod>${NC}"
 echo -e "• Folder programu: ${BOLD}$SHARE_DIR${NC}"
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
+echo -e "${BLUE}💡 Jeśli w tym oknie terminala polecenie 'algodeck' nie jest jeszcze widoczne, wpisz:${NC}"
+echo -e "   ${BOLD}source ~/.zshrc${NC}  (lub po prostu otwórz nowe okno terminala)\n"
 
 echo -e "\n${CYAN}${BOLD}🧩 ROZSZERZENIE PRZEGLĄDARKI (Automatyczne ułatwienie):${NC}"
 echo -e "${GREEN}✓ Ścieżka folderu rozszerzenia została AUTOMATYCZNIE SKOPIOWANA do Twojego schowka (Cmd+V)!${NC}"

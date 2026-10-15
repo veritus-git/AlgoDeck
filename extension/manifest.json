@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "AlgoDeck ⚡ Koło MAP",
   "version": "2.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmyXY5hk3v/NunKLsARSihaI9QiVBtirIzyVxcCo2fM5LjnE0aQJHrzKb5oqgclc7YeCYzzqYhSc1ilfMyNTYodn8uez44ND5Wvg8JoDG0pD6Y4lxeVAueEJoODwafRtbRvgDRIslcqAJKrslnPgmavARCHAPF8n1xE3qlIudHt8HB3A2kMWGkKa4l5m5UzfaDi26OmYsNIX86CJRELeFkn6iF6Mulqo48w9e5zFwbFPfeEFI+JsnhdectHEmMjnss9ICKR3KyYA9K6E5bLmYC7csdrgEAtkCY2KYF5Zskq40/+rTpqhyI0/awbvK9lE10bZxOWJC0TughpwN5HZtrQIDAQAB",
   "description": "Zautomatyzowane środowisko do algorytmiki i programowania dla Koła MAP, OIJ, OI oraz Szkopuła",
   "icons": {
     "16": "icons/icon16.png",
