@@ -100,36 +100,6 @@ fn main() {
     }
 }
 
-fn check_streamdeck_conflicts() {
-    #[cfg(target_os = "windows")]
-    {
-        let output = std::process::Command::new("tasklist")
-            .args(["/FI", "IMAGENAME eq StreamDeck.exe"])
-            .output();
-        if let Ok(out) = output {
-            let s = String::from_utf8_lossy(&out.stdout);
-            if s.contains("StreamDeck.exe") {
-                eprintln!("\x1b[1;33m[UWAGA] Wykryto działającą oficjalną aplikację Elgato (StreamDeck.exe)!");
-                eprintln!("Aplikacja Elgato blokuje bezpośredni dostęp USB HID do urządzenia.");
-                eprintln!("Zamknij StreamDeck.exe z paska zadań, aby AlgoDeck mógł natychmiast przejąć kontrolę nad Stream Deckiem.\x1b[0m\n");
-            }
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let output = std::process::Command::new("pgrep")
-            .args(["-i", "streamcontroller"])
-            .output();
-        if let Ok(out) = output {
-            if !out.stdout.is_empty() {
-                eprintln!("\x1b[1;33m[UWAGA] Wykryto działający proces StreamController!");
-                eprintln!("StreamController może blokować bezpośredni dostęp do urządzenia.");
-                eprintln!("Zamknij StreamController, aby AlgoDeck mógł sterować klawiszami.\x1b[0m\n");
-            }
-        }
-    }
-}
-
 fn run_daemon(port: u16) {
     println!("{}", r#"
   █████╗ ██╗      ██████╗  ██████╗ ██████╗ ███████╗ ██████╗██╗  ██╗
@@ -145,7 +115,7 @@ fn run_daemon(port: u16) {
     println!("⚡ AlgoDeck Daemon v2.0.0 (100% Rust Architecture) na porcie {}", port);
     println!("--------------------------------------------------");
 
-    check_streamdeck_conflicts();
+    streamdeck::kill_streamdeck_conflicts();
     ensure_vscode_extension_installed();
 
     let settings = Arc::new(RwLock::new(AppSettings::load()));

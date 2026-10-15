@@ -1765,6 +1765,8 @@ pub fn start_detached_daemon() {
         Err(_) => {}
     }
 
+    crate::streamdeck::kill_streamdeck_conflicts();
+
     #[cfg(target_os = "linux")]
     {
         let status = std::process::Command::new("systemctl")

@@ -33,5 +33,4 @@ gui/target/
 release_artifacts/
 dist/
 .cargo/
-frontend/icons/task_*
 

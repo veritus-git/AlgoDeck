@@ -709,8 +709,8 @@ impl StreamDeckEngine {
             return None;
         }
 
-        // Bazowa wysokość tekstu na kafelku 72x72: 28px
-        let base_h: f32 = 28.0;
+        // Bazowa wysokość tekstu na kafelku 72x72: 14px (zgodnie z oryginalnym projektem graficznym i odstępami od boków)
+        let base_h: f32 = 14.0;
         let spacing: i32 = 2;
         let mut total_raw_w: f32 = 0.0;
         for g in &glyphs {
@@ -719,9 +719,9 @@ impl StreamDeckEngine {
         }
         total_raw_w += (spacing * (glyphs.len() as i32 - 1).max(0)) as f32;
 
-        let max_w: f32 = 64.0;
+        let max_w: f32 = 44.0;
         let scale = if total_raw_w > max_w { max_w / total_raw_w } else { 1.0 };
-        let actual_h = (base_h * scale).round().max(12.0) as u32;
+        let actual_h = (base_h * scale).round().max(10.0) as u32;
 
         let mut scaled_glyphs: Vec<RgbaImage> = Vec::new();
         let mut total_w: i32 = 0;
@@ -773,7 +773,7 @@ impl StreamDeckEngine {
             }
 
             let char_count = label.chars().count() as i32;
-            let scale = if char_count <= 3 { 3 } else { 2 };
+            let scale = if char_count <= 4 { 2 } else { 1 };
             let char_w = 5 * scale + scale;
             let total_w = char_count * char_w - scale;
             let start_x = ((72 - total_w) / 2).max(2);
@@ -902,6 +902,7 @@ impl StreamDeckEngine {
         std::thread::spawn(move || {
             let elgato_vid = 0x0fd9;
             println!("🎮 Inicjalizacja sterownika sprzętowego Stream Deck (100% Rust USB HID)...");
+            kill_streamdeck_conflicts();
 
             while self.running.load(Ordering::Relaxed) {
                 let probes = match StreamDeck::probe() {
@@ -1022,5 +1023,136 @@ impl StreamDeckEngine {
                 }
             }
         }
+    }
+}
+
+pub fn kill_streamdeck_conflicts() {
+    let mut killed = false;
+
+    #[cfg(target_os = "windows")]
+    {
+        let conflict_binaries = [
+            "StreamDeck.exe",
+            "StreamController.exe",
+            "deckmaster.exe",
+            "boatswain.exe",
+            "streamdeck-ui.exe",
+            "opendeck.exe",
+        ];
+        for bin in &conflict_binaries {
+            let status = std::process::Command::new("taskkill")
+                .args(["/F", "/IM", bin, "/T"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Ok(s) = status {
+                if s.success() {
+                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {}\x1b[0m", bin);
+                    killed = true;
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Najpierw zatrzymaj systemd user services, aby systemd ich nie zrestartował
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "stop", "streamcontroller.service"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "stop", "com.core447.StreamController.service"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        // Zatrzymaj wersję Flatpak jeśli istnieje
+        let _ = std::process::Command::new("flatpak")
+            .args(["kill", "com.core447.StreamController"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        let my_pid = std::process::id();
+        let conflict_patterns = [
+            "streamcontroller",
+            "StreamController",
+            "boatswain",
+            "deckmaster",
+            "streamdeck-ui",
+            "opendeck",
+        ];
+
+        for pattern in &conflict_patterns {
+            let pgrep = std::process::Command::new("pgrep")
+                .args(["-f", pattern])
+                .output();
+            if let Ok(out) = pgrep {
+                let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .filter(|&pid| pid != my_pid)
+                    .collect();
+
+                if !pids.is_empty() {
+                    for pid in &pids {
+                        let _ = std::process::Command::new("kill")
+                            .args(["-9", &pid.to_string()])
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .status();
+                    }
+                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {} (PID: {:?})\x1b[0m", pattern, pids);
+                    killed = true;
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let my_pid = std::process::id();
+        let conflict_patterns = [
+            "Stream Deck",
+            "StreamDeck",
+            "streamcontroller",
+            "StreamController",
+            "deckmaster",
+            "boatswain",
+            "streamdeck-ui",
+        ];
+
+        for pattern in &conflict_patterns {
+            let pgrep = std::process::Command::new("pgrep")
+                .args(["-f", pattern])
+                .output();
+            if let Ok(out) = pgrep {
+                let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .filter_map(|l| l.trim().parse::<u32>().ok())
+                    .filter(|&pid| pid != my_pid)
+                    .collect();
+
+                if !pids.is_empty() {
+                    for pid in &pids {
+                        let _ = std::process::Command::new("kill")
+                            .args(["-9", &pid.to_string()])
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .status();
+                    }
+                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {} (PID: {:?})\x1b[0m", pattern, pids);
+                    killed = true;
+                }
+            }
+        }
+    }
+
+    if killed {
+        // Krótka pauza, aby deskryptory USB HID zostały w pełni zwolnione w systemie operacyjnym
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        eprintln!("\x1b[1;32m✓ [AlgoDeck] Zwolniono urządzenie Stream Deck dla AlgoDeck.\x1b[0m\n");
     }
 }
