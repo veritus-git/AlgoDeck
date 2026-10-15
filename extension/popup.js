@@ -188,6 +188,12 @@ async function checkDaemonHealth() {
 
 // ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
+  // Jeśli AlgoDeck jest wyłączony (offline), autowykrywanie NIE MOŻE działać!
+  const isOnline = await checkDaemonHealth();
+  if (!isOnline) {
+    return false;
+  }
+
   const urlParams = new URLSearchParams(window.location.search);
   let autoPdf = urlParams.get("auto_pdf");
   const tParam = urlParams.get("t");

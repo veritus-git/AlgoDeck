@@ -54,6 +54,9 @@ enum Commands {
     Run {
         problem_id: String,
     },
+
+    #[command(about = "Otwórz folder rozszerzenia i stronę rozszerzeń w przeglądarce")]
+    Extension,
 }
 
 fn main() {
@@ -90,6 +93,9 @@ fn main() {
         }
         Some(Commands::Run { problem_id }) => {
             run_cli_interactive(&problem_id);
+        }
+        Some(Commands::Extension) => {
+            open_extension_helper();
         }
     }
 }
@@ -611,3 +617,56 @@ fn run_cli_interactive(problem_id: &str) {
     println!("▶ Uruchamianie {} (wprowadź dane wejściowe, zakończ Ctrl+D):\n", problem_id);
     let _ = std::process::Command::new(bin).status();
 }
+
+fn open_extension_helper() {
+    let ext_dir = if let Some(home) = dirs::home_dir() {
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                std::path::PathBuf::from(local).join("AlgoDeck/extension")
+            } else {
+                home.join("AppData/Local/AlgoDeck/extension")
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            home.join(".local/share/algodeck/extension")
+        }
+    } else {
+        std::path::PathBuf::from("extension")
+    };
+
+    let ext_str = ext_dir.to_string_lossy().to_string();
+    println!("🧩 Folder rozszerzenia AlgoDeck: {}", ext_str);
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(mut child) = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn() {
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(ext_str.as_bytes());
+            }
+            let _ = child.wait();
+            println!("📋 Ścieżka została automatycznie skopiowana do schowka (Cmd+V)!");
+        }
+        let _ = std::process::Command::new("open").arg(&ext_dir).output();
+        if std::path::Path::new("/Applications/Brave Browser.app").exists() {
+            let _ = std::process::Command::new("open").args(["-a", "Brave Browser", "brave://extensions"]).output();
+        } else if std::path::Path::new("/Applications/Google Chrome.app").exists() {
+            let _ = std::process::Command::new("open").args(["-a", "Google Chrome", "chrome://extensions"]).output();
+        } else {
+            let _ = open::that("chrome://extensions");
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = open::that(&ext_dir);
+        let _ = open::that("chrome://extensions");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = open::that(&ext_dir);
+        let _ = open::that("chrome://extensions");
+    }
+}
+

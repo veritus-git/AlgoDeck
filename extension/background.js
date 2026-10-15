@@ -145,73 +145,56 @@ function isOlympicTaskFile(item) {
 }
 
 // ------------------------------------------------------------------------------
-// PANCERNY SINGLETON OKNA POWIADOMIENIA (MAKSYMALNIE 1 OKNO NA RAZ)
+// WERYFIKACJA STANU USŁUGI ALGODECK
+// Gdy AlgoDeck jest wyłączony (offline), autowykrywanie NIE MOŻE działać!
 // ------------------------------------------------------------------------------
-async function openDedicatedNotificationWindow(filename) {
-  if (!filename) return;
-
-  const targetUrl = chrome.runtime.getURL(`popup.html?auto_pdf=${encodeURIComponent(filename)}&t=${Date.now()}`);
-
-  // 1. Jeśli mamy zapamiętane aktywne okno powiadomienia, zaktualizuj je i wysuń na wierzch
-  if (activeNotificationWindowId !== null) {
-    try {
-      const win = await chrome.windows.get(activeNotificationWindowId, { populate: true });
-      if (win) {
-        if (win.tabs && win.tabs.length > 0) {
-          await chrome.tabs.update(win.tabs[0].id, { url: targetUrl });
-        }
-        await chrome.windows.update(activeNotificationWindowId, { focused: true });
-        return;
-      }
-    } catch (_) {
-      activeNotificationWindowId = null;
-    }
-  }
-
-  // 2. Sprawdź czy JAKIEKOLWIEK inne okno z popup.html istnieje w przeglądarce
+async function isDaemonRunning() {
   try {
-    const allWins = await chrome.windows.getAll({ populate: true });
-    for (const win of allWins) {
-      for (const tab of win.tabs || []) {
-        if (tab.url && tab.url.includes("popup.html")) {
-          activeNotificationWindowId = win.id;
-          await chrome.tabs.update(tab.id, { url: targetUrl });
-          await chrome.windows.update(win.id, { focused: true });
-          return;
-        }
-      }
-    }
-  } catch (_) {}
-
-  // 3. Mutex blokujący wyścigi współbieżne
-  if (isOpeningWindow) return;
-  isOpeningWindow = true;
-
-  try {
-    const createdWin = await chrome.windows.create({
-      url: targetUrl,
-      type: "popup",
-      width: 390,
-      height: 140,
-      focused: true
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1000);
+    const res = await fetch(`${API_BASE}/api/status`, {
+      signal: controller.signal,
+      cache: "no-store"
     });
-    if (createdWin && createdWin.id) {
-      activeNotificationWindowId = createdWin.id;
-    }
-  } catch (err) {
-    console.warn("[AlgoDeck] Błąd chrome.windows.create:", err);
-  } finally {
-    isOpeningWindow = false;
+    clearTimeout(timer);
+    return res.ok;
+  } catch (_) {
+    return false;
   }
 }
 
-// Czyszczenie referencji okna po jego zamknięciu
-if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.onRemoved) {
-  chrome.windows.onRemoved.addListener((windowId) => {
-    if (windowId === activeNotificationWindowId) {
-      activeNotificationWindowId = null;
+// ------------------------------------------------------------------------------
+// OTWARCIE PODMENU ROZSZERZENIA (ZAKAZ TWORZENIA OSOBNYCH OKIEN SYSTEMOWYCH)
+// ------------------------------------------------------------------------------
+async function triggerDetectedAction(filename) {
+  if (!filename) return;
+
+  // 1. Zapisz w pamięci rozszerzenia (dostępne przez 120s)
+  try {
+    await chrome.storage.local.set({
+      auto_pdf: filename,
+      auto_pdf_ts: Date.now(),
+      auto_is_zip: filename.toLowerCase().endsWith(".zip")
+    });
+  } catch (_) {}
+
+  // 2. Ustaw zieloną odznakę "1" na ikonie rozszerzenia na pasku zadań
+  try {
+    if (chrome.action && chrome.action.setBadgeText) {
+      chrome.action.setBadgeText({ text: "1" });
+      chrome.action.setBadgeBackgroundColor({ color: "#10b981" });
     }
-  });
+  } catch (_) {}
+
+  // 3. Otwórz podmenu rozszerzenia (Action Popup) pod ikoną rozszerzenia
+  // Całkowity zakaz chrome.windows.create() — rozszerzenie NIGDY nie tworzy osobnych okien OS!
+  try {
+    if (chrome.action && typeof chrome.action.openPopup === "function") {
+      await chrome.action.openPopup();
+    }
+  } catch (err) {
+    console.log("[AlgoDeck] Action popup oczekuje na kliknięcie ikony przez użytkownika:", err);
+  }
 }
 
 // ------------------------------------------------------------------------------
@@ -220,14 +203,28 @@ if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.onRemoved)
 async function processDownload(downloadId) {
   if (handledDownloads.has(downloadId)) return;
 
+  // 1. BEZWZGLĘDNE SPRAWDZENIE: Gdy AlgoDeck jest wyłączony, autodetekcja NIE DZIAŁA!
+  const isOnline = await isDaemonRunning();
+  if (!isOnline) {
+    console.log("[AlgoDeck] Usługa AlgoDeck jest wyłączona (offline). Ignoruję pobranie:", downloadId);
+    markHandled(downloadId, null, null);
+    return;
+  }
+
   chrome.downloads.search({ id: downloadId }, async (items) => {
     if (!items || items.length === 0) return;
     const item = items[0];
 
     const filename = item.filename || "";
-    const normKey = filename.toLowerCase();
 
-    // 1. Sprawdź czy pobieranie jest kompletne
+    // Ponowne sprawdzenie stanu procesu
+    const stillOnline = await isDaemonRunning();
+    if (!stillOnline) {
+      markHandled(downloadId, filename, item.url);
+      return;
+    }
+
+    // 2. Sprawdź czy pobieranie jest kompletne
     if (item.state !== "complete") {
       setTimeout(() => {
         if (!handledDownloads.has(downloadId)) {
@@ -247,7 +244,7 @@ async function processDownload(downloadId) {
       return;
     }
 
-    // 2. Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
+    // 3. Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
     try {
       const stored = await chrome.storage.local.get(["auto_detect_downloads"]);
       if (stored.auto_detect_downloads === false) {
@@ -260,23 +257,6 @@ async function processDownload(downloadId) {
 
     console.log("[AlgoDeck] Pomyślnie wykryto nowe pobranie zadania:", filename);
 
-    // Zapisz w storage rozszerzenia dla popupa (dostępne przez 120s)
-    try {
-      await chrome.storage.local.set({
-        auto_pdf: filename,
-        auto_pdf_ts: Date.now(),
-        auto_is_zip: filename.toLowerCase().endsWith(".zip")
-      });
-    } catch (_) {}
-
-    // Zielona odznaka na ikonie rozszerzenia na pasku zadań
-    try {
-      if (chrome.action && chrome.action.setBadgeText) {
-        chrome.action.setBadgeText({ text: "1" });
-        chrome.action.setBadgeBackgroundColor({ color: "#10b981" });
-      }
-    } catch (_) {}
-
     // Powiadomienie natywne
     const baseName = filename.replace(/^.*[\\\/]/, '');
     try {
@@ -285,33 +265,32 @@ async function processDownload(downloadId) {
           type: "basic",
           iconUrl: "icons/icon128.png",
           title: "AlgoDeck ⚡ Wykryto zadanie olimpijskie",
-          message: `Pobrano: ${baseName}\nKliknij, aby utworzyć zadanie w AlgoDeck.`,
+          message: `Pobrano: ${baseName}\nKliknij podmenu ⚡ na pasku, aby utworzyć zadanie.`,
           priority: 2,
           requireInteraction: false
         });
       }
     } catch (_) {}
 
-    // Otwórz DOKŁADNIE JEDNO okienko 1-kliknięcia
-    await openDedicatedNotificationWindow(filename);
+    // Otwórz podmenu rozszerzenia (bez tworzenia żadnych okien systemu operacyjnego)
+    await triggerDetectedAction(filename);
   });
 }
 
 // Kliknięcie w powiadomienie Chrome
 if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {
-  chrome.notifications.onClicked.addListener((notifId) => {
+  chrome.notifications.onClicked.addListener(async (notifId) => {
     if (notifId && notifId.startsWith("algodeck_")) {
       chrome.notifications.clear(notifId);
+      
+      const isOnline = await isDaemonRunning();
+      if (!isOnline) return;
+
       try {
-        if (chrome.action && chrome.action.setBadgeText) {
-          chrome.action.setBadgeText({ text: "" });
+        if (chrome.action && typeof chrome.action.openPopup === "function") {
+          await chrome.action.openPopup();
         }
       } catch (_) {}
-      chrome.storage.local.get(["auto_pdf"], (data) => {
-        if (data && data.auto_pdf) {
-          openDedicatedNotificationWindow(data.auto_pdf);
-        }
-      });
     }
   });
 }
@@ -332,11 +311,11 @@ syncSettingsFromBackend();
 setInterval(syncSettingsFromBackend, 15000);
 
 // ------------------------------------------------------------------------------
-// NASŁUCHIWANIE POBRAŃ — TYLKO NOWE POBRANIA NA ŻYWO W TRAKCIE SESJI
+// NASŁUCHIWANIE POBRAŃ — TYLKO NOWE POBRANIA NA ŻYWO GDY ALGODECK JEST ONLINE
 // ------------------------------------------------------------------------------
 
 if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onCreated) {
-  chrome.downloads.onCreated.addListener((item) => {
+  chrome.downloads.onCreated.addListener(async (item) => {
     if (!item || !item.id) return;
 
     // Pobranie z historii przy starcie nie jest "in_progress"
@@ -347,16 +326,23 @@ if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onCrea
 
     if (handledDownloads.has(item.id)) return;
 
+    // Gdy AlgoDeck jest wyłączony, nie rejestruj pobrania
+    const isOnline = await isDaemonRunning();
+    if (!isOnline) {
+      handledDownloads.add(item.id);
+      return;
+    }
+
     // Rejestrujemy to pobranie jako świeże pobranie na żywo
     liveDownloads.set(item.id, Date.now());
   });
 }
 
 if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onChanged) {
-  chrome.downloads.onChanged.addListener((delta) => {
+  chrome.downloads.onChanged.addListener(async (delta) => {
     if (!delta || !delta.id) return;
 
-    // Pobranie MUSI być obecne w liveDownloads (czyli rozpoczęte na żywo w tej sesji)
+    // Pobranie MUSI być obecne w liveDownloads (czyli zarejestrowane na żywo w tej sesji)
     if (!liveDownloads.has(delta.id)) {
       handledDownloads.add(delta.id);
       return;
@@ -365,6 +351,10 @@ if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.onChan
     if (delta.state && delta.state.current === "complete") {
       liveDownloads.delete(delta.id);
       handledDownloads.add(delta.id);
+
+      const isOnline = await isDaemonRunning();
+      if (!isOnline) return;
+
       processDownload(delta.id);
     }
   });

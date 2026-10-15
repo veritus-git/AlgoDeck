@@ -273,7 +273,10 @@ cat << PLIST_EOF > "$PLIST_FILE"
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>$SHARE_DIR/daemon.log</string>
     <key>StandardErrorPath</key>
@@ -302,6 +305,24 @@ for RC in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
 done
 
 # ------------------------------------------------------------------------------
+# AUTOMATYZACJA ROZSZERZENIA: SCHOWEK, FINDER I PRZEGLĄDARKA
+# ------------------------------------------------------------------------------
+# 1. Automatyczne skopiowanie ścieżki do schowka macOS
+echo -n "$EXT_DIR" | pbcopy 2>/dev/null || true
+
+# 2. Automatyczne otwarcie strony rozszerzeń w domyślnej przeglądarce Chromium
+if [ -d "/Applications/Brave Browser.app" ]; then
+    open -a "Brave Browser" "brave://extensions" 2>/dev/null || true
+elif [ -d "/Applications/Google Chrome.app" ]; then
+    open -a "Google Chrome" "chrome://extensions" 2>/dev/null || true
+elif [ -d "/Applications/Microsoft Edge.app" ]; then
+    open -a "Microsoft Edge" "edge://extensions" 2>/dev/null || true
+fi
+
+# 3. Otwarcie folderu rozszerzenia w Finderze dla łatwego Drag & Drop
+open "$EXT_DIR" 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
 # PODSUMOWANIE INSTALACJI
 # ------------------------------------------------------------------------------
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
@@ -309,14 +330,15 @@ echo -e "${GREEN}${BOLD}       🎉 AlgoDeck v2.0.0 (100% Rust) pomyślnie zains
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
 echo -e "• Panel Web Hub:   ${CYAN}${BOLD}http://127.0.0.1:8080/${NC} lub kliknij ikonę rozszerzenia"
 echo -e "• Stream Deck:     Bezpośrednia obsługa USB HID bez oficjalnej aplikacji Elgato"
-echo -e "• Narzędzie CLI:   ${BOLD}algodeck status${NC} | ${BOLD}algodeck test <kod>${NC} | ${BOLD}algodeck stop${NC}"
+echo -e "• Narzędzie CLI:   ${BOLD}algodeck status${NC} | ${BOLD}algodeck test <kod>${NC} | ${BOLD}algodeck stop${NC} | ${BOLD}algodeck extension${NC}"
 echo -e "• Folder programu: ${BOLD}$SHARE_DIR${NC}"
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
 
-echo -e "\n${CYAN}${BOLD}🧩 DODANIE ROZSZERZENIA DO PRZEGLĄDARKI (Chrome / Brave / Edge):${NC}"
-echo -e "1. Wejdź w przeglądarce pod adres: ${BOLD}chrome://extensions${NC} (lub brave://extensions)"
-echo -e "2. Włącz w prawym górnym rogu przełącznik ${BOLD}Tryb programisty${NC} (Developer mode)"
-echo -e "3. Kliknij w lewym górnym rogu przycisk ${BOLD}Załaduj rozpakowane${NC} (Load unpacked)"
-echo -e "4. Wybierz ten folder:"
-echo -e "   ${GREEN}${BOLD}$EXT_DIR${NC}"
-echo -e "5. Gotowe! Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki.\n"
+echo -e "\n${CYAN}${BOLD}🧩 ROZSZERZENIE PRZEGLĄDARKI (Automatyczne ułatwienie):${NC}"
+echo -e "${GREEN}✓ Ścieżka folderu rozszerzenia została AUTOMATYCZNIE SKOPIOWANA do Twojego schowka (Cmd+V)!${NC}"
+echo -e "${GREEN}✓ Otwarto stronę rozszerzeń w przeglądarce oraz folder w Finderze.${NC}"
+echo -e "1. W otwartej przeglądarce włącz ${BOLD}Tryb programisty${NC} (Developer mode) w prawym górnym rogu."
+echo -e "2. Kliknij ${BOLD}Załaduj rozpakowane${NC} (Load unpacked)."
+echo -e "3. W oknie wyboru wciśnij ${BOLD}Cmd+Shift+G${NC}, wklej schowek (${BOLD}Cmd+V${NC}) i naciśnij Enter."
+echo -e "   (lub po prostu przeciągnij otwarty folder z Findera do okna przeglądarki)"
+echo -e "4. Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki.\n"
