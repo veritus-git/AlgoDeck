@@ -92,12 +92,25 @@ body {
 /* ==========================================================================
    STAN 1: OFFLINE — TYLKO DUŻY ZIELONY PRZYCISK
    ========================================================================== */
+html.offline-mode,
+body.offline-mode {
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: hidden !important;
+}
+
+body.offline-mode .app-container {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
 .view-offline {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 18px;
+  padding: 16px 18px !important;
   background-color: var(--bg-main);
+  box-sizing: border-box;
 }
 
 .btn-start-offline {
@@ -105,7 +118,7 @@ body {
   color: #ffffff;
   border: none;
   border-radius: 10px;
-  padding: 16px 20px;
+  padding: 14px 20px;
   font-size: 14.5px;
   font-weight: 700;
   cursor: pointer;
@@ -114,6 +127,7 @@ body {
   justify-content: center;
   gap: 10px;
   width: 100%;
+  margin: 0 !important;
   box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
   transition: all 0.2s ease;
 }
@@ -166,9 +180,9 @@ body.detected-mode {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  height: 140px !important;
-  min-height: 125px !important;
-  max-height: 140px !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  max-height: 100vh !important;
   background: linear-gradient(145deg, #121a2c, #0d1322) !important;
   overflow: hidden !important;
   margin: 0 !important;
@@ -184,34 +198,31 @@ body.detected-mode .app-container {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  height: 116px !important;
-  min-height: 105px !important;
-  max-height: 120px !important;
+  height: 100% !important;
+  min-height: 100% !important;
   background: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
   display: flex !important;
   flex-direction: column !important;
+  justify-content: center !important;
 }
 
 body.detected-mode .view-detected {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  height: 116px !important;
-  min-height: 105px !important;
-  max-height: 120px !important;
-  padding: 10px 14px 10px 14px !important;
+  height: 100% !important;
+  padding: 12px 14px !important;
   box-sizing: border-box !important;
   background: transparent !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: flex-start !important;
+  justify-content: center !important;
 }
 
 body.detected-mode .detected-box-card {
   width: 100% !important;
-  height: 100% !important;
   background: transparent;
   border: none;
   box-shadow: none;
@@ -219,8 +230,8 @@ body.detected-mode .detected-box-card {
   padding: 0;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: flex-start !important;
-  gap: 7px;
+  justify-content: center !important;
+  gap: 8px;
 }
 
 .det-top-row {

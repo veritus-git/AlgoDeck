@@ -280,12 +280,54 @@ async fn post_settings(
     Json(new_settings): Json<AppSettings>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     state.streamdeck.set_brightness(new_settings.streamdeck_brightness);
+    apply_autostart_setting(new_settings.autostart_on_boot);
     let _ = new_settings.save();
     {
         let mut w = state.settings.write().unwrap();
         *w = new_settings;
     }
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+fn apply_autostart_setting(enable: bool) {
+    #[cfg(target_os = "linux")]
+    {
+        if enable {
+            let _ = std::process::Command::new("systemctl").args(["--user", "enable", "algodeck.service"]).output();
+        } else {
+            let _ = std::process::Command::new("systemctl").args(["--user", "disable", "algodeck.service"]).output();
+            if let Some(home) = dirs::home_dir() {
+                let _ = std::fs::remove_file(home.join(".config/autostart/algodeck.desktop"));
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let startup_vbs = std::path::PathBuf::from(appdata).join("Microsoft/Windows/Start Menu/Programs/Startup/AlgoDeck.vbs");
+            if enable {
+                if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                    let src = std::path::PathBuf::from(local).join("AlgoDeck/AlgoDeck.vbs");
+                    if src.exists() {
+                        let _ = std::fs::copy(src, startup_vbs);
+                    }
+                }
+            } else {
+                let _ = std::fs::remove_file(startup_vbs);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
+            if enable {
+                let _ = std::process::Command::new("launchctl").args(["load", "-w"]).arg(&plist).output();
+            } else {
+                let _ = std::process::Command::new("launchctl").args(["unload", "-w"]).arg(&plist).output();
+            }
+        }
+    }
 }
 
 async fn open_gui() -> Json<serde_json::Value> {
@@ -1134,6 +1176,10 @@ async fn shutdown_server(State(state): State<AppState>) -> Json<serde_json::Valu
     tokio::task::spawn_blocking(|| {
         std::thread::sleep(std::time::Duration::from_millis(80));
         StreamDeckEngine::blank_device_if_connected();
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("systemctl").args(["--user", "stop", "algodeck.service"]).output();
+        }
     });
     Json(serde_json::json!({ "success": true }))
 }

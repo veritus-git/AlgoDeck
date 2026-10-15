@@ -48,6 +48,13 @@ pub struct AppSettings {
 
     #[serde(default = "default_editor_split_ratio")]
     pub editor_split_ratio: u8,
+
+    #[serde(default = "default_autostart_on_boot")]
+    pub autostart_on_boot: bool,
+}
+
+fn default_autostart_on_boot() -> bool {
+    true
 }
 
 fn default_pdf_position() -> String {
@@ -128,6 +135,7 @@ impl Default for AppSettings {
             streamdeck_brightness: default_streamdeck_brightness(),
             pdf_position: default_pdf_position(),
             editor_split_ratio: default_editor_split_ratio(),
+            autostart_on_boot: default_autostart_on_boot(),
         }
     }
 }

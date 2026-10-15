@@ -170,13 +170,17 @@ async function checkDaemonHealth() {
     const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
     if (res.ok) {
       // ONLINE: Schowaj widok offline, pokaż główny
+      document.documentElement.classList.remove("offline-mode");
+      document.body.classList.remove("offline-mode");
       viewOffline.classList.add("hidden");
       viewMain.classList.remove("hidden");
       return true;
     }
   } catch (e) {}
 
-  // OFFLINE: Pokaż TYLKO widok offline
+  // OFFLINE: Pokaż TYLKO widok offline ze zwartymi, symetrycznymi marginesami
+  document.documentElement.classList.add("offline-mode");
+  document.body.classList.add("offline-mode");
   viewMain.classList.add("hidden");
   viewOffline.classList.remove("hidden");
   return false;
@@ -185,11 +189,40 @@ async function checkDaemonHealth() {
 // ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
 async function checkDetectedMode() {
   const urlParams = new URLSearchParams(window.location.search);
-  const autoPdf = urlParams.get("auto_pdf");
+  let autoPdf = urlParams.get("auto_pdf");
+  const tParam = urlParams.get("t");
 
-  // Tryb 1-kliknięcia jest aktywowany wyłącznie gdy okno zostało otwarte z parametrem ?auto_pdf=
+  // 1. Zabezpieczenie przed zombi-oknami przywracanymi przez sesję przeglądarki (Session Restore):
+  // Jeśli to dedykowane okno powiadomienia, ale timestamp w URL jest przedawniony (> 20s) lub go brak:
+  if (autoPdf) {
+    const timestamp = parseInt(tParam || "0", 10);
+    const age = Date.now() - timestamp;
+    if (!timestamp || age > 20000 || age < -5000) {
+      console.log("[AlgoDeck] Wykryto zombi-okno powiadomienia ze starej sesji. Zamykam natychmiast.");
+      window.close();
+      return false;
+    }
+  }
+
+  // 2. Jeśli brak w URL (użytkownik kliknął ikonę rozszerzenia na pasku zadań),
+  // sprawdź czy w pamięci jest świeżo pobrane zadanie z ostatnich 2 minut (< 120s)
+  if (!autoPdf) {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
+        if (stored.auto_pdf && stored.auto_pdf_ts) {
+          const age = Date.now() - stored.auto_pdf_ts;
+          if (age < 120000) {
+            autoPdf = stored.auto_pdf;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   if (!autoPdf) return false;
 
+  document.body.classList.remove("offline-mode");
   document.documentElement.classList.add("detected-mode");
   document.body.classList.add("detected-mode");
   viewOffline.classList.add("hidden");
@@ -824,6 +857,8 @@ function setupShutdown() {
     } catch (_) {}
 
     // 3. Przełącz na ekran offline
+    document.documentElement.classList.add("offline-mode");
+    document.body.classList.add("offline-mode");
     viewMain.classList.add("hidden");
     viewOffline.classList.remove("hidden");
     btnStop.disabled = false;

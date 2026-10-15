@@ -296,7 +296,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=$HOME/.local/bin/algodeck daemon
-Restart=always
+Restart=on-failure
 RestartSec=2s
 Environment="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 

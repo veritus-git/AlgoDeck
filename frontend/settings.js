@@ -56,7 +56,8 @@ const elements = {
 
   // Browser Automation
   autoDetect: document.getElementById("cfg-auto-detect"),
-  notifications: document.getElementById("cfg-notifications")
+  notifications: document.getElementById("cfg-notifications"),
+  autostart: document.getElementById("cfg-autostart")
 };
 
 let currentSettings = {
@@ -74,7 +75,8 @@ let currentSettings = {
   pdf_position: "right",
   editor_split_ratio: 60,
   auto_detect_downloads: true,
-  notifications: true
+  notifications: true,
+  autostart_on_boot: true
 };
 
 let brightnessDebounceTimer = null;
@@ -180,6 +182,7 @@ function applySettingsToForm(s) {
   if (s.editor_split_ratio) elements.splitRatio.value = s.editor_split_ratio;
   if (s.auto_detect_downloads !== undefined) elements.autoDetect.checked = Boolean(s.auto_detect_downloads);
   if (s.notifications !== undefined) elements.notifications.checked = Boolean(s.notifications);
+  if (s.autostart_on_boot !== undefined && elements.autostart) elements.autostart.checked = Boolean(s.autostart_on_boot);
   updateSplitRatioVisual();
 }
 
@@ -230,7 +233,8 @@ function collectSettingsFromForm() {
     default_memory_limit: parseInt(elements.memoryLimit.value, 10) || 128,
     streamdeck_brightness: parseInt(elements.sdBrightness.value, 10) || 85,
     auto_detect_downloads: elements.autoDetect.checked,
-    notifications: elements.notifications.checked
+    notifications: elements.notifications.checked,
+    autostart_on_boot: elements.autostart ? elements.autostart.checked : true
   };
 }
 
