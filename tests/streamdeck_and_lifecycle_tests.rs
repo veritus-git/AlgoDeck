@@ -343,6 +343,14 @@ fn test_workspace_scripts_and_tasks_generation() {
     assert!(test_content.contains("AlgoDeck Test Runner"));
     assert!(test_content.contains("CHW"));
 
+    let p_tasks = std::fs::read_to_string(p_dir.join(".vscode/tasks.json")).unwrap();
+    assert!(p_tasks.contains("${workspaceFolder}/.algo/run.sh"));
+    assert!(p_tasks.contains("${workspaceFolder}/$TASK/.algo/run.sh"));
+
+    let root_tasks = std::fs::read_to_string(ws_path.join(".vscode/tasks.json")).unwrap();
+    assert!(root_tasks.contains("${workspaceFolder}/.algo/run.sh"));
+    assert!(root_tasks.contains("${workspaceFolder}/$TASK/.algo/run.sh"));
+
     let _ = std::fs::remove_dir_all(&ws_path);
 }
 

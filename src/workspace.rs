@@ -733,13 +733,13 @@ fi
         let p_vscode = p_dir.join(".vscode");
         let _ = fs::create_dir_all(&p_vscode);
         let p_tasks_path = p_vscode.join("tasks.json");
-        let p_tasks_json = r#"{
+        let universal_tasks_json = r#"{
     "version": "2.0.0",
     "tasks": [
         {
             "label": "AlgoDeck: ODPAL",
             "type": "shell",
-            "command": "bash ${workspaceFolder}/.algo/run.sh",
+            "command": "if [ -f \"${workspaceFolder}/.algo/run.sh\" ]; then bash \"${workspaceFolder}/.algo/run.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/run.sh\"; elif [ -f \"${fileDirname}/.algo/run.sh\" ]; then bash \"${fileDirname}/.algo/run.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/run.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -755,7 +755,7 @@ fi
         {
             "label": "AlgoDeck: TESTUJ",
             "type": "shell",
-            "command": "bash ${workspaceFolder}/.algo/test.sh",
+            "command": "if [ -f \"${workspaceFolder}/.algo/test.sh\" ]; then bash \"${workspaceFolder}/.algo/test.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/test.sh\"; elif [ -f \"${fileDirname}/.algo/test.sh\" ]; then bash \"${fileDirname}/.algo/test.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/test.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -770,7 +770,7 @@ fi
         }
     ]
 }"#;
-        let _ = fs::write(p_tasks_path, p_tasks_json);
+        let _ = fs::write(p_tasks_path, universal_tasks_json);
 
         // 6. Ensure Root Workspace .vscode/tasks.json
         Self::ensure_root_workspace_tasks(workspace_dir);
@@ -786,7 +786,7 @@ fi
         {
             "label": "AlgoDeck: ODPAL",
             "type": "shell",
-            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/run.sh\" || bash \"${fileDirname}/.algo/run.sh\"",
+            "command": "if [ -f \"${workspaceFolder}/.algo/run.sh\" ]; then bash \"${workspaceFolder}/.algo/run.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/run.sh\"; elif [ -f \"${fileDirname}/.algo/run.sh\" ]; then bash \"${fileDirname}/.algo/run.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/run.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -802,7 +802,7 @@ fi
         {
             "label": "AlgoDeck: TESTUJ",
             "type": "shell",
-            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/test.sh\" || bash \"${fileDirname}/.algo/test.sh\"",
+            "command": "if [ -f \"${workspaceFolder}/.algo/test.sh\" ]; then bash \"${workspaceFolder}/.algo/test.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/test.sh\"; elif [ -f \"${fileDirname}/.algo/test.sh\" ]; then bash \"${fileDirname}/.algo/test.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/test.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",

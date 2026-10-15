@@ -116,7 +116,7 @@ fn run_daemon(port: u16) {
     println!("--------------------------------------------------");
 
     streamdeck::kill_streamdeck_conflicts();
-    ensure_vscode_extension_installed();
+    server::ensure_vscode_extension_installed();
 
     let settings = Arc::new(RwLock::new(AppSettings::load()));
     let runner = Arc::new(TestExecutor::new(settings.clone()));
@@ -149,8 +149,6 @@ fn run_daemon(port: u16) {
         let open_in_vscode = |pid: &str| {
             server::open_in_vscode_internal(pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
         };
-        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-        let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
 
         if action.starts_with("select_task:") {
             let pid = action.trim_start_matches("select_task:").to_string();
@@ -178,69 +176,7 @@ fn run_daemon(port: u16) {
             }
             "run_all" => {
                 if !active_id.is_empty() {
-                    let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
-                    let p_dir_str = p_dir.to_string_lossy();
-                    
-                    // 1. Bezpośredni mostek VS Code (wieloplatformowy port 49152)
-                    let mut triggered = false;
-                    let bridge_url = format!("http://127.0.0.1:49152/test?pdir={}", url_encode(&p_dir_str));
-                    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(600)).call() {
-                        if res.status() == 200 {
-                            triggered = true;
-                        }
-                    }
-
-                    // 2. Jeśli VS Code nie odpowiedziało natychmiast, upewnij się że okno jest otwarte i ponów
-                    if !triggered {
-                        if !server::is_vscode_open_for_problem(&active_id) {
-                            open_in_vscode(&active_id);
-                            std::thread::sleep(std::time::Duration::from_millis(1000));
-                        }
-                        if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(1200)).call() {
-                            if res.status() == 200 {
-                                triggered = true;
-                            }
-                        }
-                    }
-
-                    // 3. Fallback dla skryptów sd_algo_* jeśli istnieją na maszynie (Linux legacy) lub terminal
-                    if !triggered {
-                        let sd_test = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_test_vscode.sh"));
-                        if let Some(ref s) = sd_test {
-                            if s.exists() {
-                                let _ = std::process::Command::new(s)
-                                    .arg(&p_dir)
-                                    .arg(&active_id)
-                                    .env("DISPLAY", &display)
-                                    .env("XAUTHORITY", &xauthority)
-                                    .spawn();
-                                return;
-                            }
-                        }
-
-                        let self_exe = std::env::current_exe()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|_| "algodeck".into());
-
-                        #[cfg(target_os = "macos")]
-                        {
-                            let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\" test {}\"", self_exe, active_id);
-                            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
-                        }
-                        #[cfg(target_os = "windows")]
-                        {
-                            let _ = std::process::Command::new("cmd").args(["/c", "start", &self_exe, "test", &active_id]).spawn();
-                        }
-                        #[cfg(target_os = "linux")]
-                        {
-                            let mut cmd = std::process::Command::new("x-terminal-emulator");
-                            cmd.args(["-e", &format!("\"{}\" test {}", self_exe, active_id)]);
-                            cmd.env("DISPLAY", &display);
-                            cmd.env("XAUTHORITY", &xauthority);
-                            let _ = cmd.spawn();
-                        }
-                    }
-
+                    server::trigger_vscode_action("test", &active_id, &ws_dir, &open_in_vscode);
                     let r = runner_clone.run_all_tests(&active_id);
                     if r.all_passed && r.total_tests > 0 {
                         streamdeck_clone.update_key_status(6, "OK", Some(&format!("{:.0}ms", r.total_time_ms)));
@@ -253,65 +189,7 @@ fn run_daemon(port: u16) {
             }
             "run_interactive" => {
                 if !active_id.is_empty() {
-                    let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
-                    let p_dir_str = p_dir.to_string_lossy();
-
-                    let mut triggered = false;
-                    let bridge_url = format!("http://127.0.0.1:49152/run?pdir={}", url_encode(&p_dir_str));
-                    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(600)).call() {
-                        if res.status() == 200 {
-                            triggered = true;
-                        }
-                    }
-
-                    if !triggered {
-                        if !server::is_vscode_open_for_problem(&active_id) {
-                            open_in_vscode(&active_id);
-                            std::thread::sleep(std::time::Duration::from_millis(1000));
-                        }
-                        if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(1200)).call() {
-                            if res.status() == 200 {
-                                triggered = true;
-                            }
-                        }
-                    }
-
-                    if !triggered {
-                        let sd_run = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_run_vscode.sh"));
-                        if let Some(ref s) = sd_run {
-                            if s.exists() {
-                                let _ = std::process::Command::new(s)
-                                    .arg(&p_dir)
-                                    .arg(&active_id)
-                                    .env("DISPLAY", &display)
-                                    .env("XAUTHORITY", &xauthority)
-                                    .spawn();
-                                return;
-                            }
-                        }
-
-                        let self_exe = std::env::current_exe()
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|_| "algodeck".into());
-
-                        #[cfg(target_os = "macos")]
-                        {
-                            let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\" run {}\"", self_exe, active_id);
-                            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
-                        }
-                        #[cfg(target_os = "windows")]
-                        {
-                            let _ = std::process::Command::new("cmd").args(["/c", "start", &self_exe, "run", &active_id]).spawn();
-                        }
-                        #[cfg(target_os = "linux")]
-                        {
-                            let mut cmd = std::process::Command::new("x-terminal-emulator");
-                            cmd.args(["-e", &format!("\"{}\" run {}", self_exe, active_id)]);
-                            cmd.env("DISPLAY", &display);
-                            cmd.env("XAUTHORITY", &xauthority);
-                            let _ = cmd.spawn();
-                        }
-                    }
+                    server::trigger_vscode_action("run", &active_id, &ws_dir, &open_in_vscode);
                 }
             }
             "new_task" => {
@@ -562,38 +440,6 @@ fn open_extension_helper() {
     {
         let _ = open::that(&ext_dir);
         let _ = open::that("chrome://extensions");
-    }
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' || b == b'/' {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{:02X}", b));
-        }
-    }
-    out
-}
-
-fn ensure_vscode_extension_installed() {
-    if let Some(home) = dirs::home_dir() {
-        let dest = home.join(".vscode/extensions/algodeck-vscode-bridge");
-        let pkg = include_str!("../vscode_extension/package.json");
-        let ext = include_str!("../vscode_extension/extension.js");
-        let ext_file = dest.join("extension.js");
-        let pkg_file = dest.join("package.json");
-        let should_update = match std::fs::read_to_string(&ext_file) {
-            Ok(existing) => existing != ext,
-            Err(_) => true,
-        };
-        if should_update {
-            let _ = std::fs::create_dir_all(&dest);
-            let _ = std::fs::write(&pkg_file, pkg);
-            let _ = std::fs::write(&ext_file, ext);
-            println!("✓ Zainstalowano/zaktualizowano integrację VS Code Bridge w {}", dest.display());
-        }
     }
 }
 

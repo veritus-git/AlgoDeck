@@ -1126,6 +1126,26 @@ async fn stage_refresh() -> Json<serde_json::Value> {
     get_staged_state().await
 }
 
+pub fn ensure_vscode_extension_installed() {
+    if let Some(home) = dirs::home_dir() {
+        let dest = home.join(".vscode/extensions/algodeck-vscode-bridge");
+        let pkg = include_str!("../vscode_extension/package.json");
+        let ext = include_str!("../vscode_extension/extension.js");
+        let ext_file = dest.join("extension.js");
+        let pkg_file = dest.join("package.json");
+        let should_update = match std::fs::read_to_string(&ext_file) {
+            Ok(existing) => existing != ext,
+            Err(_) => true,
+        };
+        if should_update {
+            let _ = std::fs::create_dir_all(&dest);
+            let _ = std::fs::write(&pkg_file, pkg);
+            let _ = std::fs::write(&ext_file, ext);
+            println!("✓ Zainstalowano/zaktualizowano integrację VS Code Bridge w {}", dest.display());
+        }
+    }
+}
+
 pub fn open_in_vscode_internal(
     problem_id: &str,
     workspace_dir: &Path,
@@ -1135,6 +1155,7 @@ pub fn open_in_vscode_internal(
     vscode_mode: &str,
     macos_window_mode: &str,
 ) {
+    ensure_vscode_extension_installed();
     static LAST_VSCODE_LAUNCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1356,8 +1377,24 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         return false;
     }
 
-    // 1. Najszybsze i w 100% niezawodne sprawdzenie: mostek HTTP rozszerzenia VS Code
-    if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(300)).call() {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let sock_path = format!("/tmp/algodeck_vscode_{}.sock", problem_id.to_lowercase());
+        if std::path::Path::new(&sock_path).exists() {
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(200)));
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+                if stream.write_all(b"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").is_ok() {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 1. Sprawdź czy mostek HTTP potwierdza otwarcie tego konkretnego zadania
+    let ping_url = format!("http://127.0.0.1:49152/ping?problem_id={}", url_encode(problem_id));
+    if let Ok(res) = ureq::get(&ping_url).timeout(std::time::Duration::from_millis(300)).call() {
         if res.status() == 200 {
             return true;
         }
@@ -1367,12 +1404,20 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     {
         if let Ok(output) = std::process::Command::new("pgrep").args(["-f", "Visual Studio Code"]).output() {
             if output.status.success() && !output.stdout.is_empty() {
-                return true;
+                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
+                    if res.status() == 200 {
+                        return true;
+                    }
+                }
             }
         }
         if let Ok(output) = std::process::Command::new("pgrep").args(["-x", "Code"]).output() {
             if output.status.success() && !output.stdout.is_empty() {
-                return true;
+                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
+                    if res.status() == 200 {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -1396,7 +1441,11 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         }
         if let Ok(output) = std::process::Command::new("pgrep").args(["-f", "/usr/share/code/code"]).output() {
             if output.status.success() && !output.stdout.is_empty() {
-                return true;
+                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
+                    if res.status() == 200 {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -1405,10 +1454,77 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         if let Ok(output) = std::process::Command::new("tasklist").args(["/FI", "IMAGENAME eq Code.exe"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if stdout.contains("Code.exe") {
-                return true;
+                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
+                    if res.status() == 200 {
+                        return true;
+                    }
+                }
             }
         }
     }
+    false
+}
+
+pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        use std::io::{Write, Read};
+        let sock_path = format!("/tmp/algodeck_vscode_{}.sock", problem_id.to_lowercase());
+        if std::path::Path::new(&sock_path).exists() {
+            if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(600)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(600)));
+                let req = format!(
+                    "POST /{}?pdir={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    endpoint,
+                    url_encode(p_dir_str)
+                );
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    let mut resp = String::new();
+                    if stream.read_to_string(&mut resp).is_ok() && resp.contains("200 OK") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    let bridge_url = format!("http://127.0.0.1:49152/{}?pdir={}", endpoint, url_encode(p_dir_str));
+    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(600)).call() {
+        if res.status() == 200 {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn trigger_vscode_action<F>(endpoint: &str, problem_id: &str, ws_dir: &std::path::Path, open_vscode: F) -> bool
+where
+    F: Fn(&str),
+{
+    let p_dir = WorkspaceManager::get_problem_dir(ws_dir, problem_id);
+    let p_dir_str = p_dir.to_string_lossy();
+
+    // 1. Spróbuj wysłać natychmiast do aktywnego mostka VS Code
+    if send_bridge_request(endpoint, problem_id, &p_dir_str) {
+        return true;
+    }
+
+    // 2. Jeśli okno nie jest jeszcze otwarte, otwórz je
+    if !is_vscode_open_for_problem(problem_id) {
+        open_vscode(problem_id);
+    }
+
+    // 3. Poczekaj na inicjalizację rozszerzenia VS Code (do 2s)
+    for _ in 0..14 {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        if send_bridge_request(endpoint, problem_id, &p_dir_str) {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -1620,44 +1736,26 @@ async fn press_streamdeck_key(
                 open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
             }
             "run_all" => {
-                let p_dir = WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
-                let p_dir_str = p_dir.to_string_lossy();
-                let bridge_url = format!("http://127.0.0.1:49152/test?pdir={}", url_encode(&p_dir_str));
-                let _ = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(500)).call();
-                ensure_vscode_open_for_problem(&active_id, &state);
-                let _ = state.runner.run_all_tests(&active_id);
+                if !active_id.is_empty() {
+                    let ws = ws_dir.clone();
+                    let pid = active_id.clone();
+                    let state_c = state.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let open_fn = |p: &str| ensure_vscode_open_for_problem(p, &state_c);
+                        trigger_vscode_action("test", &pid, &ws, open_fn);
+                        let _ = state_c.runner.run_all_tests(&pid);
+                    });
+                }
             }
             "run_interactive" => {
-                let p_dir = WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
-                let p_dir_str = p_dir.to_string_lossy();
-                let bridge_url = format!("http://127.0.0.1:49152/run?pdir={}", url_encode(&p_dir_str));
-                let mut triggered = false;
-                if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(500)).call() {
-                    if res.status() == 200 {
-                        triggered = true;
-                    }
-                }
-                if !triggered {
-                    ensure_vscode_open_for_problem(&active_id, &state);
-                    #[cfg(target_os = "macos")]
-                    {
-                        let self_exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "algodeck".into());
-                        let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\" run {}\"", self_exe, active_id);
-                        let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
-                    }
-                    #[cfg(target_os = "windows")]
-                    {
-                        let self_exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "algodeck".into());
-                        let _ = std::process::Command::new("cmd").args(["/c", "start", &self_exe, "run", &active_id]).spawn();
-                    }
-                    #[cfg(target_os = "linux")]
-                    {
-                        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-                        let _ = std::process::Command::new("x-terminal-emulator")
-                            .args(["-e", &format!("algodeck run {}", active_id)])
-                            .env("DISPLAY", &display)
-                            .spawn();
-                    }
+                if !active_id.is_empty() {
+                    let ws = ws_dir.clone();
+                    let pid = active_id.clone();
+                    let state_c = state.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let open_fn = |p: &str| ensure_vscode_open_for_problem(p, &state_c);
+                        trigger_vscode_action("run", &pid, &ws, open_fn);
+                    });
                 }
             }
             "kill_process" => {
