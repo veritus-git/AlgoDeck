@@ -305,12 +305,46 @@ async fn post_settings(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     state.streamdeck.set_brightness(new_settings.streamdeck_brightness);
     apply_autostart_setting(new_settings.autostart_on_boot);
+    apply_macos_vscode_window_setting(&new_settings.macos_window_mode);
     let _ = new_settings.save();
     {
         let mut w = state.settings.write().unwrap();
         *w = new_settings;
     }
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+fn apply_macos_vscode_window_setting(mode: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let vscode_user_dir = home.join("Library/Application Support/Code/User");
+            if vscode_user_dir.exists() {
+                let settings_file = vscode_user_dir.join("settings.json");
+                let mut json_val: serde_json::Value = if settings_file.exists() {
+                    fs::read_to_string(&settings_file)
+                        .ok()
+                        .and_then(|c| serde_json::from_str(&c).ok())
+                        .unwrap_or_else(|| serde_json::json!({}))
+                } else {
+                    serde_json::json!({})
+                };
+
+                if let Some(obj) = json_val.as_object_mut() {
+                    let dim_val = match mode {
+                        "maximized" => "maximized",
+                        "fullscreen" => "fullscreen",
+                        _ => "default",
+                    };
+                    obj.insert("window.newWindowDimensions".to_string(), serde_json::Value::String(dim_val.to_string()));
+                    if let Ok(formatted) = serde_json::to_string_pretty(&json_val) {
+                        let _ = fs::write(&settings_file, formatted);
+                    }
+                }
+            }
+        }
+    }
+    let _ = mode;
 }
 
 fn apply_autostart_setting(enable: bool) {
@@ -492,11 +526,11 @@ async fn auto_import_pdf(
                 let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
                 state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
                 let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-                let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+                let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
                 };
-                open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+                open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
                 Json(serde_json::json!({
                     "success": true,
                     "problem_id": analysis.problem_id,
@@ -572,11 +606,11 @@ async fn create_manual(
             let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&pid)).map(|i| i + 1).unwrap_or(total);
             state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, total);
             let _ = state.ws_sender.send(format!("active:{}", pid));
-            let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+            let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
             };
-            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
             Json(serde_json::json!({ "success": true, "problem_id": pid }))
         }
         Err(e) => Json(serde_json::json!({ "success": false, "detail": e })),
@@ -994,11 +1028,11 @@ async fn start_staged(
             let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
             state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
             let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-            let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+            let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
             };
-            open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+            open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
             let _ = clear_staged(None).await;
 
             return Json(serde_json::json!({
@@ -1039,11 +1073,11 @@ async fn start_staged(
         let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
         state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
         let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-        let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+        let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
             let s = state.settings.read().unwrap();
-            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
         };
-        open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+        open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
         let _ = clear_staged(None).await;
 
         return Json(serde_json::json!({
@@ -1080,11 +1114,11 @@ async fn open_vscode(
     state.streamdeck.set_active_problem_with_meta(&id, cur_idx, total);
     let _ = state.ws_sender.send(format!("active:{}", id));
 
-    let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+    let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
         let s = state.settings.read().unwrap();
-        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
     };
-    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
     Json(serde_json::json!({ "success": true }))
 }
 
@@ -1099,6 +1133,7 @@ pub fn open_in_vscode_internal(
     pdf_position: &str,
     split_ratio: u8,
     vscode_mode: &str,
+    macos_window_mode: &str,
 ) {
     static LAST_VSCODE_LAUNCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let now = std::time::SystemTime::now()
@@ -1256,6 +1291,55 @@ pub fn open_in_vscode_internal(
             let _ = cmd.spawn();
         }
 
+        #[cfg(target_os = "macos")]
+        {
+            let win_mode = macos_window_mode.to_string();
+            if win_mode == "maximized" || win_mode == "fullscreen" {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if win_mode == "fullscreen" {
+                        let script = r#"
+                            tell application "Visual Studio Code" to activate
+                            delay 0.1
+                            tell application "System Events"
+                                tell process "Code"
+                                    if exists window 1 then
+                                        set value of attribute "AXFullScreen" of window 1 to true
+                                    end if
+                                end tell
+                            end tell
+                        "#;
+                        let _ = std::process::Command::new("osascript").args(["-e", script]).output();
+                    } else if win_mode == "maximized" {
+                        let script = r#"
+                            tell application "Visual Studio Code" to activate
+                            delay 0.1
+                            tell application "Finder"
+                                set db to bounds of window of desktop
+                                set screenW to item 3 of db
+                                set screenH to item 4 of db
+                            end tell
+                            tell application "System Events"
+                                tell process "Code"
+                                    if exists window 1 then
+                                        try
+                                            click (first button whose subrole is "AXZoomButton") of window 1
+                                        end try
+                                        try
+                                            set position of window 1 to {0, 25}
+                                            set size of window 1 to {screenW, screenH - 25}
+                                        end try
+                                    end if
+                                end tell
+                            end tell
+                        "#;
+                        let _ = std::process::Command::new("osascript").args(["-e", script]).output();
+                    }
+                });
+            }
+        }
+        let _ = macos_window_mode;
+
         #[cfg(target_os = "linux")]
         {
             let _ = std::process::Command::new("notify-send")
@@ -1334,11 +1418,11 @@ pub fn ensure_vscode_open_for_problem(problem_id: &str, state: &AppState) {
     }
     if !is_vscode_open_for_problem(problem_id) {
         let ws_dir = state.settings.read().unwrap().get_workspace_path();
-        let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+        let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
             let s = state.settings.read().unwrap();
-            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
         };
-        open_in_vscode_internal(problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+        open_in_vscode_internal(problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
     }
 }
 
@@ -1519,21 +1603,21 @@ async fn press_streamdeck_key(
             let problems = WorkspaceManager::list_problems(&ws_dir);
             let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
             state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
-            let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+            let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
             };
-            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
             return Json(serde_json::json!({ "success": true, "action": action }));
         }
 
         match action.as_str() {
             "open_vscode" => {
-                let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+                let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+                    (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
                 };
-                open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+                open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
             }
             "run_all" => {
                 let p_dir = WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
@@ -1610,11 +1694,11 @@ async fn press_streamdeck_key(
                 let problems = WorkspaceManager::list_problems(&ws_dir);
                 if let Some(first) = problems.first() {
                     state.streamdeck.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
-                    let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
+                    let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
                         let s = state.settings.read().unwrap();
-                        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
+                        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
                     };
-                    open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+                    open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
                 } else {
                     let _ = open::that("http://127.0.0.1:8080/");
                 }

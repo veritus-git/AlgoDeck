@@ -165,7 +165,7 @@ fn run_daemon(port: u16) {
 
     let action_callback = Arc::new(move |action: String, _key_idx: usize| {
         let active_id = streamdeck_clone.get_state().active_problem_id.unwrap_or_default();
-        let (split_pdf, pdf_pos, split_ratio, vscode_mode, ws_dir) = {
+        let (split_pdf, pdf_pos, split_ratio, vscode_mode, ws_dir, macos_mode) = {
             let s = settings_for_callback.read().unwrap();
             (
                 s.open_pdf_in_vscode,
@@ -173,10 +173,11 @@ fn run_daemon(port: u16) {
                 s.editor_split_ratio,
                 s.vscode_mode.clone(),
                 s.get_workspace_path(),
+                s.macos_window_mode.clone(),
             )
         };
         let open_in_vscode = |pid: &str| {
-            server::open_in_vscode_internal(pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+            server::open_in_vscode_internal(pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
         };
         let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
         let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());

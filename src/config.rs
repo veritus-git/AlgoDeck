@@ -51,6 +51,13 @@ pub struct AppSettings {
 
     #[serde(default = "default_autostart_on_boot")]
     pub autostart_on_boot: bool,
+
+    #[serde(default = "default_macos_window_mode")]
+    pub macos_window_mode: String,
+}
+
+fn default_macos_window_mode() -> String {
+    "default".to_string()
 }
 
 fn default_autostart_on_boot() -> bool {
@@ -136,6 +143,7 @@ impl Default for AppSettings {
             pdf_position: default_pdf_position(),
             editor_split_ratio: default_editor_split_ratio(),
             autostart_on_boot: default_autostart_on_boot(),
+            macos_window_mode: default_macos_window_mode(),
         }
     }
 }

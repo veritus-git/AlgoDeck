@@ -122,6 +122,21 @@ body {
   border: 1px solid var(--border-subtle);
 }
 
+.badge-os {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  margin-right: 6px;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
 .doc-title-row {
   display: flex;
   align-items: flex-start;
