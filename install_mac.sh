@@ -71,8 +71,14 @@ if command -v clang++ >/dev/null 2>&1; then
 elif command -v g++ >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Wykryto kompilator GNU C++: $(g++ --version | head -n 1)${NC}"
 else
-    echo -e "${YELLOW}Uwaga: Nie wykryto kompilatora C++ w PATH (np. Clang z Command Line Tools lub GCC z Homebrew).${NC}"
-    echo -e "${BLUE}Wskazówka: Do lokalnej kompilacji zadań w C++ możesz w razie potrzeby zainstalować kompilator: xcode-select --install${NC}"
+    echo -e "${YELLOW}Nie wykryto kompilatora C++ w PATH.${NC}"
+    if command -v brew >/dev/null 2>&1; then
+        echo -e "${CYAN}Próba instalacji kompilatora GCC przez Homebrew...${NC}"
+        brew install gcc || true
+    else
+        echo -e "${CYAN}Uruchamianie instalatora Apple Command Line Tools (Clang C++)...${NC}"
+        xcode-select --install 2>/dev/null || true
+    fi
 fi
 
 # ------------------------------------------------------------------------------
@@ -84,22 +90,50 @@ if ! command -v code >/dev/null 2>&1; then
     # Sprawdź domyślną ścieżkę aplikacji na macOS
     if [ -f "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]; then
         export PATH="/Applications/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"
+    elif [ -f "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]; then
+        export PATH="$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"
     fi
 fi
 
-if command -v code >/dev/null 2>&1; then
-    echo -e "${GREEN}✓ Visual Studio Code jest dostępny w PATH.${NC}"
+if ! command -v code >/dev/null 2>&1; then
+    echo -e "${YELLOW}Visual Studio Code nie został znaleziony w PATH.${NC}"
+    if command -v brew >/dev/null 2>&1; then
+        echo -e "${CYAN}Próba instalacji VS Code przez Homebrew Cask...${NC}"
+        brew install --cask visual-studio-code || true
+    fi
+    if ! command -v code >/dev/null 2>&1 && [ ! -d "/Applications/Visual Studio Code.app" ]; then
+        echo -e "${CYAN}Pobieranie oficjalnej aplikacji Visual Studio Code od Microsoft...${NC}"
+        TMP_VSCODE_ZIP="/tmp/vscode_mac_$$.zip"
+        TMP_VSCODE_DIR="/tmp/vscode_mac_$$"
+        if curl -fsSL -o "$TMP_VSCODE_ZIP" "https://update.code.visualstudio.com/latest/darwin-universal/stable" 2>/dev/null && [ -s "$TMP_VSCODE_ZIP" ]; then
+            mkdir -p "$TMP_VSCODE_DIR"
+            unzip -q "$TMP_VSCODE_ZIP" -d "$TMP_VSCODE_DIR" 2>/dev/null || true
+            if [ -d "$TMP_VSCODE_DIR/Visual Studio Code.app" ]; then
+                TARGET_APP_DIR="/Applications"
+                [ ! -w "/Applications" ] && TARGET_APP_DIR="$HOME/Applications"
+                mkdir -p "$TARGET_APP_DIR"
+                cp -R "$TMP_VSCODE_DIR/Visual Studio Code.app" "$TARGET_APP_DIR/" 2>/dev/null || true
+                export PATH="$TARGET_APP_DIR/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"
+            fi
+            rm -rf "$TMP_VSCODE_ZIP" "$TMP_VSCODE_DIR"
+        fi
+    fi
+fi
+
+if command -v code >/dev/null 2>&1 || [ -f "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ] || [ -f "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]; then
+    if ! command -v code >/dev/null 2>&1; then
+        if [ -f "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]; then
+            ln -sf "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" "$BIN_DIR/code"
+        elif [ -f "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]; then
+            ln -sf "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" "$BIN_DIR/code"
+        fi
+    fi
+    echo -e "${GREEN}✓ Visual Studio Code jest dostępny.${NC}"
     echo -e "${CYAN}Weryfikacja wtyczki C/C++ dla VS Code...${NC}"
     code --install-extension ms-vscode.cpptools --force >/dev/null 2>&1 || true
     echo -e "${GREEN}✓ Rozszerzenie C/C++ zainstalowane w VS Code.${NC}"
 else
-    echo -e "${YELLOW}Visual Studio Code nie został znaleziony w PATH.${NC}"
-    if command -v brew >/dev/null 2>&1; then
-        echo -e "${CYAN}Próba instalacji VS Code przez Homebrew...${NC}"
-        brew install --cask visual-studio-code || true
-    else
-        echo -e "${YELLOW}Pobierz VS Code z: https://code.visualstudio.com/Download${NC}"
-    fi
+    echo -e "${YELLOW}Uwaga: Pobierz i zainstaluj VS Code z https://code.visualstudio.com/${NC}"
 fi
 
 # ------------------------------------------------------------------------------

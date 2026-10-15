@@ -35,11 +35,29 @@ function isOlympicTaskFile(item) {
   if (filename.endsWith(".crdownload")) {
     filename = filename.slice(0, -11);
   }
-  const url = (item.url || "").toLowerCase().split("?")[0];
+  const url = (item.url || "").toLowerCase();
+  const finalUrl = (item.finalUrl || "").toLowerCase();
   const mime = (item.mime || "").toLowerCase();
 
-  // Wyłącznie pliki .pdf! ZIPy nie są automatycznie zaciągane z pobrań
-  return filename.endsWith(".pdf") || mime.includes("pdf") || url.endsWith(".pdf");
+  // 1. Nazwa pliku kończy się na .pdf
+  if (filename.endsWith(".pdf")) return true;
+
+  // 2. MIME type wskazuje na PDF
+  if (mime.includes("pdf")) return true;
+
+  // 3. Adres URL lub finalUrl zawiera słowo kluczowe związane z PDF
+  if (url.includes(".pdf") || url.includes("/pdf") || url.includes("task/pdf") || url.includes("statement")) return true;
+  if (finalUrl.includes(".pdf") || finalUrl.includes("/pdf") || finalUrl.includes("task/pdf") || finalUrl.includes("statement")) return true;
+
+  // 4. Jeśli pobieranie pochodzi z platform olimpijskich (Szkopuł, SIO2, OIOIOI, OI) i nie jest kodem ani zipem
+  const isOlympicDomain = url.includes("szkopul.edu.pl") || url.includes("oioioi") || url.includes("sio2") || url.includes("oi.edu.pl");
+  if (isOlympicDomain) {
+    if (!filename.endsWith(".zip") && !filename.endsWith(".cpp") && !filename.endsWith(".tar.gz")) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // Sprawdzenie czy usługa AlgoDeck działa

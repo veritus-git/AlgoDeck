@@ -91,14 +91,41 @@ fi
 
 # 3. Sprawdzenie Visual Studio Code
 echo -e "\n${CYAN}[3/6] Weryfikacja edytora Visual Studio Code...${NC}"
-if ! command -v code &> /dev/null && [ "$HAS_SUDO" = true ]; then
-    echo -e "${YELLOW}Próba automatycznej instalacji Visual Studio Code...${NC}"
-    if command -v apt-get &> /dev/null; then
-        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/packages.microsoft.gpg 2>/dev/null || true
-        sudo install -D -o root -g root -m 644 /tmp/packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg 2>/dev/null || true
-        echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null 2>&1 || true
-        sudo apt-get update -qq 2>/dev/null || true
-        sudo apt-get install -y -qq code 2>/dev/null || true
+if ! command -v code &> /dev/null; then
+    echo -e "${YELLOW}Weryfikacja / próba instalacji Visual Studio Code...${NC}"
+    if [ "$HAS_SUDO" = true ]; then
+        if command -v apt-get &> /dev/null; then
+            wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/packages.microsoft.gpg 2>/dev/null || true
+            sudo install -D -o root -g root -m 644 /tmp/packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg 2>/dev/null || true
+            echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null 2>&1 || true
+            sudo apt-get update -qq 2>/dev/null || true
+            sudo apt-get install -y -qq code 2>/dev/null || true
+        elif command -v dnf &> /dev/null; then
+            sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc 2>/dev/null || true
+            sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo' 2>/dev/null || true
+            sudo dnf install -y -q code 2>/dev/null || true
+        elif command -v zypper &> /dev/null; then
+            sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc 2>/dev/null || true
+            sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ntype=rpm-md\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/zypp/repos.d/vscode.repo' 2>/dev/null || true
+            sudo zypper refresh 2>/dev/null || true
+            sudo zypper install -y code 2>/dev/null || true
+        fi
+    fi
+
+    # Uniwersalny fallback: pobranie oficjalnej paczki standalone od Microsoft do ~/.local/lib/
+    if ! command -v code &> /dev/null; then
+        echo -e "${CYAN}Pobieranie oficjalnej paczki Visual Studio Code od Microsoft...${NC}"
+        TMP_CODE_TAR="/tmp/vscode_linux_$$.tar.gz"
+        mkdir -p "$HOME/.local/lib"
+        if curl -fsSL -o "$TMP_CODE_TAR" "https://update.code.visualstudio.com/latest/linux-x64/stable" 2>/dev/null && [ -s "$TMP_CODE_TAR" ]; then
+            tar -xzf "$TMP_CODE_TAR" -C "$HOME/.local/lib/" 2>/dev/null || true
+            rm -f "$TMP_CODE_TAR"
+            if [ -f "$HOME/.local/lib/VSCode-linux-x64/bin/code" ]; then
+                mkdir -p "$HOME/.local/bin"
+                ln -sf "$HOME/.local/lib/VSCode-linux-x64/bin/code" "$HOME/.local/bin/code"
+                export PATH="$HOME/.local/bin:$PATH"
+            fi
+        fi
     fi
 fi
 
@@ -138,6 +165,10 @@ if [ -f "$REPO_DIR/Cargo.toml" ] && command -v cargo &> /dev/null; then
     fi
     if [ -d "$REPO_DIR/extension" ]; then
         cp -r "$REPO_DIR/extension/"* "$SHARE_DIR/extension/"
+    fi
+    if [ -d "$REPO_DIR/vscode_extension" ]; then
+        mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+        cp -r "$REPO_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
     fi
 elif [ -f "$REPO_DIR/algodeck" ]; then
     # Jeśli uruchomiono w wypakowanej paczce release tar.gz
@@ -203,6 +234,10 @@ if [ "$INSTALLED_BIN" = false ]; then
             fi
             if [ -n "$ROOT_EXTRACT" ] && [ -d "$ROOT_EXTRACT/extension" ]; then
                 cp -r "$ROOT_EXTRACT/extension/"* "$SHARE_DIR/extension/"
+            fi
+            if [ -n "$ROOT_EXTRACT" ] && [ -d "$ROOT_EXTRACT/vscode_extension" ]; then
+                mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
+                cp -r "$ROOT_EXTRACT/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
             fi
             rm -rf "$TMP_ZIP" "$TMP_DIR"
         fi

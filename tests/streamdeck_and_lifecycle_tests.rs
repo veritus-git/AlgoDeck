@@ -329,8 +329,11 @@ fn test_workspace_scripts_and_tasks_generation() {
     let p_dir = ws_path.join("chw");
     let algo_dir = p_dir.join(".algo");
     assert!(algo_dir.join("run.sh").exists(), "run.sh musi istnieć");
+    assert!(algo_dir.join("run.cmd").exists(), "run.cmd musi istnieć dla Windows");
     assert!(algo_dir.join("test.sh").exists(), "test.sh musi istnieć");
+    assert!(algo_dir.join("test.cmd").exists(), "test.cmd musi istnieć dla Windows");
     assert!(algo_dir.join("kill.sh").exists(), "kill.sh musi istnieć");
+    assert!(algo_dir.join("kill.cmd").exists(), "kill.cmd musi istnieć dla Windows");
     assert!(algo_dir.join("accept.sh").exists(), "accept.sh musi istnieć");
     assert!(p_dir.join(".vscode/tasks.json").exists(), "problem tasks.json musi istnieć");
     assert!(ws_path.join(".vscode/tasks.json").exists(), "root workspace tasks.json musi istnieć");
@@ -346,10 +349,12 @@ fn test_workspace_scripts_and_tasks_generation() {
     let p_tasks = std::fs::read_to_string(p_dir.join(".vscode/tasks.json")).unwrap();
     assert!(p_tasks.contains("${workspaceFolder}/.algo/run.sh"));
     assert!(p_tasks.contains("${workspaceFolder}/$TASK/.algo/run.sh"));
+    assert!(p_tasks.contains("run.cmd"), "tasks.json musi zawierać wsparcie run.cmd dla Windows");
 
     let root_tasks = std::fs::read_to_string(ws_path.join(".vscode/tasks.json")).unwrap();
     assert!(root_tasks.contains("${workspaceFolder}/.algo/run.sh"));
     assert!(root_tasks.contains("${workspaceFolder}/$TASK/.algo/run.sh"));
+    assert!(root_tasks.contains("run.cmd"), "root tasks.json musi zawierać wsparcie run.cmd dla Windows");
 
     let _ = std::fs::remove_dir_all(&ws_path);
 }
@@ -422,6 +427,45 @@ int main() {
 
     let _ = std::fs::remove_dir_all(&ws_path);
 }
+
+#[tokio::test]
+async fn test_vscode_detection_and_multi_socket_bridge() {
+    // 1. Sprawdź gdy puste ID
+    assert!(!algodeck::server::is_vscode_open_for_problem(""));
+
+    // 2. Symuluj UNIX domain socket utworzony przez algodeckworkspace
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixListener;
+        use std::io::{Read, Write};
+
+        let sock_path = "/tmp/algodeck_vscode_algodeckworkspace.sock";
+        let _ = std::fs::remove_file(sock_path);
+
+        if let Ok(listener) = UnixListener::bind(sock_path) {
+            let handle = std::thread::spawn(move || {
+                for _ in 0..2 {
+                    if let Ok((mut stream, _)) = listener.accept() {
+                        let mut buf = [0u8; 128];
+                        let _ = stream.read(&mut buf);
+                        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+                    }
+                }
+            });
+
+            // is_vscode_open_for_problem powinien wykryć algodeckworkspace.sock
+            assert!(algodeck::server::is_vscode_open_for_problem("kol"));
+
+            // send_bridge_request również powinien przesłać zapytanie
+            let sent = algodeck::server::send_bridge_request("test", "kol", "/tmp/pdir");
+            assert!(sent, "send_bridge_request musi nawiązać połączenie przez socket");
+
+            let _ = handle.join();
+            let _ = std::fs::remove_file(sock_path);
+        }
+    }
+}
+
 
 
 

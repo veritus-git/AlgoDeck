@@ -67,10 +67,53 @@ document.addEventListener("DOMContentLoaded", () => {
   setupActionButtons();
 
   checkDaemonHealth();
+  connectWebSocket();
   loadStagedState();
   checkAutoPdfParam();
   setInterval(checkDaemonHealth, 3000);
 });
+
+function connectWebSocket() {
+  const wsHost = location.host || "127.0.0.1:8080";
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${wsProto}//${wsHost}/ws`);
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data && typeof data === "object" && data.active_problem_id !== undefined) {
+        if (data.active_problem_id) {
+          activeProblemId = data.active_problem_id;
+          activeTaskBar.classList.remove("hidden");
+          activeTaskName.textContent = `[${data.active_problem_id.toUpperCase()}]`;
+        } else {
+          activeProblemId = null;
+          activeTaskBar.classList.add("hidden");
+        }
+        if (document.getElementById("tab-gallery")?.classList.contains("active")) {
+          loadProblems();
+        }
+      }
+    } catch (_) {
+      if (typeof event.data === "string" && event.data.startsWith("active:")) {
+        const pid = event.data.substring(7);
+        if (pid) {
+          activeProblemId = pid;
+          activeTaskBar.classList.remove("hidden");
+          activeTaskName.textContent = `[${pid.toUpperCase()}]`;
+        } else {
+          activeProblemId = null;
+          activeTaskBar.classList.add("hidden");
+        }
+        if (document.getElementById("tab-gallery")?.classList.contains("active")) {
+          loadProblems();
+        }
+      }
+    }
+  };
+  ws.onclose = () => {
+    setTimeout(connectWebSocket, 3000);
+  };
+}
 
 async function checkAutoPdfParam() {
   const urlParams = new URLSearchParams(window.location.search);

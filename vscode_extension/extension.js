@@ -34,7 +34,11 @@ function createAlgoTask(name, scriptName, pdir) {
         ? vscode.workspace.workspaceFolders[0]
         : vscode.TaskScope.Global;
 
-    const cmd = pdir ? `cd "${pdir}" && bash .algo/${scriptName}` : `bash .algo/${scriptName}`;
+    const isWin = process.platform === 'win32';
+    const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
+    const cmd = isWin
+        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
+        : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
     const execution = new vscode.ShellExecution(cmd);
     const task = new vscode.Task(
         { type: 'shell', task: name },
@@ -50,6 +54,26 @@ function createAlgoTask(name, scriptName, pdir) {
         clear: true
     };
     return task;
+}
+
+function runInAlgoTerminal(name, scriptName, pdir) {
+    const isWin = process.platform === 'win32';
+    const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
+    const cmd = isWin
+        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
+        : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
+
+    let term = vscode.window.terminals.find(t => t.name === name || t.name === 'AlgoDeck');
+    if (!term) {
+        term = vscode.window.createTerminal({
+            name: name,
+            cwd: pdir || undefined
+        });
+    }
+    term.show(true);
+    term.sendText('\x03', false);
+    term.sendText(cmd, true);
+    return true;
 }
 
 function getRequestHandler() {
@@ -69,10 +93,16 @@ function getRequestHandler() {
                         for (const f of vscode.workspace.workspaceFolders) {
                             const fName = f.name.toLowerCase();
                             const fPath = f.uri.fsPath.toLowerCase();
-                            if (fName === qLower || fPath.endsWith(qLower) || fPath.includes('/' + qLower)) {
+                            if (fName === qLower || fPath.endsWith(qLower) || fPath.includes('/' + qLower) || fName.includes('algodeck')) {
                                 isOpen = true;
                                 break;
                             }
+                            try {
+                                if (fs.existsSync(path.join(f.uri.fsPath, qProb)) || fs.existsSync(path.join(f.uri.fsPath, qLower))) {
+                                    isOpen = true;
+                                    break;
+                                }
+                            } catch (_) {}
                         }
                     }
 
@@ -92,6 +122,11 @@ function getRequestHandler() {
                                 break;
                             }
                         }
+                    }
+
+                    // 4. Jeśli ten edytor ma otwarty jakikolwiek workspace AlgoDeck, uznajemy go za otwarty
+                    if (!isOpen && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                        isOpen = true;
                     }
 
                     if (isOpen) {
@@ -159,18 +194,17 @@ function getRequestHandler() {
 
                     let executed = false;
 
-                    // 1. Wykonanie jako natywne zadanie VS Code Task
+                    // 1. Zawsze uruchom w niezawodnym dedykowanym terminalu AlgoDeck
                     if (pdir) {
                         try {
-                            const task = createAlgoTask('AlgoDeck: TESTUJ', 'test.sh', pdir);
-                            await vscode.tasks.executeTask(task);
+                            runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', pdir);
                             executed = true;
-                        } catch (taskErr) {
-                            console.error('[AlgoDeck Bridge] executeTask error:', taskErr);
+                        } catch (termErr) {
+                            console.error('[AlgoDeck Bridge] runInAlgoTerminal error:', termErr);
                         }
                     }
 
-                    // 2. Fallback: wyszukaj zadanie w workspace (tasks.json)
+                    // 2. Fallback zadania VS Code Task jeśli terminal nie wystartował
                     if (!executed) {
                         try {
                             const allTasks = await vscode.tasks.fetchTasks();
@@ -209,18 +243,17 @@ function getRequestHandler() {
 
                     let executed = false;
 
-                    // 1. Wykonanie jako natywne zadanie VS Code Task
+                    // 1. Zawsze uruchom w niezawodnym dedykowanym terminalu AlgoDeck
                     if (pdir) {
                         try {
-                            const task = createAlgoTask('AlgoDeck: ODPAL', 'run.sh', pdir);
-                            await vscode.tasks.executeTask(task);
+                            runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', pdir);
                             executed = true;
-                        } catch (taskErr) {
-                            console.error('[AlgoDeck Bridge] executeTask error:', taskErr);
+                        } catch (termErr) {
+                            console.error('[AlgoDeck Bridge] runInAlgoTerminal error:', termErr);
                         }
                     }
 
-                    // 2. Fallback: wyszukaj zadanie w workspace (tasks.json)
+                    // 2. Fallback zadania VS Code Task jeśli terminal nie wystartował
                     if (!executed) {
                         try {
                             const allTasks = await vscode.tasks.fetchTasks();
@@ -299,6 +332,9 @@ function activate(context) {
             });
             sockServer.listen(sockPath, () => {
                 console.log(`[AlgoDeck Bridge] Nasłuchiwanie na gnieździe UNIX: ${sockPath}`);
+                try {
+                    fs.writeFileSync('/tmp/algodeck_vscode_active.sock', sockPath);
+                } catch (_) {}
             });
         }
     }

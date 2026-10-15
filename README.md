@@ -54,14 +54,17 @@ Działa bezpośrednio z magistralą USB urządzenia — bez oficjalnej aplikacji
 
 | Klawisz | Działanie |
 |:---:|:---|
-| **`●` (0..4, 11..13)** | Dynamiczne wskaźniki statusu poszczególnych testów |
-| **`KOD` (2)** | Identyfikator aktualnego zadania (np. `CHW`, `SIL`) |
-| **`</>` (5)** | Otwórz w VS Code z podziałem ekranu (kod C++ + treść PDF) |
-| **`⚗` (6)** | Skompiluj z flagami olimpijskimi i uruchom wszystkie testy |
-| **`▶` (7)** | Uruchom program w interaktywnym terminalu |
-| **`⏹` (8)** | Natychmiast zatrzymaj zapętlony kod bez zamykania VS Code |
-| **`⚙` (9)** | Ustawienia jasności i konfiguracji |
-| **`‹` / `›` (10, 14)** | Szybkie przełączanie między zadaniami |
+| **`KOD` (0..4)** | 5-klawiszowy identyfikator aktywnego zadania (np. `[ = ] [ K ] [ O ] [ L ] [ = ]`), kliknięcie skupia plik w VS Code |
+| **`+` (5)** | Otwórz stronę dodawania nowego zadania (`#new`) w przeglądarce |
+| **`✓` (6)** | Skompiluj kod (C++20) i uruchom testy w VS Code z dynamicznym statusem (OK, WA, TLE, czas w ms) |
+| **`▶` (7)** | Skompiluj i uruchom rozwiązanie w interaktywnym oknie terminala VS Code (cin/cout) |
+| **`⏹` (8)** | Natychmiast zatrzymaj działający program lub testy (mostek VS Code + SIGKILL / taskkill) |
+| **`⊞` (9)** | Otwórz Galerię Zadań na Stream Decku (klawisze 0..9) do bezpośredniego skoku do dowolnego zadania |
+| **`⚙` (10)** | Otwórz Centrum Konfiguracji i Architektury pod `http://127.0.0.1:8080/settings` |
+| **Pusty (11)** | Czysta czerń OLED (#000000) |
+| **`‹` (12)** | Przełącz aktywne zadanie na poprzednie w workspace i skup je w VS Code |
+| **`1 / X` (13)** | Wskaźnik numeru zadania i łącznej liczby zadań |
+| **`›` (14)** | Przełącz aktywne zadanie na kolejne w workspace i skup je w VS Code |
 
 ### 4. Centrum Konfiguracji i Ustawień
 Pełna kontrola nad stroną podziału okien (VS Code po lewej lub prawej), proporcjami ekranu, katalogiem roboczym oraz kompilatorem C++20.

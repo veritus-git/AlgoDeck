@@ -411,6 +411,40 @@ fi
             let _ = fs::set_permissions(&run_sh_path, fs::Permissions::from_mode(0o755));
         }
 
+        // 1b. run.cmd (Windows)
+        let run_cmd_path = algo_dir.join("run.cmd");
+        let run_cmd_content = format!(
+            r#"@echo off
+chcp 65001 >nul
+cd /d "{p_dir_disp}"
+
+echo [AlgoDeck] Kompilacja {p_id}.cpp (g++ -O3 -std=c++20)...
+if not exist .algo mkdir .algo
+g++ -O3 -std=c++20 "{p_id}.cpp" -o ".algo\{p_id}.exe" 2>.algo\compile.log
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ BŁĄD KOMPILACJI!
+    type .algo\compile.log
+    exit /b 1
+)
+
+echo ✓ Skompilowano pomyślnie!
+echo ▶ Program uruchomiony (wprowadź dane cin):
+echo ---------------------------------------------------------
+.algo\{p_id}.exe
+set RET=%ERRORLEVEL%
+echo.
+echo ---------------------------------------------------------
+if %RET% EQU 0 (
+    echo ✓ Program zakończony pomyślnie (kod: 0).
+) else (
+    echo ❌ Program zakończony błędem (kod: %RET%).
+)
+"#,
+            p_dir_disp = p_dir.display(),
+            p_id = p_id
+        );
+        let _ = fs::write(&run_cmd_path, run_cmd_content);
+
         // 2. test.sh
         let test_sh_path = algo_dir.join("test.sh");
         let test_content = format!(
@@ -676,6 +710,70 @@ fi
             let _ = fs::set_permissions(&test_sh_path, fs::Permissions::from_mode(0o755));
         }
 
+        // 2b. test.cmd (Windows)
+        let test_cmd_path = algo_dir.join("test.cmd");
+        let test_cmd_content = format!(
+            r#"@echo off
+chcp 65001 >nul
+cd /d "{p_dir_disp}"
+
+echo ================================================================================
+echo        ⚡ AlgoDeck Test Runner — {p_upper} ({title})
+echo ================================================================================
+
+echo ⚡ Kompilacja {p_id}.cpp (g++ -O3 -std=c++20)...
+if not exist .algo mkdir .algo
+g++ -O3 -std=c++20 "{p_id}.cpp" -o ".algo\{p_id}.exe" 2>.algo\compile.log
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ BŁĄD KOMPILACJI!
+    type .algo\compile.log
+    exit /b 1
+)
+echo ✓ Kompilacja OK
+echo.
+
+set TOTAL=0
+set PASSED=0
+set FAILED=0
+
+for %%F in (.algo\tests\*.in) do (
+    set /a TOTAL+=1
+    set "base=%%~nF"
+    .algo\{p_id}.exe < "%%F" > ".algo\tests\%%~nF.my" 2>nul
+    if errorlevel 1 (
+        echo [%%~nF] 💥 RTE (Błąd wykonania)
+        set /a FAILED+=1
+    ) else if exist ".algo\tests\%%~nF.out" (
+        fc /w ".algo\tests\%%~nF.out" ".algo\tests\%%~nF.my" >nul 2>&1
+        if errorlevel 1 (
+            echo [%%~nF] ❌ WA (Zły wynik)
+            set /a FAILED+=1
+        ) else (
+            echo [%%~nF] ✓ OK
+            set /a PASSED+=1
+        )
+    ) else (
+        echo [%%~nF] ✓ OK (brak wzorca .out)
+        set /a PASSED+=1
+    )
+)
+
+echo.
+echo ================================================================================
+if %PASSED% EQU %TOTAL% (
+    echo ✨ 100%% TESTÓW ZALICZONYCH (%PASSED%/%TOTAL%) - WSZYSTKO POPRAWNIE!
+) else (
+    echo ⚠️ WYNIK: %PASSED%/%TOTAL% zaliczonych (%FAILED% oblanych).
+)
+echo ================================================================================
+"#,
+            p_dir_disp = p_dir.display(),
+            p_id = p_id,
+            p_upper = p_id.to_uppercase(),
+            title = title
+        );
+        let _ = fs::write(&test_cmd_path, test_cmd_content);
+
         // 3. kill.sh
         let kill_sh_path = algo_dir.join("kill.sh");
         let kill_content = format!(
@@ -706,6 +804,17 @@ notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program /
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(&kill_sh_path, fs::Permissions::from_mode(0o755));
         }
+
+        // 3b. kill.cmd (Windows)
+        let kill_cmd_path = algo_dir.join("kill.cmd");
+        let kill_cmd_content = format!(
+            r#"@echo off
+taskkill /F /IM "{p_id}.exe" 2>nul
+echo 🛑 Zatrzymano działający program {p_id}
+"#,
+            p_id = p_id
+        );
+        let _ = fs::write(&kill_cmd_path, kill_cmd_content);
 
         // 4. accept.sh
         let accept_sh_path = algo_dir.join("accept.sh");
@@ -740,6 +849,9 @@ fi
             "label": "AlgoDeck: ODPAL",
             "type": "shell",
             "command": "if [ -f \"${workspaceFolder}/.algo/run.sh\" ]; then bash \"${workspaceFolder}/.algo/run.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/run.sh\"; elif [ -f \"${fileDirname}/.algo/run.sh\" ]; then bash \"${fileDirname}/.algo/run.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/run.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
+            "windows": {
+                "command": "if (Test-Path \"${workspaceFolder}\\.algo\\run.cmd\") { & \"${workspaceFolder}\\.algo\\run.cmd\" } elseif (Test-Path \"${fileDirname}\\.algo\\run.cmd\") { & \"${fileDirname}\\.algo\\run.cmd\" } elseif (Test-Path \"${workspaceFolder}\\.algo\\run.sh\") { bash \"${workspaceFolder}/.algo/run.sh\" } else { Write-Error \"[AlgoDeck] Nie znaleziono .algo\\run.cmd\"; exit 1 }"
+            },
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -756,6 +868,9 @@ fi
             "label": "AlgoDeck: TESTUJ",
             "type": "shell",
             "command": "if [ -f \"${workspaceFolder}/.algo/test.sh\" ]; then bash \"${workspaceFolder}/.algo/test.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/test.sh\"; elif [ -f \"${fileDirname}/.algo/test.sh\" ]; then bash \"${fileDirname}/.algo/test.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/test.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
+            "windows": {
+                "command": "if (Test-Path \"${workspaceFolder}\\.algo\\test.cmd\") { & \"${workspaceFolder}\\.algo\\test.cmd\" } elseif (Test-Path \"${fileDirname}\\.algo\\test.cmd\") { & \"${fileDirname}\\.algo\\test.cmd\" } elseif (Test-Path \"${workspaceFolder}\\.algo\\test.sh\") { bash \"${workspaceFolder}/.algo/test.sh\" } else { Write-Error \"[AlgoDeck] Nie znaleziono .algo\\test.cmd\"; exit 1 }"
+            },
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -787,6 +902,9 @@ fi
             "label": "AlgoDeck: ODPAL",
             "type": "shell",
             "command": "if [ -f \"${workspaceFolder}/.algo/run.sh\" ]; then bash \"${workspaceFolder}/.algo/run.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/run.sh\"; elif [ -f \"${fileDirname}/.algo/run.sh\" ]; then bash \"${fileDirname}/.algo/run.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/run.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
+            "windows": {
+                "command": "if (Test-Path \"${workspaceFolder}\\.algo\\run.cmd\") { & \"${workspaceFolder}\\.algo\\run.cmd\" } elseif (Test-Path \"${fileDirname}\\.algo\\run.cmd\") { & \"${fileDirname}\\.algo\\run.cmd\" } elseif (Test-Path \"${workspaceFolder}\\.algo\\run.sh\") { bash \"${workspaceFolder}/.algo/run.sh\" } else { Write-Error \"[AlgoDeck] Nie znaleziono .algo\\run.cmd\"; exit 1 }"
+            },
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -803,6 +921,9 @@ fi
             "label": "AlgoDeck: TESTUJ",
             "type": "shell",
             "command": "if [ -f \"${workspaceFolder}/.algo/test.sh\" ]; then bash \"${workspaceFolder}/.algo/test.sh\"; else TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; if [ -n \"$TASK\" ] && [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ]; then bash \"${workspaceFolder}/$TASK/.algo/test.sh\"; elif [ -f \"${fileDirname}/.algo/test.sh\" ]; then bash \"${fileDirname}/.algo/test.sh\"; else echo \"[AlgoDeck] Błąd: Nie znaleziono .algo/test.sh w ${workspaceFolder} ani w ${workspaceFolder}/$TASK\"; exit 1; fi; fi",
+            "windows": {
+                "command": "if (Test-Path \"${workspaceFolder}\\.algo\\test.cmd\") { & \"${workspaceFolder}\\.algo\\test.cmd\" } elseif (Test-Path \"${fileDirname}\\.algo\\test.cmd\") { & \"${fileDirname}\\.algo\\test.cmd\" } elseif (Test-Path \"${workspaceFolder}\\.algo\\test.sh\") { bash \"${workspaceFolder}/.algo/test.sh\" } else { Write-Error \"[AlgoDeck] Nie znaleziono .algo\\test.cmd\"; exit 1 }"
+            },
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",

@@ -132,6 +132,7 @@ fn run_daemon(port: u16) {
     let runner_clone = runner.clone();
     let streamdeck_clone = streamdeck.clone();
     let settings_for_callback = settings.clone();
+    let ws_sender_cb = ws_sender.clone();
 
     let action_callback = Arc::new(move |action: String, _key_idx: usize| {
         let active_id = streamdeck_clone.get_state().active_problem_id.unwrap_or_default();
@@ -155,6 +156,7 @@ fn run_daemon(port: u16) {
             let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
             let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
             streamdeck_clone.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
+            let _ = ws_sender_cb.send(format!("active:{}", pid));
             open_in_vscode(&pid);
             return;
         }
@@ -208,17 +210,21 @@ fn run_daemon(port: u16) {
                     let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
                     let cur_idx = problems.iter().position(|p| p.problem_id == active_id).unwrap_or(0) + 1;
                     streamdeck_clone.set_active_problem_with_meta(&active_id, cur_idx, problems.len().max(1));
+                    let _ = ws_sender_cb.send(format!("active:{}", active_id));
                 } else {
                     streamdeck_clone.set_idle_screen();
+                    let _ = ws_sender_cb.send("active:".to_string());
                 }
             }
             "exit_to_idle" => {
                 streamdeck_clone.set_idle_screen();
+                let _ = ws_sender_cb.send("active:".to_string());
             }
             "start_or_resume" => {
                 let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
                 if let Some(first) = problems.first() {
                     streamdeck_clone.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
+                    let _ = ws_sender_cb.send(format!("active:{}", first.problem_id));
                     open_in_vscode(&first.problem_id);
                 } else {
                     let _ = open::that("http://127.0.0.1:8080/");
@@ -235,6 +241,7 @@ fn run_daemon(port: u16) {
                     };
                     let new_pid = &problems[new_idx].problem_id;
                     streamdeck_clone.set_active_problem_with_meta(new_pid, new_idx + 1, problems.len());
+                    let _ = ws_sender_cb.send(format!("active:{}", new_pid));
                     open_in_vscode(new_pid);
                 }
             }

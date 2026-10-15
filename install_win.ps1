@@ -59,20 +59,39 @@ if ($hasGpp) {
     Write-Host "✓ Wykryto kompilator MSVC (cl.exe)." -ForegroundColor Green
 } else {
     Write-Host "Brak wykrytego kompilatora C++ w PATH." -ForegroundColor Yellow
+    $installedCompiler = $false
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Host "Próba automatycznej instalacji MinGW-w64 UCRT (C++20) przez winget..." -ForegroundColor Cyan
         try {
             winget install -e --id BrechtSanders.winlibs-mingw-ucrt --accept-package-agreements --accept-source-agreements --silent
-            # Odśwież zmienną PATH w bieżącej sesji
             $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
             if (Get-Command g++ -ErrorAction SilentlyContinue) {
                 Write-Host "✓ Pomyślnie zainstalowano MinGW C++20!" -ForegroundColor Green
+                $installedCompiler = $true
+            }
+        } catch {}
+    }
+    if (-not $installedCompiler) {
+        Write-Host "Pobieranie przenośnego kompilatora C++20 (w64devkit / MinGW)..." -ForegroundColor Cyan
+        $DevkitZip = "$env:TEMP\w64devkit.zip"
+        $DevkitDir = "$InstallDir\compiler"
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri "https://github.com/skeeto/w64devkit/releases/latest/download/w64devkit-x64.zip" -OutFile $DevkitZip -UseBasicParsing
+            Expand-Archive -Path $DevkitZip -DestinationPath $DevkitDir -Force
+            Remove-Item $DevkitZip -Force -ErrorAction SilentlyContinue
+            $BinPath = "$DevkitDir\w64devkit\bin"
+            if (Test-Path $BinPath) {
+                $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+                if ($userPath -notlike "*$BinPath*") {
+                    [Environment]::SetEnvironmentVariable("Path", "$userPath;$BinPath", "User")
+                }
+                $env:Path = "$env:Path;$BinPath"
+                Write-Host "✓ Kompilator C++20 (g++) zainstalowany w $BinPath" -ForegroundColor Green
             }
         } catch {
-            Write-Host "Ostrzeżenie: Nie udało się zainstalować MinGW automatycznie. Możesz zainstalować go ręcznie z winlibs.com." -ForegroundColor DarkYellow
+            Write-Host "Wskazówka: Zainstaluj MinGW-w64 (https://winlibs.com) do lokalnej kompilacji zadań." -ForegroundColor DarkYellow
         }
-    } else {
-        Write-Host "Zainstaluj MinGW-w64 (https://winlibs.com) lub Visual Studio C++, aby móc lokalnie kompilować zadania olimpijskie." -ForegroundColor DarkYellow
     }
 }
 
@@ -91,6 +110,29 @@ if (-not $hasVscode) {
     }
 }
 
+if (-not $hasVscode) {
+    Write-Host "Visual Studio Code nie został znaleziony w PATH." -ForegroundColor Yellow
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "Próba automatycznej instalacji VS Code przez winget..." -ForegroundColor Cyan
+        try {
+            winget install -e --id Microsoft.VisualStudioCode --accept-package-agreements --accept-source-agreements --silent
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+        } catch {}
+    }
+    if (-not (Get-Command code -ErrorAction SilentlyContinue) -and -not (Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd")) {
+        Write-Host "Pobieranie oficjalnego instalatora Visual Studio Code od Microsoft..." -ForegroundColor Cyan
+        $VsSetup = "$env:TEMP\VSCodeUserSetup.exe"
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri "https://update.code.visualstudio.com/latest/win32-x64-user/stable" -OutFile $VsSetup -UseBasicParsing
+            Start-Process -FilePath $VsSetup -ArgumentList "/verysilent /mergetasks=!runcode" -Wait
+            Remove-Item $VsSetup -Force -ErrorAction SilentlyContinue
+            $env:Path = "$env:Path;$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin"
+        } catch {}
+    }
+}
+
+$hasVscode = (Get-Command code -ErrorAction SilentlyContinue) -or (Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd")
 if ($hasVscode) {
     Write-Host "✓ Wykryto edytor Visual Studio Code." -ForegroundColor Green
     Write-Host "Instalacja / weryfikacja wtyczki C/C++ (ms-vscode.cpptools)..." -ForegroundColor Cyan
@@ -99,15 +141,7 @@ if ($hasVscode) {
         Write-Host "✓ Rozszerzenie C/C++ dla VS Code jest zainstalowane." -ForegroundColor Green
     } catch {}
 } else {
-    Write-Host "Visual Studio Code nie został znaleziony w PATH." -ForegroundColor Yellow
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "Czy chcesz zainstalować VS Code automatycznie przez winget? (Próba cichej instalacji...)" -ForegroundColor Cyan
-        try {
-            winget install -e --id Microsoft.VisualStudioCode --accept-package-agreements --accept-source-agreements --silent
-        } catch {}
-    } else {
-        Write-Host "Zainstaluj VS Code z oficjalnej strony: https://code.visualstudio.com/" -ForegroundColor DarkYellow
-    }
+    Write-Host "Pobierz i zainstaluj VS Code z oficjalnej strony: https://code.visualstudio.com/" -ForegroundColor DarkYellow
 }
 
 # ------------------------------------------------------------------------------

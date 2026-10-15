@@ -813,9 +813,17 @@ async fn stage_by_path(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let raw = req.file_path.trim().trim_start_matches("file://");
     let decoded = url_decode_path(raw);
-    let mut path = PathBuf::from(raw);
+    let expand_tilde = |p: &str| -> PathBuf {
+        if p.starts_with("~/") || p == "~" {
+            dirs::home_dir().map(|h| h.join(p.trim_start_matches("~/"))).unwrap_or_else(|| PathBuf::from(p))
+        } else {
+            PathBuf::from(p)
+        }
+    };
+
+    let mut path = expand_tilde(raw);
     if !path.exists() {
-        let dec_path = PathBuf::from(&decoded);
+        let dec_path = expand_tilde(&decoded);
         if dec_path.exists() {
             path = dec_path;
         } else {
@@ -846,8 +854,16 @@ async fn stage_by_path(
         ));
     }
 
-    let is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
+    let mut is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
     let is_zip = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
+
+    if !is_pdf && !is_zip && path.exists() {
+        if let Ok(file_bytes) = fs::read(&path) {
+            if file_bytes.starts_with(b"%PDF") {
+                is_pdf = true;
+            }
+        }
+    }
 
     if !is_pdf && !is_zip {
         return Err((
@@ -873,7 +889,10 @@ async fn stage_by_path(
         }
     }
 
-    let filename = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "downloaded_file".to_string());
+    let mut filename = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "downloaded_file".to_string());
+    if is_pdf && !filename.to_lowercase().ends_with(".pdf") {
+        filename = format!("{}.pdf", filename);
+    }
     let target_path = stage_dir.join(&filename);
 
     if let Err(e) = fs::copy(&path, &target_path) {
@@ -1128,20 +1147,29 @@ async fn stage_refresh() -> Json<serde_json::Value> {
 
 pub fn ensure_vscode_extension_installed() {
     if let Some(home) = dirs::home_dir() {
-        let dest = home.join(".vscode/extensions/algodeck-vscode-bridge");
+        let targets = [
+            home.join(".vscode/extensions/algodeck-vscode-bridge"),
+            home.join(".vscode/extensions/algodeck.algodeck-vscode-bridge-2.0.0"),
+            home.join(".var/app/com.visualstudio.code/data/vscode/extensions/algodeck-vscode-bridge"),
+        ];
         let pkg = include_str!("../vscode_extension/package.json");
         let ext = include_str!("../vscode_extension/extension.js");
-        let ext_file = dest.join("extension.js");
-        let pkg_file = dest.join("package.json");
-        let should_update = match std::fs::read_to_string(&ext_file) {
-            Ok(existing) => existing != ext,
-            Err(_) => true,
-        };
-        if should_update {
-            let _ = std::fs::create_dir_all(&dest);
-            let _ = std::fs::write(&pkg_file, pkg);
-            let _ = std::fs::write(&ext_file, ext);
-            println!("✓ Zainstalowano/zaktualizowano integrację VS Code Bridge w {}", dest.display());
+
+        for dest in &targets {
+            if dest.parent().map(|p| p.exists()).unwrap_or(false) || dest.exists() {
+                let ext_file = dest.join("extension.js");
+                let pkg_file = dest.join("package.json");
+                let should_update = match std::fs::read_to_string(&ext_file) {
+                    Ok(existing) => existing != ext,
+                    Err(_) => true,
+                };
+                if should_update {
+                    let _ = std::fs::create_dir_all(dest);
+                    let _ = std::fs::write(&pkg_file, pkg);
+                    let _ = std::fs::write(&ext_file, ext);
+                    println!("✓ Zainstalowano/zaktualizowano integrację VS Code Bridge w {}", dest.display());
+                }
+            }
         }
     }
 }
@@ -1151,7 +1179,7 @@ pub fn open_in_vscode_internal(
     workspace_dir: &Path,
     split_pdf: bool,
     pdf_position: &str,
-    split_ratio: u8,
+    _split_ratio: u8,
     vscode_mode: &str,
     macos_window_mode: &str,
 ) {
@@ -1237,80 +1265,58 @@ pub fn open_in_vscode_internal(
         let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
         let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
 
-        let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
-        let mut launched = false;
-        if let Some(ref script) = sd_code {
-            if script.exists() {
-                let res = std::process::Command::new(script)
-                    .arg(&p_dir)
-                    .arg(&sol_file)
-                    .env("DISPLAY", &display)
-                    .env("XAUTHORITY", &xauthority)
-                    .env("ALGODECK_PDF_POS", pdf_position)
-                    .env("ALGODECK_SPLIT_RATIO", split_ratio.to_string())
-                    .env("ALGODECK_VSCODE_MODE", vscode_mode)
-                    .env("ALGODECK_WORKSPACE_DIR", workspace_dir.to_string_lossy().as_ref())
-                    .spawn();
-                if res.is_ok() {
-                    launched = true;
+        let candidates = [
+            "/usr/local/bin/code",
+            "/opt/homebrew/bin/code",
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "/usr/bin/code",
+        ];
+        let code_bin = candidates
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .copied()
+            .unwrap_or("code");
+
+        let mut cmd = std::process::Command::new(code_bin);
+        if is_separate {
+            cmd.arg("--new-window");
+        } else {
+            cmd.arg("--reuse-window");
+        }
+        cmd.arg(target_dir);
+
+        #[cfg(target_os = "macos")]
+        {
+            if split_pdf {
+                if let Some(ref p) = actual_pdf {
+                    let _ = std::process::Command::new("open").arg(p).spawn();
                 }
             }
         }
 
-        if !launched {
-            let candidates = [
-                "/usr/local/bin/code",
-                "/opt/homebrew/bin/code",
-                "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-                "/usr/bin/code",
-            ];
-            let code_bin = candidates
-                .iter()
-                .find(|p| std::path::Path::new(p).exists())
-                .copied()
-                .unwrap_or("code");
-
-            let mut cmd = std::process::Command::new(code_bin);
-            if is_separate {
-                cmd.arg("--new-window");
-            } else {
-                cmd.arg("--reuse-window");
+        #[cfg(not(target_os = "macos"))]
+        if split_pdf && pdf_on_left {
+            if let Some(ref p) = actual_pdf {
+                cmd.arg(p);
             }
-            cmd.arg(target_dir);
-
-            #[cfg(target_os = "macos")]
-            {
-                if split_pdf {
-                    if let Some(ref p) = actual_pdf {
-                        let _ = std::process::Command::new("open").arg(p).spawn();
-                    }
-                }
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            if split_pdf && pdf_on_left {
-                if let Some(ref p) = actual_pdf {
-                    cmd.arg(p);
-                }
-            }
-
-            if sol_file.exists() {
-                cmd.arg(&sol_file);
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            if split_pdf && !pdf_on_left {
-                if let Some(ref p) = actual_pdf {
-                    cmd.arg(p);
-                }
-            }
-            #[cfg(target_os = "linux")]
-            {
-                cmd.env("DISPLAY", &display);
-                cmd.env("XAUTHORITY", &xauthority);
-            }
-            let _ = cmd.spawn();
         }
+
+        if sol_file.exists() {
+            cmd.arg(&sol_file);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        if split_pdf && !pdf_on_left {
+            if let Some(ref p) = actual_pdf {
+                cmd.arg(p);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            cmd.env("DISPLAY", &display);
+            cmd.env("XAUTHORITY", &xauthority);
+        }
+        let _ = cmd.spawn();
 
         #[cfg(target_os = "macos")]
         {
@@ -1360,15 +1366,6 @@ pub fn open_in_vscode_internal(
             }
         }
         let _ = macos_window_mode;
-
-        #[cfg(target_os = "linux")]
-        {
-            let _ = std::process::Command::new("notify-send")
-                .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
-                .env("DISPLAY", &display)
-                .env("XAUTHORITY", &xauthority)
-                .spawn();
-        }
     }
 }
 
@@ -1380,21 +1377,47 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     #[cfg(unix)]
     {
         use std::io::Write;
-        let sock_path = format!("/tmp/algodeck_vscode_{}.sock", problem_id.to_lowercase());
-        if std::path::Path::new(&sock_path).exists() {
-            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
-                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(200)));
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
-                if stream.write_all(b"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").is_ok() {
-                    return true;
+        let p_lower = problem_id.to_lowercase();
+        let mut candidate_socks = vec![
+            format!("/tmp/algodeck_vscode_{}.sock", p_lower),
+            "/tmp/algodeck_vscode_algodeckworkspace.sock".to_string(),
+            "/tmp/algodeck_vscode_default.sock".to_string(),
+        ];
+        if let Ok(act) = std::fs::read_to_string("/tmp/algodeck_vscode_active.sock") {
+            let act_trimmed = act.trim().to_string();
+            if !act_trimmed.is_empty() && !candidate_socks.contains(&act_trimmed) {
+                candidate_socks.insert(0, act_trimmed);
+            }
+        }
+
+        for sock_path in candidate_socks {
+            if std::path::Path::new(&sock_path).exists() {
+                if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
+                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(200)));
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+                    let req = format!("GET /ping?problem_id={} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", url_encode(problem_id));
+                    if stream.write_all(req.as_bytes()).is_ok() {
+                        let mut resp = String::new();
+                        use std::io::Read;
+                        if stream.read_to_string(&mut resp).is_ok() && resp.contains("200 OK") {
+                            return true;
+                        }
+                    }
                 }
             }
         }
     }
 
-    // 1. Sprawdź czy mostek HTTP potwierdza otwarcie tego konkretnego zadania
+    // 1. Sprawdź czy mostek HTTP potwierdza otwarcie zadania lub obecność edytora
     let ping_url = format!("http://127.0.0.1:49152/ping?problem_id={}", url_encode(problem_id));
     if let Ok(res) = ureq::get(&ping_url).timeout(std::time::Duration::from_millis(300)).call() {
+        if res.status() == 200 {
+            return true;
+        }
+    }
+
+    // 2. Jeśli mostek ogólny odpowiada, VS Code żyje i jest aktywny
+    if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
         if res.status() == 200 {
             return true;
         }
@@ -1404,49 +1427,24 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     {
         if let Ok(output) = std::process::Command::new("pgrep").args(["-f", "Visual Studio Code"]).output() {
             if output.status.success() && !output.stdout.is_empty() {
-                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
-                    if res.status() == 200 {
-                        return true;
-                    }
-                }
+                return true;
             }
         }
         if let Ok(output) = std::process::Command::new("pgrep").args(["-x", "Code"]).output() {
             if output.status.success() && !output.stdout.is_empty() {
-                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
-                    if res.status() == 200 {
-                        return true;
-                    }
-                }
+                return true;
             }
         }
     }
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        if let Ok(output) = std::process::Command::new("wmctrl").arg("-l").output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let line_lower = line.to_lowercase();
-                if (line_lower.contains("visual studio code") || line_lower.contains(" - code"))
-                    && line_lower.contains(&problem_id.to_lowercase())
-                {
-                    return true;
-                }
-            }
-        }
-        if let Ok(output) = std::process::Command::new("pgrep").args(["-f", &format!("code.*{}", problem_id)]).output() {
-            if output.status.success() && !output.stdout.is_empty() {
-                return true;
-            }
-        }
-        if let Ok(output) = std::process::Command::new("pgrep").args(["-f", "/usr/share/code/code"]).output() {
-            if output.status.success() && !output.stdout.is_empty() {
-                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
-                    if res.status() == 200 {
-                        return true;
-                    }
-                }
-            }
+        // Sprawdź proces Code na Linuxie (Fedora RPM, Ubuntu deb, Arch, Flatpak)
+        let is_proc_running = std::process::Command::new("pgrep").args(["-x", "code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
+            || std::process::Command::new("pgrep").args(["-f", "code.*electron"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
+            || std::process::Command::new("pgrep").args(["-f", "com.visualstudio.code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false);
+
+        if is_proc_running {
+            return true;
         }
     }
     #[cfg(target_os = "windows")]
@@ -1454,11 +1452,7 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         if let Ok(output) = std::process::Command::new("tasklist").args(["/FI", "IMAGENAME eq Code.exe"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             if stdout.contains("Code.exe") {
-                if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
-                    if res.status() == 200 {
-                        return true;
-                    }
-                }
+                return true;
             }
         }
     }
@@ -1470,20 +1464,34 @@ pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) ->
     {
         use std::os::unix::net::UnixStream;
         use std::io::{Write, Read};
-        let sock_path = format!("/tmp/algodeck_vscode_{}.sock", problem_id.to_lowercase());
-        if std::path::Path::new(&sock_path).exists() {
-            if let Ok(mut stream) = UnixStream::connect(&sock_path) {
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(600)));
-                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(600)));
-                let req = format!(
-                    "POST /{}?pdir={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    endpoint,
-                    url_encode(p_dir_str)
-                );
-                if stream.write_all(req.as_bytes()).is_ok() {
-                    let mut resp = String::new();
-                    if stream.read_to_string(&mut resp).is_ok() && resp.contains("200 OK") {
-                        return true;
+        let p_lower = problem_id.to_lowercase();
+        let mut candidate_socks = vec![
+            format!("/tmp/algodeck_vscode_{}.sock", p_lower),
+            "/tmp/algodeck_vscode_algodeckworkspace.sock".to_string(),
+            "/tmp/algodeck_vscode_default.sock".to_string(),
+        ];
+        if let Ok(act) = std::fs::read_to_string("/tmp/algodeck_vscode_active.sock") {
+            let act_trimmed = act.trim().to_string();
+            if !act_trimmed.is_empty() && !candidate_socks.contains(&act_trimmed) {
+                candidate_socks.insert(0, act_trimmed);
+            }
+        }
+
+        for sock_path in candidate_socks {
+            if std::path::Path::new(&sock_path).exists() {
+                if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(600)));
+                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(600)));
+                    let req = format!(
+                        "POST /{}?pdir={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        endpoint,
+                        url_encode(p_dir_str)
+                    );
+                    if stream.write_all(req.as_bytes()).is_ok() {
+                        let mut resp = String::new();
+                        if stream.read_to_string(&mut resp).is_ok() && resp.contains("200 OK") {
+                            return true;
+                        }
                     }
                 }
             }
@@ -1592,6 +1600,12 @@ async fn switch_task(
     let next_id = &problems[next_idx].problem_id;
     state.streamdeck.set_active_problem_with_meta(next_id, next_idx + 1, problems.len());
     let _ = state.ws_sender.send(format!("active:{}", next_id));
+
+    let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
+        let s = state.settings.read().unwrap();
+        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
+    };
+    open_in_vscode_internal(next_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
 
     Json(serde_json::json!({ "success": true, "problem_id": next_id }))
 }

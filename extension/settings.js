@@ -21,6 +21,7 @@ const elements = {
 
   // VS Code
   vscodeMode: document.getElementById("cfg-vscode-mode"),
+  macosWindowMode: document.getElementById("cfg-macos-window-mode"),
   splitPdf: document.getElementById("cfg-split-pdf"),
   splitOptionsBox: document.getElementById("split-pdf-options"),
   pdfPosition: document.getElementById("cfg-pdf-position"),
@@ -76,7 +77,8 @@ let currentSettings = {
   editor_split_ratio: 60,
   auto_detect_downloads: true,
   notifications: true,
-  autostart_on_boot: true
+  autostart_on_boot: true,
+  macos_window_mode: "default"
 };
 
 let brightnessDebounceTimer = null;
@@ -166,6 +168,7 @@ async function loadSettings() {
 function applySettingsToForm(s) {
   if (s.workspace_dir) elements.workspaceDir.value = s.workspace_dir;
   if (s.vscode_mode) elements.vscodeMode.value = s.vscode_mode;
+  if (s.macos_window_mode && elements.macosWindowMode) elements.macosWindowMode.value = s.macos_window_mode;
   if (s.open_pdf_in_vscode !== undefined) elements.splitPdf.checked = Boolean(s.open_pdf_in_vscode);
   if (s.cxx_compiler) elements.compiler.value = s.cxx_compiler;
   if (s.cpp_standard) elements.cppStd.value = s.cpp_standard;
@@ -221,6 +224,7 @@ function collectSettingsFromForm() {
     ...currentSettings,
     workspace_dir: elements.workspaceDir.value.trim(),
     vscode_mode: elements.vscodeMode.value,
+    macos_window_mode: elements.macosWindowMode ? elements.macosWindowMode.value : "default",
     open_pdf_in_vscode: elements.splitPdf.checked,
     pdf_position: elements.pdfPosition.value,
     editor_split_ratio: parseInt(elements.splitRatio.value, 10) || 60,

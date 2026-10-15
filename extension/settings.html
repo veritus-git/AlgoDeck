@@ -172,6 +172,24 @@
               </div>
             </div>
           </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="cfg-macos-window-mode" class="setting-title">
+                <span class="badge-os">macOS</span> Rozmiar okna VS Code po uruchomieniu:
+              </label>
+              <p class="setting-desc">Wybierz, jak okno edytora VS Code ma się otwierać na systemie macOS — zmaksymalizowane na cały ekran czy w standardowym/obecnym rozmiarze.</p>
+            </div>
+            <div class="setting-control">
+              <select id="cfg-macos-window-mode" class="doc-select">
+                <option value="default">Standardowy (Tak jak teraz / domyślny rozmiar macOS)</option>
+                <option value="maximized">Zmaksymalizowane okno (Wypełnij cały ekran)</option>
+                <option value="fullscreen">Pełny ekran (macOS Native Full Screen)</option>
+              </select>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -426,76 +444,70 @@
               </thead>
               <tbody>
                 <tr>
-                  <td><code>0, 1, 2</code></td>
-                  <td>Litery Kodu</td>
-                  <td><code>A L G</code> / <code>K O L</code></td>
-                  <td>Skrót nazwy zadania (kliknięcie: otwiera plik <code>code.cpp</code> w VS Code)</td>
-                </tr>
-                <tr>
-                  <td><code>3</code></td>
-                  <td><code>+</code></td>
-                  <td>Nowe Zadanie</td>
-                  <td>Otwiera rozszerzenie / przeglądarkę do załadowania nowego zadania</td>
-                </tr>
-                <tr>
-                  <td><code>4</code></td>
-                  <td><code>⚙</code></td>
-                  <td>Ustawienia</td>
-                  <td>Otwiera tę pełnoekranową kartę konfiguracji i architektury</td>
+                  <td><code>0..4</code></td>
+                  <td>Kod Zadania</td>
+                  <td><code>= K O L =</code></td>
+                  <td>5-klawiszowy identyfikator zadania (kliknięcie: otwiera i skupia plik zadania w VS Code)</td>
                 </tr>
                 <tr>
                   <td><code>5</code></td>
-                  <td><code>✓</code></td>
-                  <td>Kompiluj & Testuj</td>
-                  <td>Kompiluje <code>code.cpp</code> i w ułamku sekundy wykonuje testy wzorcowe</td>
+                  <td><code>+</code></td>
+                  <td>Nowe Zadanie</td>
+                  <td>Otwiera Web Hub / przeglądarkę pod <code>#new</code> do utworzenia nowego zadania</td>
                 </tr>
                 <tr>
                   <td><code>6</code></td>
-                  <td><code>▶</code></td>
-                  <td>Uruchom CLI</td>
-                  <td>Otwiera interaktywny terminal do ręcznego wpisywania danych</td>
+                  <td><code>✓</code></td>
+                  <td>Testuj</td>
+                  <td>Kompiluje kod (C++20) i odpala testy w VS Code, prezentując status OK/WA/TLE i czas ms</td>
                 </tr>
                 <tr>
                   <td><code>7</code></td>
-                  <td><code>⏹</code></td>
-                  <td>Zatrzymaj (Kill)</td>
-                  <td>Natychmiast przerywa zapętlony program (SIGKILL / TerminateProcess)</td>
+                  <td><code>▶</code></td>
+                  <td>Odpal (Run)</td>
+                  <td>Kompiluje i odpala program w interaktywnym terminalu VS Code (cin/cout)</td>
                 </tr>
                 <tr>
                   <td><code>8</code></td>
-                  <td><code>⊞</code></td>
-                  <td>Galeria Zadań</td>
-                  <td>Przełącza Stream Deck na menu wyboru zadania</td>
+                  <td><code>⏹</code></td>
+                  <td>Zatrzymaj (Kill)</td>
+                  <td>Natychmiast przerywa działający proces lub testy (mostek VS Code + SIGKILL / taskkill)</td>
                 </tr>
                 <tr>
                   <td><code>9</code></td>
-                  <td><code>=</code></td>
-                  <td>Status Ogólny</td>
-                  <td>Prezentuje wynik całościowy: zielone OK, czerwone ANS, pomarańczowe TLE</td>
+                  <td><code>⊞</code></td>
+                  <td>Galeria Zadań</td>
+                  <td>Otwiera galerię zadań na Stream Decku (klawisze 0..9) do bezpośredniego skoku do zadania</td>
                 </tr>
                 <tr>
                   <td><code>10</code></td>
-                  <td><code>&lt;</code></td>
-                  <td>Poprzedni Test</td>
-                  <td>Wybiera poprzedni test z zestawu</td>
+                  <td><code>⚙</code></td>
+                  <td>Ustawienia</td>
+                  <td>Otwiera tę pełnoekranową kartę ustawień i architektury pod <code>/settings</code></td>
                 </tr>
                 <tr>
                   <td><code>11</code></td>
-                  <td><code>&gt;</code></td>
-                  <td>Następny Test</td>
-                  <td>Wybiera kolejny test z zestawu</td>
+                  <td>Pusty</td>
+                  <td>Czysta czerń OLED</td>
+                  <td>Przerwa estetyczna (#000000)</td>
                 </tr>
                 <tr>
                   <td><code>12</code></td>
-                  <td><code>X / Y</code></td>
-                  <td>Licznik Testów</td>
-                  <td>Wskazuje numer aktualnie podglądanego testu (np. 1/4)</td>
+                  <td><code>‹</code></td>
+                  <td>Poprzednie Zadanie</td>
+                  <td>Przełącza aktywne zadanie na poprzednie w workspace i skupia je w VS Code</td>
                 </tr>
                 <tr>
-                  <td><code>13, 14</code></td>
-                  <td>Detale Testu</td>
-                  <td>Wynik / Czas</td>
-                  <td>Szczegółowy status wybranego testu (OK, ANS, TLE, MLE) i czas w ms</td>
+                  <td><code>13</code></td>
+                  <td><code>1 / X</code></td>
+                  <td>Wskaźnik Zadania</td>
+                  <td>Wskazuje numer aktualnego zadania (kliknięcie: skupia plik w VS Code)</td>
+                </tr>
+                <tr>
+                  <td><code>14</code></td>
+                  <td><code>›</code></td>
+                  <td>Następne Zadanie</td>
+                  <td>Przełącza aktywne zadanie na kolejne w workspace i skupia je w VS Code</td>
                 </tr>
               </tbody>
             </table>
