@@ -50,23 +50,17 @@ mkdir -p "$ICONS_DIR"
 mkdir -p "$EXT_DIR"
 
 # ------------------------------------------------------------------------------
-# KROK 1: Weryfikacja Xcode Command Line Tools i kompilatora C++
+# KROK 1: Weryfikacja kompilatora C++ (Clang / GCC)
 # ------------------------------------------------------------------------------
-echo -e "${CYAN}[1/7] Weryfikacja narzędzi Xcode i kompilatora C++...${NC}"
-
-if ! xcode-select -p >/dev/null 2>&1; then
-    echo -e "${YELLOW}Brak narzędzi deweloperskich Xcode. Uruchamianie instalatora Apple...${NC}"
-    xcode-select --install || true
-    echo -e "${YELLOW}Dokończ instalację w oknie dialogowym macOS, a następnie uruchom ten skrypt ponownie.${NC}"
-    exit 0
-fi
+echo -e "${CYAN}[1/7] Weryfikacja kompilatora C++...${NC}"
 
 if command -v clang++ >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Wykryto kompilator Apple Clang C++: $(clang++ --version | head -n 1)${NC}"
 elif command -v g++ >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Wykryto kompilator GNU C++: $(g++ --version | head -n 1)${NC}"
 else
-    echo -e "${YELLOW}Uwaga: Upewnij się, że masz zainstalowany kompilator C++20.${NC}"
+    echo -e "${YELLOW}Uwaga: Nie wykryto kompilatora C++ w PATH (np. Clang z Command Line Tools lub GCC z Homebrew).${NC}"
+    echo -e "${BLUE}Wskazówka: Do lokalnej kompilacji zadań w C++ możesz w razie potrzeby zainstalować kompilator: xcode-select --install${NC}"
 fi
 
 # ------------------------------------------------------------------------------
@@ -234,16 +228,23 @@ chmod +x "$WRAPPER_PATH"
 # Oblicz unikalny identyfikator rozszerzenia Chrome dla lokalnego folderu rozszerzenia
 MAC_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
 
+ALLOWED_ORIGINS='[
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
+    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"'
+
+if [ -n "$MAC_EXT_ID" ]; then
+    ALLOWED_ORIGINS="$ALLOWED_ORIGINS"',
+    "chrome-extension://'"$MAC_EXT_ID"'/"'
+fi
+ALLOWED_ORIGINS="$ALLOWED_ORIGINS"'
+  ]'
+
 MANIFEST_CONTENT='{
   "name": "com.algodeck.launcher",
   "description": "AlgoDeck 100% Rust Native Messaging Host for macOS",
   "path": "'"$WRAPPER_PATH"'",
   "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
-    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/",
-    "chrome-extension://'"$MAC_EXT_ID"'/"
-  ]
+  "allowed_origins": '"$ALLOWED_ORIGINS"'
 }'
 
 MAC_BROWSER_TARGETS=(
@@ -325,8 +326,8 @@ elif [ -d "/Applications/Google Chrome.app" ]; then
     open -a "Google Chrome" "chrome://extensions" 2>/dev/null || true
 elif [ -d "/Applications/Microsoft Edge.app" ]; then
     open -a "Microsoft Edge" "edge://extensions" 2>/dev/null || true
-elif [ -d "/Applications/Safari.app" ]; then
-    open -a "Safari" 2>/dev/null || true
+elif [ -d "/Applications/Arc.app" ]; then
+    open -a "Arc" "arc://extensions" 2>/dev/null || true
 fi
 
 # 3. Otwarcie folderu rozszerzenia w Finderze dla łatwego Drag & Drop
@@ -347,13 +348,9 @@ echo -e "${GREEN}${BOLD}========================================================
 echo -e "\n${CYAN}${BOLD}🧩 ROZSZERZENIE PRZEGLĄDARKI (Automatyczne ułatwienie):${NC}"
 echo -e "${GREEN}✓ Ścieżka folderu rozszerzenia została AUTOMATYCZNIE SKOPIOWANA do Twojego schowka (Cmd+V)!${NC}"
 echo -e "${GREEN}✓ Otwarto stronę rozszerzeń w przeglądarce oraz folder w Finderze.${NC}"
-echo -e "\n${BOLD}Dla Chrome / Brave / Edge:${NC}"
+echo -e "\n${BOLD}Dla Chrome / Brave / Edge / Arc / Chromium:${NC}"
 echo -e "1. Włącz ${BOLD}Tryb programisty${NC} (Developer mode) w prawym górnym rogu."
 echo -e "2. Kliknij ${BOLD}Załaduj rozpakowane${NC} (Load unpacked)."
 echo -e "3. W oknie wyboru wciśnij skrót ${BOLD}Cmd+Shift+G${NC}, wklej schowek (${BOLD}Cmd+V${NC}) i naciśnij Enter."
 echo -e "   (lub po prostu ${BOLD}przeciągnij otwarty folder z Findera${NC} bezpośrednio do okna przeglądarki!)"
-echo -e "4. Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki."
-echo -e "\n${BOLD}Dla Safari:${NC}"
-echo -e "1. Safari ➔ Ustawienia (Cmd+,) ➔ Zaawansowane ➔ zaznacz 'Pokaż funkcje dla programistów stron www'."
-echo -e "2. W menu głównym 'Programista' zaznacz 'Zezwalaj na niepodpisane rozszerzenia'."
-echo -e "3. Dodaj rozszerzenie wskazując folder (użyj Cmd+Shift+G i wklej Cmd+V).\n"
+echo -e "4. Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki.\n"

@@ -168,6 +168,11 @@ if (-not $installed) {
         if (Test-Path "$TempExtract\extension") {
             Copy-Item "$TempExtract\extension\*" $ExtensionDir -Recurse -Force
         }
+        if (Test-Path "$TempExtract\vscode_extension") {
+            $VsCodeExtDir = "$env:USERPROFILE\.vscode\extensions\algodeck-vscode-bridge"
+            if (-not (Test-Path $VsCodeExtDir)) { New-Item -ItemType Directory -Path $VsCodeExtDir -Force | Out-Null }
+            Copy-Item "$TempExtract\vscode_extension\*" $VsCodeExtDir -Recurse -Force
+        }
         Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
         Remove-Item $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "✓ Pomyślnie zainstalowano paczkę z GitHub Releases." -ForegroundColor Green
@@ -202,6 +207,11 @@ if ((Test-Path "$ScriptDir\frontend") -and (Test-Path "$ScriptDir\extension")) {
     if (Test-Path "$ScriptDir\frontend\icons") {
         Copy-Item "$ScriptDir\frontend\icons\*" $IconsDir -Recurse -Force
     }
+    if (Test-Path "$ScriptDir\vscode_extension") {
+        $VsCodeExtDir = "$env:USERPROFILE\.vscode\extensions\algodeck-vscode-bridge"
+        if (-not (Test-Path $VsCodeExtDir)) { New-Item -ItemType Directory -Path $VsCodeExtDir -Force | Out-Null }
+        Copy-Item "$ScriptDir\vscode_extension\*" $VsCodeExtDir -Recurse -Force
+    }
     Write-Host "✓ Skopiowano zasoby z lokalnego katalogu." -ForegroundColor Green
     $copiedAssets = $true
 }
@@ -227,6 +237,11 @@ if (-not $copiedAssets) {
             }
             if (Test-Path "$($RepoRoot.FullName)\frontend\icons") {
                 Copy-Item "$($RepoRoot.FullName)\frontend\icons\*" $IconsDir -Recurse -Force
+            }
+            if (Test-Path "$($RepoRoot.FullName)\vscode_extension") {
+                $VsCodeExtDir = "$env:USERPROFILE\.vscode\extensions\algodeck-vscode-bridge"
+                if (-not (Test-Path $VsCodeExtDir)) { New-Item -ItemType Directory -Path $VsCodeExtDir -Force | Out-Null }
+                Copy-Item "$($RepoRoot.FullName)\vscode_extension\*" $VsCodeExtDir -Recurse -Force
             }
             Write-Host "✓ Zasoby Web Hub i rozszerzenia pomyślnie zsynchronizowane." -ForegroundColor Green
         }
@@ -260,6 +275,29 @@ if ($elgatoProc) {
 # ------------------------------------------------------------------------------
 Write-Host "`n[6/7] Rejestracja Native Messaging Host dla przeglądarek Chromium..." -ForegroundColor Yellow
 
+# Oblicz unikalny identyfikator rozszerzenia Chrome dla lokalnego folderu rozszerzenia
+$LocalExtId = ""
+try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($ExtensionDir)
+    $hash = $sha256.ComputeHash($bytes)
+    $chars = @()
+    for ($i = 0; $i -lt 16; $i++) {
+        $chars += [char](97 + [int]($hash[$i] -shr 4))
+        $chars += [char](97 + [int]($hash[$i] -band 15))
+    }
+    $LocalExtId = -join $chars
+} catch {}
+
+$AllowedOrigins = @(
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
+    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"
+)
+if ($LocalExtId) {
+    $AllowedOrigins += "chrome-extension://$LocalExtId/"
+}
+$AllowedOriginsJson = ($AllowedOrigins | ForEach-Object { "    `"$_`"" }) -join ",`n"
+
 $ManifestPath = "$InstallDir\com.algodeck.launcher.json"
 $ManifestJson = @"
 {
@@ -268,8 +306,7 @@ $ManifestJson = @"
   "path": "$($BinaryPath.Replace('\', '\\'))",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
-    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"
+$AllowedOriginsJson
   ]
 }
 "@
@@ -306,6 +343,9 @@ Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run Chr(34) & "$($BinaryPath.Replace('\', '\\'))" & Chr(34) & " daemon", 0, False
 "@
 [System.IO.File]::WriteAllText($VbsPath, $VbsContent, [System.Text.Encoding]::ASCII)
+
+# Kompatybilność z funkcją dynamicznego przełączania autostartu w Rust (src/server.rs)
+Copy-Item $VbsPath "$InstallDir\AlgoDeck.vbs" -Force
 
 # Skrypty pomocnicze CMD w folderze instalacyjnym
 $StartCmd = "$InstallDir\algodeck-start.cmd"

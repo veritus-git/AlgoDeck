@@ -115,10 +115,11 @@ echo -e "\n${CYAN}[4/6] Przygotowanie binarki AlgoDeck, Web Hubu i rozszerzenia.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$HOME")"
 BIN_DIR="$HOME/.local/bin"
 SHARE_DIR="$HOME/.local/share/algodeck"
+EXT_DIR="$SHARE_DIR/extension"
 
 mkdir -p "$BIN_DIR"
 mkdir -p "$SHARE_DIR/frontend/icons"
-mkdir -p "$SHARE_DIR/extension"
+mkdir -p "$EXT_DIR"
 mkdir -p "$SHARE_DIR/icons"
 
 INSTALLED_BIN=false
@@ -247,16 +248,23 @@ CHROME_TARGETS=(
 
 LOCAL_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
 
+ALLOWED_ORIGINS='[
+    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
+    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/"'
+
+if [ -n "$LOCAL_EXT_ID" ]; then
+    ALLOWED_ORIGINS="$ALLOWED_ORIGINS"',
+    "chrome-extension://'"$LOCAL_EXT_ID"'/"'
+fi
+ALLOWED_ORIGINS="$ALLOWED_ORIGINS"'
+  ]'
+
 MANIFEST_CONTENT='{
   "name": "com.algodeck.launcher",
   "description": "AlgoDeck 100% Rust Native Messaging Host",
   "path": "'"$BIN_DIR/algodeck-native-host"'",
   "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
-    "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/",
-    "chrome-extension://'"$LOCAL_EXT_ID"'/"
-  ]
+  "allowed_origins": '"$ALLOWED_ORIGINS"'
 }'
 
 for TARGET_DIR in "${CHROME_TARGETS[@]}"; do
