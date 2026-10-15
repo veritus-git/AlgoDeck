@@ -164,37 +164,50 @@ async function isDaemonRunning() {
 }
 
 // ------------------------------------------------------------------------------
-// OTWARCIE PODMENU ROZSZERZENIA (ZAKAZ TWORZENIA OSOBNYCH OKIEN SYSTEMOWYCH)
+// DODAWANIE POBRANEGO PLIKU DO KOLEJKI (STAGING) W TLE
+// Całkowity brak samoczynnego otwierania okien/popupów.
+// Plik jest zaciągany w tle i czeka w poczekalni rozszerzenia.
 // ------------------------------------------------------------------------------
 async function triggerDetectedAction(filename) {
   if (!filename) return;
 
-  // 1. Zapisz w pamięci rozszerzenia (dostępne przez 120s)
+  const isZip = filename.toLowerCase().endsWith(".zip");
+  const isPdf = filename.toLowerCase().endsWith(".pdf");
+
+  // 1. Zapisz w pamięci lokalnej rozszerzenia ostatnio pobrany plik
   try {
-    await chrome.storage.local.set({
-      auto_pdf: filename,
-      auto_pdf_ts: Date.now(),
-      auto_is_zip: filename.toLowerCase().endsWith(".zip")
-    });
+    const dataToSave = {};
+    if (isPdf) {
+      dataToSave.last_downloaded_pdf = filename;
+      dataToSave.last_pdf_ts = Date.now();
+    } else if (isZip) {
+      dataToSave.last_downloaded_zip = filename;
+      dataToSave.last_zip_ts = Date.now();
+    }
+    await chrome.storage.local.set(dataToSave);
   } catch (_) {}
 
-  // 2. Ustaw zieloną odznakę "1" na ikonie rozszerzenia na pasku zadań
+  // 2. Jeśli usługa AlgoDeck działa, zaciągnij plik bezpośrednio do stagingu w tle!
+  try {
+    const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_path: filename })
+    });
+    if (res.ok) {
+      console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni (staging) w tle:", filename);
+    }
+  } catch (err) {
+    console.warn("[AlgoDeck] Błąd przesyłania ścieżki do stagingu:", err);
+  }
+
+  // 3. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
   try {
     if (chrome.action && chrome.action.setBadgeText) {
       chrome.action.setBadgeText({ text: "1" });
       chrome.action.setBadgeBackgroundColor({ color: "#10b981" });
     }
   } catch (_) {}
-
-  // 3. Otwórz podmenu rozszerzenia (Action Popup) pod ikoną rozszerzenia
-  // Całkowity zakaz chrome.windows.create() — rozszerzenie NIGDY nie tworzy osobnych okien OS!
-  try {
-    if (chrome.action && typeof chrome.action.openPopup === "function") {
-      await chrome.action.openPopup();
-    }
-  } catch (err) {
-    console.log("[AlgoDeck] Action popup oczekuje na kliknięcie ikony przez użytkownika:", err);
-  }
 }
 
 // ------------------------------------------------------------------------------

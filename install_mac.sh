@@ -326,6 +326,8 @@ elif [ -d "/Applications/Google Chrome.app" ]; then
     open -a "Google Chrome" "chrome://extensions" 2>/dev/null || true
 elif [ -d "/Applications/Microsoft Edge.app" ]; then
     open -a "Microsoft Edge" "edge://extensions" 2>/dev/null || true
+elif [ -d "/Applications/Safari.app" ]; then
+    open -a "Safari" 2>/dev/null || true
 fi
 
 # 3. Otwarcie folderu rozszerzenia w Finderze dla łatwego Drag & Drop
@@ -346,8 +348,13 @@ echo -e "${GREEN}${BOLD}========================================================
 echo -e "\n${CYAN}${BOLD}🧩 ROZSZERZENIE PRZEGLĄDARKI (Automatyczne ułatwienie):${NC}"
 echo -e "${GREEN}✓ Ścieżka folderu rozszerzenia została AUTOMATYCZNIE SKOPIOWANA do Twojego schowka (Cmd+V)!${NC}"
 echo -e "${GREEN}✓ Otwarto stronę rozszerzeń w przeglądarce oraz folder w Finderze.${NC}"
-echo -e "1. W otwartej przeglądarce włącz ${BOLD}Tryb programisty${NC} (Developer mode) w prawym górnym rogu."
+echo -e "\n${BOLD}Dla Chrome / Brave / Edge:${NC}"
+echo -e "1. Włącz ${BOLD}Tryb programisty${NC} (Developer mode) w prawym górnym rogu."
 echo -e "2. Kliknij ${BOLD}Załaduj rozpakowane${NC} (Load unpacked)."
-echo -e "3. W oknie wyboru wciśnij ${BOLD}Cmd+Shift+G${NC}, wklej schowek (${BOLD}Cmd+V${NC}) i naciśnij Enter."
-echo -e "   (lub po prostu przeciągnij otwarty folder z Findera do okna przeglądarki)"
-echo -e "4. Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki.\n"
+echo -e "3. W oknie wyboru wciśnij skrót ${BOLD}Cmd+Shift+G${NC}, wklej schowek (${BOLD}Cmd+V${NC}) i naciśnij Enter."
+echo -e "   (lub po prostu ${BOLD}przeciągnij otwarty folder z Findera${NC} bezpośrednio do okna przeglądarki!)"
+echo -e "4. Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki."
+echo -e "\n${BOLD}Dla Safari:${NC}"
+echo -e "1. Safari ➔ Ustawienia (Cmd+,) ➔ Zaawansowane ➔ zaznacz 'Pokaż funkcje dla programistów stron www'."
+echo -e "2. W menu głównym 'Programista' zaznacz 'Zezwalaj na niepodpisane rozszerzenia'."
+echo -e "3. Dodaj rozszerzenie wskazując folder (użyj Cmd+Shift+G i wklej Cmd+V).\n"

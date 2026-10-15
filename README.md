@@ -30,12 +30,9 @@ irm https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_win.ps1 
 
 ## 📸 Jak to wygląda w akcji
 
-### 1. Automatyczne wykrycie pobranego zadania (1-Klik)
-Pobierasz treść zadania (`.pdf`) lub testy (`.zip`) ze Szkopuła — rozszerzenie natychmiast wyświetla estetyczne okienko. Jedno kliknięcie zakłada workspace, parsuje limity i otwiera VS Code.
+### 1. Błyskawiczne zaciąganie zadań w tle (Pobranie ➔ Gotowy Workspace)
+Pobierasz treść zadania (`.pdf`) lub testy (`.zip`) ze Szkopuła, OIJ czy SIO2 — AlgoDeck w tle natychmiast przechwytuje plik i umieszcza go w poczekalni. Po otwarciu menu rozszerzenia plik jest już załadowany — wystarczy kliknąć **Utwórz Workspace**, aby utworzyć środowisko, sparsować limity pamięci/czasu i otworzyć VS Code z podziałem ekranu.
 
-<p align="center">
-  <img src="docs/screenshots/extension_detected.png" alt="Wykrycie zadania PDF w przeglądarce" width="420" />
-</p>
 
 ### 2. Panel AlgoDeck Workspace Hub (`http://127.0.0.1:8080/`)
 Zarządzaj swoimi zadaniami, dodawaj pliki metodą przeciągnij-i-upuść lub twórz własne szablony z niestandardowymi danymi wejściowymi.

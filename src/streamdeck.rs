@@ -1,4 +1,4 @@
-use image::{imageops, DynamicImage, Rgb, RgbImage};
+use image::{imageops, DynamicImage, Rgb, RgbImage, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -654,17 +654,115 @@ impl StreamDeckEngine {
         false
     }
 
+    fn render_composed_indicator(label: &str) -> Option<DynamicImage> {
+        let mut glyphs: Vec<RgbaImage> = Vec::new();
+        for c in label.chars() {
+            let icon_file = if c == '/' {
+                "letter_slash.png".to_string()
+            } else if c.is_ascii_digit() {
+                format!("letter_{}.png", c)
+            } else {
+                format!("letter_{}.png", c.to_ascii_lowercase())
+            };
+
+            let path = Self::find_icon_file(&icon_file)?;
+            let img = image::open(&path).ok()?.to_rgba8();
+
+            // Oblicz bounding box (nieczarne piksele litery/cyfry)
+            let mut min_x = img.width();
+            let mut max_x = 0;
+            let mut min_y = img.height();
+            let mut max_y = 0;
+            let mut has_pixel = false;
+
+            for y in 0..img.height() {
+                for x in 0..img.width() {
+                    let p = img.get_pixel(x, y);
+                    if p[0] > 15 || p[1] > 15 || p[2] > 15 {
+                        has_pixel = true;
+                        if x < min_x { min_x = x; }
+                        if x > max_x { max_x = x; }
+                        if y < min_y { min_y = y; }
+                        if y > max_y { max_y = y; }
+                    }
+                }
+            }
+
+            if has_pixel && max_x >= min_x && max_y >= min_y {
+                let crop_w = max_x - min_x + 1;
+                let crop_h = max_y - min_y + 1;
+                let cropped = imageops::crop_imm(&img, min_x, min_y, crop_w, crop_h).to_image();
+                glyphs.push(cropped);
+            } else {
+                glyphs.push(img);
+            }
+        }
+
+        if glyphs.is_empty() {
+            return None;
+        }
+
+        // Bazowa wysokość tekstu na kafelku 72x72: 28px
+        let base_h: f32 = 28.0;
+        let spacing: i32 = 2;
+        let mut total_raw_w: f32 = 0.0;
+        for g in &glyphs {
+            let aspect = g.width() as f32 / g.height().max(1) as f32;
+            total_raw_w += aspect * base_h;
+        }
+        total_raw_w += (spacing * (glyphs.len() as i32 - 1).max(0)) as f32;
+
+        let max_w: f32 = 64.0;
+        let scale = if total_raw_w > max_w { max_w / total_raw_w } else { 1.0 };
+        let actual_h = (base_h * scale).round().max(12.0) as u32;
+
+        let mut scaled_glyphs: Vec<RgbaImage> = Vec::new();
+        let mut total_w: i32 = 0;
+        for g in glyphs {
+            let aspect = g.width() as f32 / g.height().max(1) as f32;
+            let new_w = (actual_h as f32 * aspect).round().max(1.0) as u32;
+            let scaled = imageops::resize(&g, new_w, actual_h, imageops::FilterType::Lanczos3);
+            total_w += new_w as i32;
+            scaled_glyphs.push(scaled);
+        }
+        total_w += spacing * (scaled_glyphs.len() as i32 - 1).max(0);
+
+        let mut base = RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]));
+        let start_x = ((72 - total_w) / 2).max(1);
+        let start_y = ((72 - actual_h as i32) / 2).max(1);
+
+        let mut cur_x = start_x;
+        for sg in scaled_glyphs {
+            for y in 0..sg.height() {
+                for x in 0..sg.width() {
+                    let p = sg.get_pixel(x, y);
+                    let px = cur_x + x as i32;
+                    let py = start_y + y as i32;
+                    if px >= 0 && px < 72 && py >= 0 && py < 72 {
+                        let alpha = p[3] as f32 / 255.0;
+                        let r = (p[0] as f32 * alpha) as u8;
+                        let g = (p[1] as f32 * alpha) as u8;
+                        let b = (p[2] as f32 * alpha) as u8;
+                        if r > 0 || g > 0 || b > 0 {
+                            base.put_pixel(px as u32, py as u32, Rgb([r, g, b]));
+                        }
+                    }
+                }
+            }
+            cur_x += sg.width() as i32 + spacing;
+        }
+
+        Some(DynamicImage::ImageRgb8(base))
+    }
+
     fn render_label_button(label: &str, status: &str) -> DynamicImage {
         let mut base = RgbImage::from_pixel(72, 72, Rgb([0, 0, 0]));
 
         if label.contains('/') {
-            // Wskaźnik numeru zadania np. "1/1" czy "2/5": Sprawdź czy mamy gotową wygładzoną ikonę PNG
-            let num_filename = format!("task_num_{}.png", label.replace('/', "_"));
-            if let Some(p) = Self::find_icon_file(&num_filename) {
-                if let Ok(loaded) = image::open(&p) {
-                    let resized = loaded.resize_exact(72, 72, imageops::FilterType::Lanczos3);
-                    return DynamicImage::ImageRgb8(resized.to_rgb8());
-                }
+            // Wskaźnik numeru zadania np. "1/1", "2/4" czy "10/12":
+            // Renderuj dynamicznie z wygładzonych wektorowych cyfr oraz ukośnika (100% antyaliasing)
+            if let Some(composed) = Self::render_composed_indicator(label) {
+                return composed;
             }
 
             let char_count = label.chars().count() as i32;

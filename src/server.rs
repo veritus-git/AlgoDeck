@@ -78,6 +78,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/create-manual", post(create_manual))
         .route("/staged-state", get(get_staged_state))
         .route("/stage-file", post(stage_file))
+        .route("/stage-by-path", post(stage_by_path))
+        .route("/stage-path", post(stage_by_path))
         .route("/upload-staging", post(stage_file))
         .route("/clear-staged", post(clear_staged))
         .route("/start-staged", post(start_staged))
@@ -684,6 +686,119 @@ async fn stage_file(
         "has_zip": is_zip,
         "has_staged_zip": is_zip,
         "zip_filename": if is_zip { Some(&saved_filename) } else { None },
+        "problem_id": problem_id,
+        "title": title,
+        "time_limit_sec": time_limit_sec,
+        "memory_limit_mb": memory_limit_mb,
+        "tests_count": tests_count,
+    })))
+}
+
+#[derive(Deserialize)]
+struct StagePathRequest {
+    file_path: String,
+}
+
+async fn stage_by_path(
+    Json(req): Json<StagePathRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let mut path = PathBuf::from(&req.file_path);
+    if !path.exists() {
+        if let Some(fname) = path.file_name() {
+            if let Some(dl) = dirs::download_dir() {
+                let candidate = dl.join(fname);
+                if candidate.exists() {
+                    path = candidate;
+                }
+            }
+        }
+    }
+
+    if !path.exists() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "success": false, "detail": "Plik nie istnieje na dysku" })),
+        ));
+    }
+
+    let is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
+    let is_zip = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("zip")).unwrap_or(false);
+
+    if !is_pdf && !is_zip {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "success": false, "detail": "Wymagany plik PDF lub ZIP" })),
+        ));
+    }
+
+    let stage_dir = AppSettings::staging_dir();
+    let _ = fs::create_dir_all(&stage_dir);
+
+    // Zawsze zachowaj tylko OSTATNI plik danego typu (zgodnie z życzeniem użytkownika)
+    if let Ok(entries) = fs::read_dir(&stage_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                if is_pdf && ext.eq_ignore_ascii_case("pdf") {
+                    let _ = fs::remove_file(p);
+                } else if is_zip && ext.eq_ignore_ascii_case("zip") {
+                    let _ = fs::remove_file(p);
+                }
+            }
+        }
+    }
+
+    let filename = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "downloaded_file".to_string());
+    let target_path = stage_dir.join(&filename);
+
+    if let Err(e) = fs::copy(&path, &target_path) {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "success": false, "detail": format!("Błąd kopiowania pliku do poczekalni: {}", e) })),
+        ));
+    }
+
+    let mut problem_id = None;
+    let mut title = None;
+    let mut time_limit_sec = 1.0;
+    let mut memory_limit_mb = 128;
+    let mut tests_count = 0;
+
+    if is_pdf {
+        if let Ok(text) = PdfParser::extract_text_from_file(&target_path) {
+            let analysis = PdfParser::parse_heuristics(&text);
+            problem_id = Some(analysis.problem_id);
+            title = Some(analysis.title);
+            time_limit_sec = analysis.time_limit_sec;
+            memory_limit_mb = analysis.memory_limit_mb;
+            tests_count = analysis.tests.len();
+        }
+    } else if is_zip {
+        if let Ok(file_bytes) = fs::read(&target_path) {
+            let reader = std::io::Cursor::new(&file_bytes);
+            if let Ok(mut archive) = zip::ZipArchive::new(reader) {
+                for i in 0..archive.len() {
+                    if let Ok(file) = archive.by_index(i) {
+                        if file.name().to_lowercase().ends_with(".in") {
+                            tests_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "filename": filename,
+        "file_type": if is_pdf { "pdf" } else { "zip" },
+        "path": target_path.to_string_lossy(),
+        "has_pdf": is_pdf,
+        "has_staged_pdf": is_pdf,
+        "pdf_filename": if is_pdf { Some(&filename) } else { None },
+        "has_zip": is_zip,
+        "has_staged_zip": is_zip,
+        "zip_filename": if is_zip { Some(&filename) } else { None },
         "problem_id": problem_id,
         "title": title,
         "time_limit_sec": time_limit_sec,

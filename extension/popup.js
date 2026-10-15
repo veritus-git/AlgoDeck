@@ -74,17 +74,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupOfflineStarter();
   setupShutdown();
 
-  const isDetected = await checkDetectedMode();
-  if (!isDetected) {
-    document.documentElement.classList.remove("detected-mode");
-    document.body.classList.remove("detected-mode");
-    viewDetected.classList.add("hidden");
-
-    // Równoległe, nieblokujące sprawdzenie daemona i stanu plików
-    checkDaemonHealth();
-    loadExistingStagedState();
-    setInterval(checkDaemonHealth, 3000);
+  if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+    chrome.action.setBadgeText({ text: "" });
   }
+
+  document.documentElement.classList.remove("detected-mode");
+  document.body.classList.remove("detected-mode");
+
+  const isOnline = await checkDaemonHealth();
+  if (isOnline) {
+    await syncOfflineDownloadedFiles();
+    await loadExistingStagedState();
+    loadTasks();
+  }
+  setInterval(checkDaemonHealth, 3000);
 });
 
 
@@ -186,156 +189,39 @@ async function checkDaemonHealth() {
   return false;
 }
 
-// ---------------- 3. Tryb wykrytego zadania (1-Kliknięcie) ----------------
-async function checkDetectedMode() {
-  const urlParams = new URLSearchParams(window.location.search);
-  let autoPdf = urlParams.get("auto_pdf");
-
-  // 1. BEZWZGLĘDNE ZAMKNIĘCIE STARYCH OSOBNYCH OKIEN:
-  // AlgoDeck v2.0 korzysta wyłącznie z podmenu paska przeglądarki (Action Popup).
-  // Każde okno posiadające w URL ?auto_pdf= to relikt z poprzednich wersji - zamknij natychmiast!
-  if (autoPdf) {
-    console.log("[AlgoDeck] Wykryto osobne okno z parametrem auto_pdf. Zamykam natychmiast.");
-    try { window.close(); } catch (_) {}
-    return false;
-  }
-
-  // 2. Jeśli AlgoDeck jest wyłączony (offline), autowykrywanie NIE MOŻE działać!
-  const isOnline = await checkDaemonHealth();
-  if (!isOnline) {
-    return false;
-  }
-
-  // 2. Jeśli brak w URL (użytkownik kliknął ikonę rozszerzenia na pasku zadań),
-  // sprawdź czy w pamięci jest świeżo pobrane zadanie z ostatnich 2 minut (< 120s)
-  if (!autoPdf) {
-    try {
-      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        const stored = await chrome.storage.local.get(["auto_pdf", "auto_pdf_ts"]);
-        if (stored.auto_pdf && stored.auto_pdf_ts) {
-          const age = Date.now() - stored.auto_pdf_ts;
-          if (age < 120000) {
-            autoPdf = stored.auto_pdf;
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
-  if (!autoPdf) return false;
-
-  document.body.classList.remove("offline-mode");
-  document.documentElement.classList.add("detected-mode");
-  document.body.classList.add("detected-mode");
-  viewOffline.classList.add("hidden");
-  viewMain.classList.add("hidden");
-  viewDetected.classList.remove("hidden");
-
-  const baseName = autoPdf.replace(/^.*[\\\/]/, '');
-  const isZip = baseName.toLowerCase().endsWith(".zip");
-  const cleanStem = baseName.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().slice(0, 5);
-  let problemCode = cleanStem.toUpperCase() || "ZAD";
-
-  const detBoxTitle = document.getElementById("det-box-title");
-  const detFilenameText = document.getElementById("det-filename-text");
-  const detCodeText = document.getElementById("det-code-text");
-  const btnDetClose = document.getElementById("btn-det-close");
-  const btnDetOneclick = document.getElementById("btn-det-oneclick");
-
-  if (detBoxTitle) {
-    detBoxTitle.textContent = isZip ? "Wykryto archiwum z testami (.zip)" : "Wykryto nowe zadanie PDF";
-  }
-  detFilenameText.textContent = baseName;
-  detCodeText.textContent = problemCode;
-
+// ---------------- 3. Synchronizacja pobranych w tle plików z poczekalnią ----------------
+async function syncOfflineDownloadedFiles() {
   try {
-    const res = await fetch(`${API_BASE}/api/auto-import-pdf`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_path: autoPdf, auto_create: false })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.problem_id) {
-        problemCode = data.problem_id.toUpperCase();
-        detCodeText.textContent = problemCode;
-      }
-    }
-  } catch (e) {}
-
-  btnDetOneclick.onclick = async () => {
-    btnDetOneclick.disabled = true;
-    btnDetOneclick.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace i VS Code...`;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/auto-import-pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          file_path: autoPdf,
-          problem_id: problemCode.toLowerCase(),
-          auto_create: true
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        const pid = (data.problem_id || problemCode).toLowerCase();
-        try {
-          await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
-        } catch (_) {}
-        try {
-          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
-          }
-        } catch (_) {}
-
-        btnDetOneclick.innerHTML = `<span>✓ Otwarto zadanie [${pid.toUpperCase()}] w VS Code!</span>`;
-        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-          chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip"]);
-          if (chrome.action && chrome.action.setBadgeText) {
-            chrome.action.setBadgeText({ text: "" });
-          }
-        }
-        setTimeout(() => window.close(), 1200);
-      } else {
-        alert(data.detail || data.error || "Błąd podczas tworzenia workspace");
-        btnDetOneclick.disabled = false;
-        btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
-      }
-    } catch (err) {
-      alert("Błąd połączenia z backendem AlgoDeck!");
-      btnDetOneclick.disabled = false;
-      btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
-    }
-  };
-
-  btnDetClose.onclick = async () => {
-    try {
-      await fetch(`${API_BASE}/api/clear-staged`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_type: "all" })
-      });
-    } catch (_) {}
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.remove(["auto_pdf", "auto_pdf_ts", "auto_is_zip", "algodeck_staged_pdf", "algodeck_staged_zip"]);
-      if (chrome.action && chrome.action.setBadgeText) {
-        chrome.action.setBadgeText({ text: "" });
+      const stored = await chrome.storage.local.get(["last_downloaded_pdf", "last_downloaded_zip"]);
+      let didStage = false;
+      if (stored.last_downloaded_pdf) {
+        try {
+          const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ file_path: stored.last_downloaded_pdf })
+          });
+          if (res.ok) didStage = true;
+        } catch (_) {}
+        chrome.storage.local.remove(["last_downloaded_pdf"]);
+      }
+      if (stored.last_downloaded_zip) {
+        try {
+          const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ file_path: stored.last_downloaded_zip })
+          });
+          if (res.ok) didStage = true;
+        } catch (_) {}
+        chrome.storage.local.remove(["last_downloaded_zip"]);
+      }
+      if (didStage) {
+        await loadExistingStagedState();
       }
     }
-    if (urlParams.get("auto_pdf")) {
-      window.close();
-    } else {
-      document.documentElement.classList.remove("detected-mode");
-      document.body.classList.remove("detected-mode");
-      viewDetected.classList.add("hidden");
-      viewMain.classList.remove("hidden");
-      checkDaemonHealth();
-      loadExistingStagedState();
-    }
-  };
-
-  return true;
+  } catch (_) {}
 }
 
 // ---------------- 4. Nawigacja Zakładek ----------------
