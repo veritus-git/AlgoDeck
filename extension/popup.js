@@ -128,16 +128,6 @@ function setupDetectedHandlers() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          const pid = (data.problem_id || "zad").toLowerCase();
-          try {
-            await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
-          } catch (_) {}
-          try {
-            if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-              chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
-            }
-          } catch (_) {}
-
           if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
             chrome.action.setBadgeText({ text: "" });
           }
@@ -473,14 +463,6 @@ function setupStaging() {
       const data = await res.json();
       if (res.ok && data.success) {
         const pid = (data.problem_id || "zad").toLowerCase();
-        try {
-          await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
-        } catch (_) {}
-        try {
-          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
-          }
-        } catch (_) {}
 
         if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
           chrome.action.setBadgeText({ text: "" });
@@ -706,15 +688,6 @@ function setupManualForm() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        try {
-          await fetch(`${API_BASE}/api/open-vscode/${code}`, { method: "POST" });
-        } catch (_) {}
-        try {
-          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: code }, () => {});
-          }
-        } catch (_) {}
-
         showToast(`✓ Utworzono zadanie [${code.toUpperCase()}]! Uruchomiono VS Code.`, false);
         btnSubmitManual.innerHTML = `<span>✓ Otwarto zadanie [${code.toUpperCase()}] w VS Code!</span>`;
         setTimeout(() => window.close(), 1200);

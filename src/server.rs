@@ -80,6 +80,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/stage-file", post(stage_file))
         .route("/stage-by-path", post(stage_by_path))
         .route("/stage-path", post(stage_by_path))
+        .route("/stage-refresh", post(stage_refresh))
         .route("/upload-staging", post(stage_file))
         .route("/clear-staged", post(clear_staged))
         .route("/start-staged", post(start_staged))
@@ -997,7 +998,11 @@ async fn open_vscode(
     Json(serde_json::json!({ "success": true }))
 }
 
-fn open_in_vscode_internal(
+async fn stage_refresh() -> Json<serde_json::Value> {
+    get_staged_state().await
+}
+
+pub fn open_in_vscode_internal(
     problem_id: &str,
     workspace_dir: &Path,
     split_pdf: bool,
@@ -1005,6 +1010,16 @@ fn open_in_vscode_internal(
     split_ratio: u8,
     vscode_mode: &str,
 ) {
+    static LAST_VSCODE_LAUNCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let last = LAST_VSCODE_LAUNCH.swap(now, std::sync::atomic::Ordering::Relaxed);
+    if now.saturating_sub(last) < 1000 {
+        return;
+    }
+
     let p_dir = WorkspaceManager::get_problem_dir(workspace_dir, problem_id);
     let sol_file = p_dir.join(format!("{}.cpp", problem_id));
     let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
@@ -1088,6 +1103,7 @@ fn open_in_vscode_internal(
                     .env("ALGODECK_PDF_POS", pdf_position)
                     .env("ALGODECK_SPLIT_RATIO", split_ratio.to_string())
                     .env("ALGODECK_VSCODE_MODE", vscode_mode)
+                    .env("ALGODECK_WORKSPACE_DIR", workspace_dir.to_string_lossy().as_ref())
                     .spawn();
                 if res.is_ok() {
                     launched = true;
@@ -1115,14 +1131,28 @@ fn open_in_vscode_internal(
                 cmd.arg("--reuse-window");
             }
             cmd.arg(target_dir);
+
+            #[cfg(target_os = "macos")]
+            {
+                if split_pdf {
+                    if let Some(ref p) = actual_pdf {
+                        let _ = std::process::Command::new("open").arg(p).spawn();
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
             if split_pdf && pdf_on_left {
                 if let Some(ref p) = actual_pdf {
                     cmd.arg(p);
                 }
             }
+
             if sol_file.exists() {
                 cmd.arg(&sol_file);
             }
+
+            #[cfg(not(target_os = "macos"))]
             if split_pdf && !pdf_on_left {
                 if let Some(ref p) = actual_pdf {
                     cmd.arg(p);

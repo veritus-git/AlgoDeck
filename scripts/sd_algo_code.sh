@@ -30,6 +30,7 @@ DISP="${DISPLAY:-:0}"
 CODE_BIN=$(command -v code || echo "/usr/bin/code")
 
 [ -n "$ALGODECK_VSCODE_MODE" ] && VSCODE_MODE="$ALGODECK_VSCODE_MODE"
+[ -n "$ALGODECK_WORKSPACE_DIR" ] && WORKSPACE_DIR="$ALGODECK_WORKSPACE_DIR"
 
 if [ "$VSCODE_MODE" = "separate_windows" ]; then
     OPEN_DIR="$TARGET_DIR"

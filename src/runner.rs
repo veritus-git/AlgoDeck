@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,17 +40,70 @@ pub struct RunAllSummary {
 }
 
 pub struct TestExecutor {
-    settings: AppSettings,
+    settings: Arc<RwLock<AppSettings>>,
 }
 
 impl TestExecutor {
-    pub fn new(settings: AppSettings) -> Self {
+    pub fn new(settings: Arc<RwLock<AppSettings>>) -> Self {
         Self { settings }
+    }
+
+    #[allow(dead_code)]
+    pub fn new_with_settings(settings: AppSettings) -> Self {
+        Self {
+            settings: Arc::new(RwLock::new(settings)),
+        }
+    }
+
+    fn resolve_compiler(&self, configured: &str) -> String {
+        if let Ok(status) = Command::new(configured).arg("--version").output() {
+            if status.status.success() {
+                return configured.to_string();
+            }
+        }
+
+        let candidates = [
+            "clang++",
+            "g++",
+            "/opt/homebrew/bin/g++-14",
+            "/opt/homebrew/bin/g++-13",
+            "/opt/homebrew/bin/g++",
+            "/opt/homebrew/bin/clang++",
+            "/usr/local/bin/g++",
+            "/usr/local/bin/clang++",
+            "/usr/bin/clang++",
+            "/usr/bin/g++",
+            "c++",
+            #[cfg(target_os = "windows")]
+            "C:\\msys64\\ucrt64\\bin\\g++.exe",
+            #[cfg(target_os = "windows")]
+            "C:\\msys64\\mingw64\\bin\\g++.exe",
+        ];
+
+        for cand in candidates {
+            if let Ok(out) = Command::new(cand).arg("--version").output() {
+                if out.status.success() {
+                    return cand.to_string();
+                }
+            }
+        }
+
+        configured.to_string()
     }
 
     pub fn compile(&self, problem_id: &str, debug_mode: bool) -> CompileResult {
         let p_id = problem_id.to_lowercase();
-        let p_dir = WorkspaceManager::get_problem_dir(&self.settings.get_workspace_path(), &p_id);
+        let (ws_path, cpp_std, rel_flags, dbg_flags, raw_compiler) = {
+            let s = self.settings.read().unwrap();
+            (
+                s.get_workspace_path(),
+                s.cpp_standard.clone(),
+                s.cxx_release_flags.clone(),
+                s.cxx_debug_flags.clone(),
+                s.cxx_compiler.clone(),
+            )
+        };
+        let p_dir = WorkspaceManager::get_problem_dir(&ws_path, &p_id);
         let src_file = p_dir.join(format!("{}.cpp", p_id));
 
         if !src_file.exists() {
@@ -76,15 +130,25 @@ impl TestExecutor {
         let target_path = p_dir.join(&target_file);
 
         let flags_str = if debug_mode {
-            &self.settings.cxx_debug_flags
+            &dbg_flags
         } else {
-            &self.settings.cxx_release_flags
+            &rel_flags
         };
         let flags: Vec<&str> = flags_str.split_whitespace().collect();
 
-        let mut cmd = Command::new(&self.settings.cxx_compiler);
+        let compiler = self.resolve_compiler(&raw_compiler);
+        let mut cmd = Command::new(&compiler);
         cmd.current_dir(&p_dir);
-        cmd.arg(format!("-std={}", self.settings.cpp_standard));
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let cur_path = std::env::var("PATH").unwrap_or_default();
+            if !cur_path.contains("/opt/homebrew/bin") {
+                cmd.env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{}", cur_path));
+            }
+        }
+
+        cmd.arg(format!("-std={}", cpp_std));
         for f in flags {
             cmd.arg(f);
         }
@@ -102,7 +166,7 @@ impl TestExecutor {
                     debug_mode,
                     duration_ms: 0.0,
                     warnings: String::new(),
-                    error: format!("Błąd uruchomienia kompilatora {}: {}", self.settings.cxx_compiler, e),
+                    error: format!("Błąd uruchomienia kompilatora {}: {}", compiler, e),
                 };
             }
         };
@@ -133,9 +197,11 @@ impl TestExecutor {
 
     pub fn run_single_test(&self, problem_id: &str, test_id: &str, is_debug: bool) -> TestResult {
         let p_id = problem_id.to_lowercase();
-        let p_dir = WorkspaceManager::get_problem_dir(&self.settings.get_workspace_path(), &p_id);
+        let ws_path = self.settings.read().unwrap().get_workspace_path();
+        let p_dir = WorkspaceManager::get_problem_dir(&ws_path, &p_id);
+        let src_file = p_dir.join(format!("{}.cpp", p_id));
 
-        let manifest = WorkspaceManager::get_manifest(&self.settings.get_workspace_path(), &p_id);
+        let manifest = WorkspaceManager::get_manifest(&ws_path, &p_id);
         let time_limit_sec = manifest.as_ref().map_or(1.0, |m| m.time_limit_sec);
 
         let target_name = if is_debug {
@@ -150,7 +216,19 @@ impl TestExecutor {
 
         let binary_path = p_dir.join(&binary_file);
 
-        if !binary_path.exists() {
+        let should_compile = if !binary_path.exists() {
+            true
+        } else if let (Ok(src_meta), Ok(bin_meta)) = (src_file.metadata(), binary_path.metadata()) {
+            if let (Ok(src_mtime), Ok(bin_mtime)) = (src_meta.modified(), bin_meta.modified()) {
+                src_mtime > bin_mtime
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if should_compile {
             let comp = self.compile(&p_id, is_debug);
             if !comp.success {
                 return TestResult {
@@ -193,8 +271,11 @@ impl TestExecutor {
             }
         };
 
+        let input_bytes_clone = input_bytes.clone();
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&input_bytes);
+            std::thread::spawn(move || {
+                let _ = stdin.write_all(&input_bytes_clone);
+            });
         }
 
         let start = Instant::now();
@@ -208,6 +289,7 @@ impl TestExecutor {
                 Ok(None) => {
                     if start.elapsed() > hard_timeout {
                         let _ = child.kill();
+                        let _ = child.wait();
                         timed_out = true;
                         break;
                     }
@@ -215,6 +297,7 @@ impl TestExecutor {
                 }
                 Err(_) => {
                     let _ = child.kill();
+                    let _ = child.wait();
                     break;
                 }
             }
@@ -294,9 +377,10 @@ impl TestExecutor {
 
     pub fn run_all_tests(&self, problem_id: &str) -> RunAllSummary {
         let p_id = problem_id.to_lowercase();
-        let p_dir = WorkspaceManager::get_problem_dir(&self.settings.get_workspace_path(), &p_id);
+        let ws_path = self.settings.read().unwrap().get_workspace_path();
+        let p_dir = WorkspaceManager::get_problem_dir(&ws_path, &p_id);
 
-        let manifest = WorkspaceManager::get_manifest(&self.settings.get_workspace_path(), &p_id);
+        let manifest = WorkspaceManager::get_manifest(&ws_path, &p_id);
         let tests_dir = p_dir.join(".algo").join("tests");
 
         // Ensure compiled

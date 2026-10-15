@@ -46,6 +46,23 @@ fn handle_native_message(msg: &Value) -> Value {
             let _ = Command::new(&self_exe).spawn();
             serde_json::json!({ "success": true, "status": "gui_launched" })
         }
+        "stage_file" => {
+            let file_path = msg.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+            if !file_path.is_empty() {
+                let src = std::path::Path::new(file_path);
+                if src.exists() {
+                    let stage_dir = crate::config::AppSettings::staging_dir();
+                    let _ = std::fs::create_dir_all(&stage_dir);
+                    let filename = src.file_name().unwrap_or_default();
+                    let dst = stage_dir.join(filename);
+                    if std::fs::copy(src, &dst).is_ok() {
+                        let _ = ureq::post("http://127.0.0.1:8080/api/stage-refresh").call();
+                        return serde_json::json!({ "success": true, "path": dst.to_string_lossy() });
+                    }
+                }
+            }
+            serde_json::json!({ "success": false })
+        }
         "open_vscode" => {
             let pid = msg.get("problem_id").and_then(|v| v.as_str()).unwrap_or("");
             if !pid.is_empty() {

@@ -148,159 +148,36 @@ fn run_daemon(port: u16) {
     check_streamdeck_conflicts();
     ensure_vscode_extension_installed();
 
-    let settings = AppSettings::load();
+    let settings = Arc::new(RwLock::new(AppSettings::load()));
     let runner = Arc::new(TestExecutor::new(settings.clone()));
     let streamdeck = Arc::new(StreamDeckEngine::new());
-    streamdeck.set_brightness(settings.streamdeck_brightness);
+    {
+        let s = settings.read().unwrap();
+        streamdeck.set_brightness(s.streamdeck_brightness);
+    }
     let (ws_sender, _) = broadcast::channel(100);
     let shutdown_signal = Arc::new(AtomicBool::new(false));
 
     // Callback na fizyczne przyciski Stream Decka
     let runner_clone = runner.clone();
     let streamdeck_clone = streamdeck.clone();
-    let settings_clone = settings.clone();
-
-    fn open_in_vscode(settings: &config::AppSettings, problem_id: &str) {
-        if problem_id.is_empty() {
-            return;
-        }
-        let ws_dir = settings.get_workspace_path();
-        let p_dir = workspace::WorkspaceManager::get_problem_dir(&ws_dir, problem_id);
-        let sol_file = p_dir.join(format!("{}.cpp", problem_id));
-        let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
-        let pdf_fallback = p_dir.join(".algo").join("statement.pdf");
-        let actual_pdf = if pdf_file.exists() {
-            Some(pdf_file)
-        } else if pdf_fallback.exists() {
-            Some(pdf_fallback)
-        } else {
-            None
-        };
-
-        let temp_task_file = std::env::temp_dir().join("algodeck_active_task.txt");
-        let _ = std::fs::write(&temp_task_file, problem_id.to_uppercase());
-
-        #[cfg(target_os = "windows")]
-        {
-            let mut args = Vec::new();
-            if settings.vscode_mode == "separate_windows" {
-                args.push("--new-window".to_string());
-                args.push(p_dir.to_string_lossy().to_string());
-            } else {
-                args.push("--reuse-window".to_string());
-                args.push(ws_dir.to_string_lossy().to_string());
-            }
-            let pdf_on_left = settings.pdf_position == "left";
-            if settings.open_pdf_in_vscode && pdf_on_left {
-                if let Some(ref p) = actual_pdf {
-                    args.push(p.to_string_lossy().to_string());
-                }
-            }
-            if sol_file.exists() {
-                args.push(sol_file.to_string_lossy().to_string());
-            }
-            if settings.open_pdf_in_vscode && !pdf_on_left {
-                if let Some(ref p) = actual_pdf {
-                    args.push(p.to_string_lossy().to_string());
-                }
-            }
-
-            let win_candidates = [
-                std::env::var("LOCALAPPDATA").ok().map(|l| std::path::PathBuf::from(l).join("Programs/Microsoft VS Code/bin/code.cmd")),
-                std::env::var("ProgramFiles").ok().map(|p| std::path::PathBuf::from(p).join("Microsoft VS Code/bin/code.cmd")),
-                std::env::var("ProgramFiles(x86)").ok().map(|p| std::path::PathBuf::from(p).join("Microsoft VS Code/bin/code.cmd")),
-            ];
-
-            for cand in win_candidates.into_iter().flatten() {
-                if cand.exists() {
-                    let _ = std::process::Command::new(cand).args(&args).spawn();
-                    return;
-                }
-            }
-
-            let mut cmd = std::process::Command::new("cmd");
-            cmd.arg("/C").arg("code");
-            for a in args {
-                cmd.arg(a);
-            }
-            let _ = cmd.spawn();
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-            let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
-
-            // 1. Skrypt sd_algo_code.sh jeśli obecny
-            let sd_code = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_code.sh"));
-            let mut script_launched = false;
-            if let Some(ref script) = sd_code {
-                if script.exists() {
-                    let res = std::process::Command::new(script)
-                        .arg(&p_dir)
-                        .arg(&sol_file)
-                        .env("DISPLAY", &display)
-                        .env("XAUTHORITY", &xauthority)
-                        .env("ALGODECK_PDF_POS", &settings.pdf_position)
-                        .env("ALGODECK_SPLIT_RATIO", settings.editor_split_ratio.to_string())
-                        .spawn();
-                    if res.is_ok() {
-                        script_launched = true;
-                    }
-                }
-            }
-
-            if !script_launched {
-                let candidates = [
-                    "/usr/local/bin/code",
-                    "/opt/homebrew/bin/code",
-                    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-                    "/usr/bin/code",
-                ];
-                let code_bin = candidates
-                    .iter()
-                    .find(|p| std::path::Path::new(p).exists())
-                    .copied()
-                    .unwrap_or("code");
-
-                let mut cmd = std::process::Command::new(code_bin);
-                if settings.vscode_mode == "separate_windows" {
-                    cmd.arg("--new-window");
-                    cmd.arg(&p_dir);
-                } else {
-                    cmd.arg("--reuse-window");
-                    cmd.arg(&ws_dir);
-                }
-                let pdf_on_left = settings.pdf_position == "left";
-                if settings.open_pdf_in_vscode && pdf_on_left {
-                    if let Some(ref p) = actual_pdf {
-                        cmd.arg(p);
-                    }
-                }
-                if sol_file.exists() {
-                    cmd.arg(&sol_file);
-                }
-                if settings.open_pdf_in_vscode && !pdf_on_left {
-                    if let Some(ref p) = actual_pdf {
-                        cmd.arg(p);
-                    }
-                }
-                cmd.env("DISPLAY", &display);
-                cmd.env("XAUTHORITY", &xauthority);
-                let _ = cmd.spawn();
-            }
-
-            let _ = std::process::Command::new("notify-send")
-                .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
-                .env("DISPLAY", &display)
-                .env("XAUTHORITY", &xauthority)
-                .spawn();
-        }
-    }
+    let settings_for_callback = settings.clone();
 
     let action_callback = Arc::new(move |action: String, _key_idx: usize| {
         let active_id = streamdeck_clone.get_state().active_problem_id.unwrap_or_default();
-        let ws_dir = settings_clone.get_workspace_path();
+        let (split_pdf, pdf_pos, split_ratio, vscode_mode, ws_dir) = {
+            let s = settings_for_callback.read().unwrap();
+            (
+                s.open_pdf_in_vscode,
+                s.pdf_position.clone(),
+                s.editor_split_ratio,
+                s.vscode_mode.clone(),
+                s.get_workspace_path(),
+            )
+        };
+        let open_in_vscode = |pid: &str| {
+            server::open_in_vscode_internal(pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
+        };
         let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
         let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
 
@@ -309,7 +186,7 @@ fn run_daemon(port: u16) {
             let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
             let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
             streamdeck_clone.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
-            open_in_vscode(&settings_clone, &pid);
+            open_in_vscode(&pid);
             return;
         }
 
@@ -325,7 +202,7 @@ fn run_daemon(port: u16) {
         match action.as_str() {
             "open_vscode" => {
                 if !active_id.is_empty() {
-                    open_in_vscode(&settings_clone, &active_id);
+                    open_in_vscode(&active_id);
                 }
             }
             "run_all" => {
@@ -345,7 +222,7 @@ fn run_daemon(port: u16) {
                     // 2. Jeśli VS Code nie było otwarte, otwórz je i ponów zapytanie do mostka
                     if !triggered {
                         if !server::is_vscode_open_for_problem(&active_id) {
-                            open_in_vscode(&settings_clone, &active_id);
+                            open_in_vscode(&active_id);
                             std::thread::sleep(std::time::Duration::from_millis(800));
                             if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(900)).call() {
                                 if res.status() == 200 {
@@ -394,7 +271,7 @@ fn run_daemon(port: u16) {
 
                     if !triggered {
                         if !server::is_vscode_open_for_problem(&active_id) {
-                            open_in_vscode(&settings_clone, &active_id);
+                            open_in_vscode(&active_id);
                             std::thread::sleep(std::time::Duration::from_millis(800));
                             if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(900)).call() {
                                 if res.status() == 200 {
@@ -418,19 +295,23 @@ fn run_daemon(port: u16) {
                             }
                         }
 
+                        let self_exe = std::env::current_exe()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "algodeck".into());
+
                         #[cfg(target_os = "macos")]
                         {
-                            let script = format!("tell application \"Terminal\" to do script \"algodeck run {}\"", active_id);
+                            let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\" run {}\"", self_exe, active_id);
                             let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
                         }
                         #[cfg(target_os = "windows")]
                         {
-                            let _ = std::process::Command::new("cmd").args(["/c", "start", "algodeck", "run", &active_id]).spawn();
+                            let _ = std::process::Command::new("cmd").args(["/c", "start", &self_exe, "run", &active_id]).spawn();
                         }
                         #[cfg(target_os = "linux")]
                         {
                             let mut cmd = std::process::Command::new("x-terminal-emulator");
-                            cmd.args(["-e", &format!("algodeck run {}", active_id)]);
+                            cmd.args(["-e", &format!("\"{}\" run {}", self_exe, active_id)]);
                             cmd.env("DISPLAY", &display);
                             cmd.env("XAUTHORITY", &xauthority);
                             let _ = cmd.spawn();
@@ -465,7 +346,7 @@ fn run_daemon(port: u16) {
                 let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
                 if let Some(first) = problems.first() {
                     streamdeck_clone.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
-                    open_in_vscode(&settings_clone, &first.problem_id);
+                    open_in_vscode(&first.problem_id);
                 } else {
                     let _ = open::that("http://127.0.0.1:8080/");
                 }
@@ -481,7 +362,7 @@ fn run_daemon(port: u16) {
                     };
                     let new_pid = &problems[new_idx].problem_id;
                     streamdeck_clone.set_active_problem_with_meta(new_pid, new_idx + 1, problems.len());
-                    open_in_vscode(&settings_clone, new_pid);
+                    open_in_vscode(new_pid);
                 }
             }
             "kill_process" => {
@@ -497,7 +378,7 @@ fn run_daemon(port: u16) {
     });
 
     // Ustaw początkowe aktywne zadanie na Stream Decku jeśli istnieje w workspace
-    let ws_path = settings.get_workspace_path();
+    let ws_path = settings.read().unwrap().get_workspace_path();
     let problems = workspace::WorkspaceManager::list_problems(&ws_path);
     if !problems.is_empty() {
         let mut target_idx = 0;
@@ -520,7 +401,7 @@ fn run_daemon(port: u16) {
     let streamdeck_shutdown = streamdeck.clone();
     let shutdown_signal_clone = shutdown_signal.clone();
     let app_state = server::AppState {
-        settings: Arc::new(RwLock::new(settings)),
+        settings: settings.clone(),
         streamdeck,
         runner,
         ws_sender,
@@ -648,7 +529,7 @@ fn check_status() {
 
 fn run_cli_test(problem_id: &str) {
     let settings = AppSettings::load();
-    let runner = TestExecutor::new(settings);
+    let runner = TestExecutor::new(Arc::new(RwLock::new(settings)));
     println!("⚗ Uruchamianie testów dla zadania: {}", problem_id.to_uppercase());
 
     let summary = runner.run_all_tests(problem_id);
@@ -669,7 +550,7 @@ fn run_cli_test(problem_id: &str) {
 
 fn run_cli_interactive(problem_id: &str) {
     let settings = AppSettings::load();
-    let runner = TestExecutor::new(settings.clone());
+    let runner = TestExecutor::new(Arc::new(RwLock::new(settings.clone())));
     let comp = runner.compile(problem_id, false);
     if !comp.success {
         eprintln!("Błąd kompilacji:\n{}", comp.error);

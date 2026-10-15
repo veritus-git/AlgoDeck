@@ -162,14 +162,14 @@ fn test_generate_and_save_streamdeck_visual_snapshot() {
 
 #[tokio::test]
 async fn test_server_status_and_graceful_shutdown() {
-    let settings = AppSettings::default();
+    let settings = Arc::new(RwLock::new(AppSettings::default()));
     let runner = Arc::new(TestExecutor::new(settings.clone()));
     let streamdeck = Arc::new(StreamDeckEngine::new());
     let (ws_sender, _) = broadcast::channel(10);
     let shutdown_signal = Arc::new(AtomicBool::new(false));
 
     let app_state = AppState {
-        settings: Arc::new(RwLock::new(settings)),
+        settings,
         streamdeck,
         runner,
         ws_sender,
@@ -236,14 +236,14 @@ async fn reqwest_like_post(url: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn test_settings_serving_and_brightness_endpoint() {
-    let settings = AppSettings::default();
+    let settings = Arc::new(RwLock::new(AppSettings::default()));
     let runner = Arc::new(TestExecutor::new(settings.clone()));
     let streamdeck = Arc::new(StreamDeckEngine::new());
     let (ws_sender, _) = broadcast::channel(10);
     let shutdown_signal = Arc::new(AtomicBool::new(false));
 
     let app_state = AppState {
-        settings: Arc::new(RwLock::new(settings)),
+        settings,
         runner,
         streamdeck: streamdeck.clone(),
         ws_sender,

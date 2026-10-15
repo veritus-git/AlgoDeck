@@ -218,6 +218,7 @@ async function handleCompletedDownload(downloadId) {
 
     // 4. Wyślij do Rust backendu (staging)
     let problemId = "";
+    let stagedSuccessfully = false;
     try {
       const res = await fetch(`${API_BASE}/api/stage-by-path`, {
         method: "POST",
@@ -227,10 +228,21 @@ async function handleCompletedDownload(downloadId) {
       if (res.ok) {
         const data = await res.json();
         problemId = data.problem_id || "";
+        stagedSuccessfully = true;
         console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni (staging) w Rust:", data);
       }
     } catch (err) {
       console.warn("[AlgoDeck] Błąd przesyłania do /api/stage-by-path:", err);
+    }
+
+    if (!stagedSuccessfully) {
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+          chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filename }, (resp) => {
+            console.log("[AlgoDeck] Native Host staging fallback odpowiedź:", resp);
+          });
+        }
+      } catch (_) {}
     }
 
     // 5. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
