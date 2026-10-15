@@ -68,6 +68,9 @@ jobs:
           else
             cp target/${{ matrix.target }}/release/algodeck dist/${{ matrix.artifact_name }}
             chmod +x dist/${{ matrix.artifact_name }}
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              codesign --force --deep -s - dist/${{ matrix.artifact_name }} || true
+            fi
           fi
 
       - name: Upload Build Artifact

@@ -324,10 +324,15 @@ fn apply_autostart_setting(enable: bool) {
     {
         if let Some(home) = dirs::home_dir() {
             let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
+            let uid = unsafe { libc::getuid() };
+            let service_target = format!("gui/{}/com.algodeck.daemon", uid);
             if enable {
-                let _ = std::process::Command::new("launchctl").args(["load", "-w"]).arg(&plist).output();
+                let _ = std::process::Command::new("launchctl").args(["enable", &service_target]).output();
+                let _ = std::process::Command::new("launchctl").args(["bootstrap", &format!("gui/{}", uid)]).arg(&plist).output();
+                let _ = std::process::Command::new("launchctl").args(["load"]).arg(&plist).output();
             } else {
-                let _ = std::process::Command::new("launchctl").args(["unload", "-w"]).arg(&plist).output();
+                let _ = std::process::Command::new("launchctl").args(["bootout", &service_target]).output();
+                let _ = std::process::Command::new("launchctl").args(["unload"]).arg(&plist).output();
             }
         }
     }
@@ -1360,11 +1365,14 @@ async fn shutdown_server(State(state): State<AppState>) -> Json<serde_json::Valu
         }
         #[cfg(target_os = "macos")]
         {
+            let uid = unsafe { libc::getuid() };
+            let service_target = format!("gui/{}/com.algodeck.daemon", uid);
+            let _ = std::process::Command::new("launchctl").args(["bootout", &service_target]).output();
             if let Some(home) = dirs::home_dir() {
                 let plist = home.join("Library/LaunchAgents/com.algodeck.daemon.plist");
                 if plist.exists() {
                     let _ = std::process::Command::new("launchctl")
-                        .args(["unload", "-w"])
+                        .args(["unload"])
                         .arg(&plist)
                         .output();
                 }

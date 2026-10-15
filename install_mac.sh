@@ -34,7 +34,19 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 
-ARCH_TYPE=$(uname -m)
+ARCH_RAW=$(uname -m)
+if [ "$ARCH_RAW" = "x86_64" ]; then
+    # Sprawdź czy powłoka nie działa pod emulacją Rosetta 2 na Apple Silicon
+    if [ "$(sysctl -in sysctl.proc_translated 2>/dev/null)" = "1" ] || sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -qi "Apple"; then
+        ARCH_TYPE="arm64"
+    else
+        ARCH_TYPE="x86_64"
+    fi
+elif [ "$ARCH_RAW" = "arm64" ] || [ "$ARCH_RAW" = "aarch64" ]; then
+    ARCH_TYPE="arm64"
+else
+    ARCH_TYPE="$ARCH_RAW"
+fi
 echo -e "${GREEN}✓ Wykryto system macOS (${ARCH_TYPE})${NC}"
 
 # Katalogi instalacyjne
@@ -96,6 +108,10 @@ fi
 echo -e "\n${CYAN}[3/7] Przygotowanie binarki silnika AlgoDeck...${NC}"
 
 # Zatrzymaj działający proces jeśli istnieje
+USER_ID=$(id -u)
+launchctl bootout "gui/$USER_ID/com.algodeck.daemon" 2>/dev/null || true
+launchctl unload "$HOME/Library/LaunchAgents/com.algodeck.daemon.plist" 2>/dev/null || true
+pkill -x "algodeck" 2>/dev/null || true
 pkill -f "algodeck daemon" 2>/dev/null || true
 sleep 0.3
 
@@ -125,37 +141,48 @@ if [ "$INSTALLED_BIN" = false ]; then
 
     if curl -fsSL -o "$TMP_TAR" "$TAR_URL" 2>/dev/null && [ -s "$TMP_TAR" ]; then
         mkdir -p "$TMP_DIR"
-        tar -xzf "$TMP_TAR" -C "$TMP_DIR"
+        tar -xzf "$TMP_TAR" -C "$TMP_DIR" 2>/dev/null || true
         if [ -f "$TMP_DIR/algodeck" ]; then
             cp "$TMP_DIR/algodeck" "$BIN_DIR/algodeck"
             chmod +x "$BIN_DIR/algodeck"
             INSTALLED_BIN=true
         fi
         if [ -d "$TMP_DIR/frontend" ]; then
-            cp -r "$TMP_DIR/frontend/"* "$FRONTEND_DIR/"
+            cp -r "$TMP_DIR/frontend/"* "$FRONTEND_DIR/" 2>/dev/null || true
             cp -r "$TMP_DIR/frontend/icons/"* "$ICONS_DIR/" 2>/dev/null || true
         fi
         if [ -d "$TMP_DIR/extension" ]; then
-            cp -r "$TMP_DIR/extension/"* "$EXT_DIR/"
+            cp -r "$TMP_DIR/extension/"* "$EXT_DIR/" 2>/dev/null || true
         fi
         rm -rf "$TMP_TAR" "$TMP_DIR"
-    else
+    fi
+
+    if [ "$INSTALLED_BIN" = false ]; then
         # Fallback: pojedyncza binarka
         echo -e "${CYAN}Pobieranie surowej binarki algodeck-macos-${ARCH_TYPE}...${NC}"
         RAW_URL="https://github.com/veritus-git/AlgoDeck/releases/latest/download/algodeck-macos-${ARCH_TYPE}"
         curl -fsSL -o "$BIN_DIR/algodeck" "$RAW_URL" || true
         chmod +x "$BIN_DIR/algodeck"
-        if [ -x "$BIN_DIR/algodeck" ]; then
+        if [ -s "$BIN_DIR/algodeck" ] && file "$BIN_DIR/algodeck" 2>/dev/null | grep -q "Mach-O"; then
             INSTALLED_BIN=true
         fi
     fi
 fi
 
-if [ ! -x "$BIN_DIR/algodeck" ]; then
-    echo -e "${RED}Błąd: Nie udało się zainstalować binarki algodeck w $BIN_DIR.${NC}"
+if [ ! -s "$BIN_DIR/algodeck" ] || ! file "$BIN_DIR/algodeck" 2>/dev/null | grep -q "Mach-O"; then
+    echo -e "${RED}Błąd: Nie udało się zainstalować prawidłowej binarki algodeck w $BIN_DIR.${NC}"
     exit 1
 fi
-echo -e "${GREEN}✓ Binarka algodeck zainstalowana w $BIN_DIR/algodeck.${NC}"
+
+# Usuń kwarantannę macOS Gatekeeper i odśwież podpis ad-hoc
+echo -e "${CYAN}Odblokowywanie binarki w macOS (usuwanie kwarantanny Gatekeeper i podpis ad-hoc)...${NC}"
+xattr -dr com.apple.quarantine "$BIN_DIR/algodeck" 2>/dev/null || true
+xattr -cr "$BIN_DIR/algodeck" 2>/dev/null || true
+codesign --force --deep -s - "$BIN_DIR/algodeck" 2>/dev/null || true
+chmod 755 "$BIN_DIR/algodeck"
+xattr -cr "$SHARE_DIR" 2>/dev/null || true
+
+echo -e "${GREEN}✓ Binarka algodeck zainstalowana i odblokowana w $BIN_DIR/algodeck.${NC}"
 
 # ------------------------------------------------------------------------------
 # KROK 4: Kopiowanie kompletnego frontendu, grafik i rozszerzenia
@@ -221,9 +248,11 @@ echo -e "\n${CYAN}[6/7] Rejestracja Native Messaging Host dla przeglądarek Chro
 WRAPPER_PATH="$BIN_DIR/algodeck-native-host"
 cat << 'WRAPPER_EOF' > "$WRAPPER_PATH"
 #!/bin/sh
-exec "$HOME/.local/bin/algodeck" native-host
+exec "$HOME/.local/bin/algodeck" native-host "$@"
 WRAPPER_EOF
-chmod +x "$WRAPPER_PATH"
+chmod 755 "$WRAPPER_PATH"
+xattr -dr com.apple.quarantine "$WRAPPER_PATH" 2>/dev/null || true
+xattr -cr "$WRAPPER_PATH" 2>/dev/null || true
 
 # Oblicz unikalny identyfikator rozszerzenia Chrome dla lokalnego folderu rozszerzenia
 MAC_EXT_ID=$(python3 -c "import hashlib; p='$EXT_DIR'; print(''.join(chr(int(c, 16) + ord('a')) for c in hashlib.sha256(p.encode('utf-8')).hexdigest()[:32]))" 2>/dev/null || true)
@@ -284,6 +313,8 @@ cat << PLIST_EOF > "$PLIST_FILE"
         <string>$BIN_DIR/algodeck</string>
         <string>daemon</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>$SHARE_DIR</string>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
@@ -299,10 +330,43 @@ cat << PLIST_EOF > "$PLIST_FILE"
 </plist>
 PLIST_EOF
 
-# Załaduj i uruchom usługę przez launchctl
+# Załaduj i uruchom usługę przez modern launchctl oraz legacy fallback
+USER_ID=$(id -u)
+launchctl enable "gui/$USER_ID/com.algodeck.daemon" 2>/dev/null || true
+launchctl bootout "gui/$USER_ID/com.algodeck.daemon" 2>/dev/null || true
 launchctl unload "$PLIST_FILE" 2>/dev/null || true
-launchctl load -w "$PLIST_FILE" 2>/dev/null || true
-echo -e "${GREEN}✓ Usługa tła LaunchAgent (com.algodeck.daemon) uruchomiona.${NC}"
+launchctl bootstrap "gui/$USER_ID" "$PLIST_FILE" 2>/dev/null || launchctl load "$PLIST_FILE" 2>/dev/null || true
+launchctl kickstart -k "gui/$USER_ID/com.algodeck.daemon" 2>/dev/null || launchctl start com.algodeck.daemon 2>/dev/null || true
+
+# Weryfikacja uruchomienia serwera AlgoDeck
+echo -e "${CYAN}Weryfikacja działania serwera AlgoDeck na porcie 8080...${NC}"
+SERVER_RUNNING=false
+for i in {1..15}; do
+    if curl -fsSL http://127.0.0.1:8080/api/status >/dev/null 2>&1; then
+        SERVER_RUNNING=true
+        break
+    fi
+    sleep 0.2
+done
+
+# Jeśli launchctl nie wystartował daemona (np. brak aktywnej sesji GUI), uruchom niezależnie z nohup
+if [ "$SERVER_RUNNING" = false ]; then
+    echo -e "${YELLOW}Usługa launchd nie odpowiedziała natychmiast. Uruchamianie daemona w tle (nohup)...${NC}"
+    nohup "$BIN_DIR/algodeck" daemon > "$SHARE_DIR/daemon.log" 2>&1 &
+    for i in {1..15}; do
+        if curl -fsSL http://127.0.0.1:8080/api/status >/dev/null 2>&1; then
+            SERVER_RUNNING=true
+            break
+        fi
+        sleep 0.2
+    done
+fi
+
+if [ "$SERVER_RUNNING" = true ]; then
+    echo -e "${GREEN}✓ AlgoDeck Daemon pomyślnie uruchomiony i aktywny pod http://127.0.0.1:8080/${NC}"
+else
+    echo -e "${YELLOW}Uwaga: Serwer nie odpowiedział jeszcze na porcie 8080. Logi dostępne w: $SHARE_DIR/daemon.log${NC}"
+fi
 
 # Dodaj ~/.local/bin do powłok zsh i bash
 for RC in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do

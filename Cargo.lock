@@ -62,6 +62,7 @@ dependencies = [
  "clap 4.6.7",
  "dirs",
  "image",
+ "libc",
  "open",
  "pdf-extract",
  "regex",
