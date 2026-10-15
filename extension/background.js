@@ -28,7 +28,7 @@ async function cleanupRestoredWindows() {
 }
 cleanupRestoredWindows();
 
-// Weryfikacja czy plik to treść zadania lub testy
+// Weryfikacja czy plik to treść zadania PDF
 function isOlympicTaskFile(item) {
   if (!item) return false;
   const filename = (item.filename || "").toLowerCase();
@@ -39,10 +39,8 @@ function isOlympicTaskFile(item) {
     return false;
   }
 
-  const isPdf = filename.endsWith(".pdf") || mime.includes("pdf") || url.endsWith(".pdf");
-  const isZip = filename.endsWith(".zip") || mime.includes("zip") || mime.includes("compressed") || url.endsWith(".zip");
-
-  return isPdf || isZip;
+  // Wyłącznie pliki .pdf! ZIPy nie są automatycznie zaciągane z pobrań
+  return filename.endsWith(".pdf") || mime.includes("pdf") || url.endsWith(".pdf");
 }
 
 // Sprawdzenie czy usługa AlgoDeck działa
@@ -61,7 +59,7 @@ async function isDaemonRunning() {
   }
 }
 
-// Obsługa zakończonego pobierania
+// Obsługa zakończonego pobierania (wyłącznie PDF)
 async function handleCompletedDownload(downloadId) {
   if (!downloadId) return;
 
@@ -82,25 +80,17 @@ async function handleCompletedDownload(downloadId) {
     if (!filename) return;
 
     const baseName = filename.replace(/^.*[\\\/]/, '');
-    const isPdf = filename.toLowerCase().endsWith(".pdf");
-    const isZip = filename.toLowerCase().endsWith(".zip");
 
-    console.log("[AlgoDeck] Wykryto pobranie zadania:", filename);
+    console.log("[AlgoDeck] Wykryto pobranie zadania PDF:", filename);
 
-    // 1. Zapisz w chrome.storage.local
-    const dataToSave = {};
-    if (isPdf) {
-      dataToSave.last_downloaded_pdf = filename;
-      dataToSave.last_pdf_name = baseName;
-      dataToSave.last_pdf_ts = Date.now();
-      await chrome.storage.local.remove(["cleared_pdf_name"]);
-    } else if (isZip) {
-      dataToSave.last_downloaded_zip = filename;
-      dataToSave.last_zip_name = baseName;
-      dataToSave.last_zip_ts = Date.now();
-      await chrome.storage.local.remove(["cleared_zip_name"]);
-    }
-    await chrome.storage.local.set(dataToSave);
+    // 1. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
+    await chrome.storage.local.set({
+      last_downloaded_pdf: filename,
+      last_pdf_name: baseName,
+      last_pdf_ts: Date.now()
+    });
+    // Nowe pobranie unieważnia ewentualne poprzednie wyczyszczenie
+    await chrome.storage.local.remove(["cleared_pdf_name"]);
 
     // 2. Jeśli usługa AlgoDeck działa, wyślij natychmiast do stagingu w tle!
     const isOnline = await isDaemonRunning();
