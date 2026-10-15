@@ -45,25 +45,27 @@ function getRequestHandler() {
 
             if (parsed.pathname === '/test') {
                 try {
-                    let executed = false;
-                    try {
-                        const allTasks = await vscode.tasks.fetchTasks();
-                        const match = allTasks.find(t => t.name === 'AlgoDeck: TESTUJ' || (t.name && t.name.includes('TESTUJ')));
-                        if (match) {
-                            await vscode.tasks.executeTask(match);
-                            executed = true;
-                        }
-                    } catch (e) {
-                        console.error('[AlgoDeck Bridge] fetchTasks error:', e);
-                    }
-
-                    if (!executed) {
-                        const pdir = parsed.searchParams.get('pdir');
-                        const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck') || vscode.window.createTerminal('AlgoDeck');
+                    const pdir = parsed.searchParams.get('pdir');
+                    if (pdir) {
+                        const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck' || t.name === 'AlgoDeck: TESTUJ')
+                            || vscode.window.createTerminal('AlgoDeck: TESTUJ');
                         term.show(true);
-                        if (pdir) {
-                            term.sendText(`cd "${pdir}" && bash .algo/test.sh`);
-                        } else {
+                        term.sendText('\x03', false);
+                        term.sendText(`cd "${pdir}" && bash .algo/test.sh`);
+                    } else {
+                        let executed = false;
+                        try {
+                            const allTasks = await vscode.tasks.fetchTasks();
+                            const match = allTasks.find(t => t.name === 'AlgoDeck: TESTUJ' || (t.name && t.name.includes('TESTUJ')));
+                            if (match) {
+                                await vscode.tasks.executeTask(match);
+                                executed = true;
+                            }
+                        } catch (e) {
+                            console.error('[AlgoDeck Bridge] fetchTasks error:', e);
+                        }
+
+                        if (!executed) {
                             await vscode.commands.executeCommand('workbench.action.tasks.test');
                         }
                     }
@@ -79,25 +81,27 @@ function getRequestHandler() {
 
             if (parsed.pathname === '/run') {
                 try {
-                    let executed = false;
-                    try {
-                        const allTasks = await vscode.tasks.fetchTasks();
-                        const match = allTasks.find(t => t.name === 'AlgoDeck: ODPAL' || (t.name && t.name.includes('ODPAL')));
-                        if (match) {
-                            await vscode.tasks.executeTask(match);
-                            executed = true;
-                        }
-                    } catch (e) {
-                        console.error('[AlgoDeck Bridge] fetchTasks error:', e);
-                    }
-
-                    if (!executed) {
-                        const pdir = parsed.searchParams.get('pdir');
-                        const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck') || vscode.window.createTerminal('AlgoDeck');
+                    const pdir = parsed.searchParams.get('pdir');
+                    if (pdir) {
+                        const term = vscode.window.terminals.find(t => t.name === 'AlgoDeck' || t.name === 'AlgoDeck: ODPAL')
+                            || vscode.window.createTerminal('AlgoDeck: ODPAL');
                         term.show(true);
-                        if (pdir) {
-                            term.sendText(`cd "${pdir}" && bash .algo/run.sh`);
-                        } else {
+                        term.sendText('\x03', false);
+                        term.sendText(`cd "${pdir}" && bash .algo/run.sh`);
+                    } else {
+                        let executed = false;
+                        try {
+                            const allTasks = await vscode.tasks.fetchTasks();
+                            const match = allTasks.find(t => t.name === 'AlgoDeck: ODPAL' || (t.name && t.name.includes('ODPAL')));
+                            if (match) {
+                                await vscode.tasks.executeTask(match);
+                                executed = true;
+                            }
+                        } catch (e) {
+                            console.error('[AlgoDeck Bridge] fetchTasks error:', e);
+                        }
+
+                        if (!executed) {
                             await vscode.commands.executeCommand('workbench.action.tasks.build');
                         }
                     }

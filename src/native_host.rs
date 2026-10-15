@@ -53,12 +53,56 @@ fn handle_native_message(msg: &Value) -> Value {
         "stage_file" => {
             let file_path = msg.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
             if !file_path.is_empty() {
-                let src = std::path::Path::new(file_path);
+                let raw = file_path.trim().trim_start_matches("file://");
+                let decoded = {
+                    let mut out = Vec::new();
+                    let bytes = raw.as_bytes();
+                    let mut i = 0;
+                    while i < bytes.len() {
+                        if bytes[i] == b'%' && i + 2 < bytes.len() {
+                            if let Ok(val) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
+                                out.push(val);
+                                i += 3;
+                                continue;
+                            }
+                        }
+                        out.push(bytes[i]);
+                        i += 1;
+                    }
+                    String::from_utf8_lossy(&out).to_string()
+                };
+
+                let mut src = std::path::PathBuf::from(raw);
+                if !src.exists() {
+                    let dec_path = std::path::PathBuf::from(&decoded);
+                    if dec_path.exists() {
+                        src = dec_path;
+                    } else {
+                        let fname_opt = src.file_name().or_else(|| std::path::Path::new(&decoded).file_name()).map(|f| f.to_os_string());
+                        if let Some(fname) = fname_opt {
+                            if let Some(dl) = dirs::download_dir() {
+                                let candidate = dl.join(&fname);
+                                if candidate.exists() {
+                                    src = candidate;
+                                }
+                            }
+                            if !src.exists() {
+                                if let Some(home) = dirs::home_dir() {
+                                    let candidate = home.join("Downloads").join(&fname);
+                                    if candidate.exists() {
+                                        src = candidate;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if src.exists() {
                     let stage_dir = crate::config::AppSettings::staging_dir();
                     let _ = std::fs::create_dir_all(&stage_dir);
 
-                    let is_pdf = file_path.to_lowercase().ends_with(".pdf");
+                    let is_pdf = src.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("pdf")).unwrap_or(false);
                     if is_pdf {
                         if let Ok(entries) = std::fs::read_dir(&stage_dir) {
                             for e in entries.flatten() {
@@ -74,7 +118,7 @@ fn handle_native_message(msg: &Value) -> Value {
 
                     let filename = src.file_name().unwrap_or_default();
                     let dst = stage_dir.join(filename);
-                    if std::fs::copy(src, &dst).is_ok() {
+                    if std::fs::copy(&src, &dst).is_ok() {
                         let _ = ureq::post("http://127.0.0.1:8080/api/stage-refresh").call();
                         return serde_json::json!({ "success": true, "path": dst.to_string_lossy() });
                     }

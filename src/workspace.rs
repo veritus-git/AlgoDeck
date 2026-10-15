@@ -786,7 +786,7 @@ fi
         {
             "label": "AlgoDeck: ODPAL",
             "type": "shell",
-            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/run.sh\" || bash \"${fileDirname}/.algo/run.sh\"",
+            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/run.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/run.sh\" || bash \"${fileDirname}/.algo/run.sh\"",
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
@@ -802,7 +802,7 @@ fi
         {
             "label": "AlgoDeck: TESTUJ",
             "type": "shell",
-            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/test.sh\" || bash \"${fileDirname}/.algo/test.sh\"",
+            "command": "TASK=\"$(cat /tmp/algodeck_active_task.txt 2>/dev/null || cat \"$TMPDIR/algodeck_active_task.txt\" 2>/dev/null || cat \"${TMPDIR:-/tmp}/algodeck_active_task.txt\" 2>/dev/null | tr '[:upper:]' '[:lower:]')\"; [ -z \"$TASK\" ] && TASK=\"$(basename \"${fileDirname}\")\"; [ -f \"${workspaceFolder}/$TASK/.algo/test.sh\" ] && bash \"${workspaceFolder}/$TASK/.algo/test.sh\" || bash \"${fileDirname}/.algo/test.sh\"",
             "problemMatcher": [],
             "presentation": {
                 "reveal": "always",

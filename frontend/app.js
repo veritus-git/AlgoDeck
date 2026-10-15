@@ -460,16 +460,19 @@ function setupActionButtons() {
       return;
     }
 
+    const inContent = manInput.value;
+    const outContent = manOutput.value;
+
     const payload = {
       problem_id: pId,
       title: manTitle.value.trim() || pId.toUpperCase(),
       time_limit: parseFloat(manTime.value) || 1.0,
       memory_limit: parseInt(manMem.value) || 128,
+      sample_cin: inContent,
+      sample_cout: outContent,
       tests: []
     };
 
-    const inContent = manInput.value;
-    const outContent = manOutput.value;
     if (inContent.trim() || outContent.trim()) {
       payload.tests.push({
         id: "test_1",

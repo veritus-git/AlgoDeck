@@ -81,23 +81,11 @@ async function handleCompletedDownload(downloadId) {
   if (processedDownloads.has(downloadId)) {
     return;
   }
-  processedDownloads.add(downloadId);
-  if (processedDownloads.size > 200) {
-    const oldest = processedDownloads.values().next().value;
-    processedDownloads.delete(oldest);
-  }
 
   try {
-    // 1. Sprawdź czy usługa AlgoDeck działa
-    const isOnline = await isDaemonRunning();
-    if (!isOnline) {
-      console.log("[AlgoDeck] Demon wyłączony — pomijam zadanie.");
-      return;
-    }
-
-    // 2. Pobierz informacje o pliku z retry (Chrome potrzebuje chwili na usunięcie .crdownload)
+    // 1. Pobierz informacje o pliku z retry (Chrome na macOS potrzebuje chwili na sfinalizowanie pliku)
     let item = null;
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 20; i++) {
       const items = await chrome.downloads.search({ id: downloadId });
       if (items && items.length > 0) {
         item = items[0];
@@ -109,15 +97,9 @@ async function handleCompletedDownload(downloadId) {
       await new Promise(r => setTimeout(r, 150));
     }
 
-    if (!item) return;
-
-    // 3. Sprawdź czas rozpoczęcia: ignoruj stare pobrania z historii starsze niż 5 minut
-    if (item.startTime) {
-      const startTs = new Date(item.startTime).getTime();
-      if (Date.now() - startTs > 300000) {
-        console.log("[AlgoDeck] Zignorowano stare pobranie z historii:", item.filename, item.startTime);
-        return;
-      }
+    if (!item || item.state !== "complete") {
+      // Plik jeszcze się nie sfinalizował — nie oznaczaj jako przetworzonego, poczekaj na stan complete
+      return;
     }
 
     if (!isOlympicTaskFile(item)) {
@@ -133,6 +115,13 @@ async function handleCompletedDownload(downloadId) {
       }
     } catch (_) {}
 
+    // Dopiero po pomyślnej weryfikacji oznacz jako przetworzony
+    processedDownloads.add(downloadId);
+    if (processedDownloads.size > 200) {
+      const oldest = processedDownloads.values().next().value;
+      processedDownloads.delete(oldest);
+    }
+
     let filename = item.filename || "";
     if (filename.endsWith(".crdownload")) {
       filename = filename.slice(0, -11);
@@ -140,18 +129,31 @@ async function handleCompletedDownload(downloadId) {
     if (!filename) return;
 
     const baseName = filename.replace(/^.*[\\\/]/, '');
+    console.log("[AlgoDeck] Wykryto kompletne pobranie zadania PDF:", filename);
 
-    console.log("[AlgoDeck] Wykryto świeże pobranie zadania PDF:", filename);
-
-    // 4. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
+    // 2. Natychmiast zapisz w chrome.storage.local (żeby plik był od razu widoczny w popupie po kliknięciu!)
     await chrome.storage.local.set({
       last_downloaded_pdf: filename,
       last_pdf_name: baseName,
-      last_pdf_ts: Date.now()
+      last_pdf_ts: Date.now(),
+      detected_task: {
+        filename: baseName,
+        code: baseName.replace(/\.pdf$/i, "").slice(0, 6).toLowerCase(),
+        ts: Date.now()
+      },
+      dismiss_oneclick: false
     });
     await chrome.storage.local.remove(["cleared_pdf_name"]);
 
-    // 4. Wyślij do Rust backendu (staging)
+    // 3. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
+    try {
+      if (chrome.action && chrome.action.setBadgeText) {
+        chrome.action.setBadgeText({ text: "1" });
+        chrome.action.setBadgeBackgroundColor({ color: "#10b981" });
+      }
+    } catch (_) {}
+
+    // 4. Wyślij do Rust backendu (staging) lub Native Host
     let problemId = "";
     let stagedSuccessfully = false;
     try {
@@ -164,7 +166,7 @@ async function handleCompletedDownload(downloadId) {
         const data = await res.json();
         problemId = data.problem_id || "";
         stagedSuccessfully = true;
-        console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni (staging) w Rust:", data);
+        console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni w Rust:", data);
       }
     } catch (err) {
       console.warn("[AlgoDeck] Błąd przesyłania do /api/stage-by-path:", err);
@@ -180,47 +182,41 @@ async function handleCompletedDownload(downloadId) {
       } catch (_) {}
     }
 
-    // 5. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
-    try {
-      if (chrome.action && chrome.action.setBadgeText) {
-        chrome.action.setBadgeText({ text: "1" });
-        chrome.action.setBadgeBackgroundColor({ color: "#10b981" });
-      }
-    } catch (_) {}
+    // 5. Zaktualizuj detected_task o kod zadania z analizy
+    if (problemId) {
+      await chrome.storage.local.set({
+        detected_task: {
+          filename: baseName,
+          code: problemId,
+          ts: Date.now()
+        }
+      });
+    }
 
-    // 6. Otwórz popup rozszerzenia pod ikoną ⚡ na pasku przeglądarki (nie jako osobne okno systemu!)
-    await triggerExtensionPopup(baseName, problemId);
-
-    // 7. Powiadomienie systemowe
+    // 6. Powiadomienie systemowe (jeśli użytkownik nie patrzy na przeglądarkę)
     try {
       if (chrome.notifications && chrome.notifications.create) {
         chrome.notifications.create(`algodeck_${downloadId}_${Date.now()}`, {
           type: "basic",
           iconUrl: "icons/icon128.png",
-          title: "AlgoDeck ⚡ Nowe zadanie",
-          message: `Pobrano: ${baseName}\nKliknij ikonę ⚡, aby utworzyć Workspace w VS Code.`,
+          title: "AlgoDeck ⚡ Nowe zadanie PDF",
+          message: `Pobrano: ${baseName}\nKliknij ikonę ⚡, aby otworzyć zadanie w VS Code.`,
           priority: 2,
           requireInteraction: false
         });
       }
     } catch (_) {}
+
+    // 7. Otwórz popup rozszerzenia pod ikoną ⚡ jeśli przeglądarka na to zezwala
+    await triggerExtensionPopup(baseName, problemId);
   } catch (e) {
     console.warn("[AlgoDeck] Błąd handleCompletedDownload:", e);
   }
 }
 
-// Otwieranie natywnego popupu rozszerzenia pod ikoną ⚡ (wewnątrz przeglądarki, ZERO osobnych okien systemu)
+// Otwieranie natywnego popupu rozszerzenia pod ikoną ⚡ (wewnątrz przeglądarki)
 async function triggerExtensionPopup(baseName, problemId) {
   try {
-    await chrome.storage.local.set({
-      detected_task: {
-        filename: baseName,
-        code: problemId,
-        ts: Date.now()
-      },
-      dismiss_oneclick: false
-    });
-
     if (typeof chrome !== "undefined" && chrome.action && chrome.action.openPopup) {
       try {
         const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -253,13 +249,42 @@ if (typeof chrome !== "undefined" && chrome.downloads) {
     chrome.downloads.onChanged.addListener((delta) => {
       if (!delta || !delta.id) return;
       const isComplete = delta.state && delta.state.current === "complete";
-      const isRenamed = delta.filename && !delta.filename.current.endsWith(".crdownload");
-      if (isComplete || isRenamed) {
+      if (isComplete) {
         handleCompletedDownload(delta.id);
+      } else if (delta.filename && delta.filename.current) {
+        const fn = delta.filename.current.toLowerCase();
+        if (fn.endsWith(".pdf") && !fn.endsWith(".crdownload")) {
+          // Na macOS zmiana nazwy z .crdownload na .pdf może nastąpić w osobnym zdarzeniu
+          setTimeout(() => handleCompletedDownload(delta.id), 250);
+        }
       }
     });
   }
 }
+
+// Sprawdź ostatnio pobrane pliki po starcie / obudzeniu service workera
+async function checkRecentDownloadsOnWake() {
+  try {
+    if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
+      const recent = await chrome.downloads.search({
+        limit: 5,
+        orderBy: ["-startTime"],
+        state: "complete"
+      });
+      for (const item of recent || []) {
+        if (isOlympicTaskFile(item)) {
+          const finishTime = item.endTime ? new Date(item.endTime).getTime() : new Date(item.startTime).getTime();
+          const age = Date.now() - finishTime;
+          if (age < 180000) { // młodszy niż 3 minuty
+            handleCompletedDownload(item.id);
+            break;
+          }
+        }
+      }
+    }
+  } catch (_) {}
+}
+checkRecentDownloadsOnWake();
 
 // Kliknięcie w powiadomienie systemowe
 if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {

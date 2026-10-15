@@ -273,7 +273,8 @@ function setupOfflineStarter() {
           offlineSpinner.classList.add("hidden");
           offlineBtnText.textContent = "⚡ Uruchom AlgoDeck";
 
-          loadExistingStagedState();
+          await syncRecentDownloads();
+          await updatePopupViewState();
           loadTasks();
           return;
         }
@@ -329,35 +330,70 @@ async function checkDaemonHealth() {
 // ---------------- 3. Zaciąganie świeżo pobranego zadania PDF do poczekalni ----------------
 async function syncRecentDownloads() {
   try {
+    let filePath = null;
+
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      const stored = await chrome.storage.local.get(["last_downloaded_pdf"]);
+      const stored = await chrome.storage.local.get(["last_downloaded_pdf", "cleared_pdf_name"]);
       if (stored.last_downloaded_pdf) {
-        const filePath = stored.last_downloaded_pdf;
-        let success = false;
+        filePath = stored.last_downloaded_pdf;
+      }
+    }
 
-        try {
-          const res = await fetch(`${API_BASE}/api/stage-by-path`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ file_path: filePath })
-          });
-          if (res.ok) success = true;
-        } catch (_) {}
+    // Fallback dla macOS i Chrome: przeszukaj ostatnio pobrane pliki PDF (w ciągu ostatnich 2 godzin)
+    if (!filePath && typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
+      try {
+        const recent = await chrome.downloads.search({
+          limit: 10,
+          orderBy: ["-startTime"],
+          state: "complete"
+        });
+        const stored = await chrome.storage.local.get(["cleared_pdf_name"]);
+        const clearedName = stored.cleared_pdf_name || "";
 
-        if (!success) {
-          try {
-            if (chrome.runtime && chrome.runtime.sendNativeMessage) {
-              chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filePath }, () => {});
-              success = true;
+        for (const item of recent || []) {
+          const fn = item.filename || "";
+          const baseName = fn.replace(/^.*[\\\/]/, '');
+          const isPdf = fn.toLowerCase().endsWith(".pdf") || (item.mime && item.mime.toLowerCase().includes("pdf"));
+          if (isPdf && fn && !fn.endsWith(".crdownload") && !fn.endsWith(".tmp")) {
+            if (baseName && baseName !== clearedName) {
+              const startTs = item.endTime ? new Date(item.endTime).getTime() : new Date(item.startTime).getTime();
+              const ageMs = Date.now() - startTs;
+              if (ageMs < 7200000) { // 2 godziny
+                filePath = fn;
+                break;
+              }
             }
-          } catch (_) {}
+          }
         }
+      } catch (err) {
+        console.warn("[AlgoDeck] chrome.downloads.search error:", err);
+      }
+    }
 
-        if (success) {
-          // Natychmiast usuń z pamięci podręcznej, aby nie dodawać go ponownie po usunięciu krzyżykiem
-          await chrome.storage.local.remove(["last_downloaded_pdf"]);
-          return true;
-        }
+    if (filePath) {
+      let success = false;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_path: filePath })
+        });
+        if (res.ok) success = true;
+      } catch (_) {}
+
+      if (!success) {
+        try {
+          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filePath }, () => {});
+            success = true;
+          }
+        } catch (_) {}
+      }
+
+      if (success && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        await chrome.storage.local.remove(["last_downloaded_pdf"]);
+        return true;
       }
     }
   } catch (e) {
@@ -701,6 +737,8 @@ function setupManualForm() {
           title: title,
           time_limit: timeLimit,
           memory_limit: memoryLimit,
+          sample_cin: cinVal,
+          sample_cout: coutVal,
           tests: tests
         })
       });

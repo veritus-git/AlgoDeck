@@ -213,26 +213,26 @@ fn run_daemon(port: u16) {
                     // 1. Bezpośredni mostek VS Code (wieloplatformowy port 49152)
                     let mut triggered = false;
                     let bridge_url = format!("http://127.0.0.1:49152/test?pdir={}", url_encode(&p_dir_str));
-                    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(500)).call() {
+                    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(600)).call() {
                         if res.status() == 200 {
                             triggered = true;
                         }
                     }
 
-                    // 2. Jeśli VS Code nie było otwarte, otwórz je i ponów zapytanie do mostka
+                    // 2. Jeśli VS Code nie odpowiedziało natychmiast, upewnij się że okno jest otwarte i ponów
                     if !triggered {
                         if !server::is_vscode_open_for_problem(&active_id) {
                             open_in_vscode(&active_id);
-                            std::thread::sleep(std::time::Duration::from_millis(800));
-                            if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(900)).call() {
-                                if res.status() == 200 {
-                                    triggered = true;
-                                }
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
+                        if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(1200)).call() {
+                            if res.status() == 200 {
+                                triggered = true;
                             }
                         }
                     }
 
-                    // 3. Fallback dla skryptów sd_algo_* jeśli istnieją na maszynie (Linux legacy)
+                    // 3. Fallback dla skryptów sd_algo_* jeśli istnieją na maszynie (Linux legacy) lub terminal
                     if !triggered {
                         let sd_test = dirs::home_dir().map(|h| h.join(".local/bin/sd_algo_test_vscode.sh"));
                         if let Some(ref s) = sd_test {
@@ -246,11 +246,35 @@ fn run_daemon(port: u16) {
                                 return;
                             }
                         }
+
+                        let self_exe = std::env::current_exe()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "algodeck".into());
+
+                        #[cfg(target_os = "macos")]
+                        {
+                            let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\" test {}\"", self_exe, active_id);
+                            let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+                        }
+                        #[cfg(target_os = "windows")]
+                        {
+                            let _ = std::process::Command::new("cmd").args(["/c", "start", &self_exe, "test", &active_id]).spawn();
+                        }
+                        #[cfg(target_os = "linux")]
+                        {
+                            let mut cmd = std::process::Command::new("x-terminal-emulator");
+                            cmd.args(["-e", &format!("\"{}\" test {}", self_exe, active_id)]);
+                            cmd.env("DISPLAY", &display);
+                            cmd.env("XAUTHORITY", &xauthority);
+                            let _ = cmd.spawn();
+                        }
                     }
 
                     let r = runner_clone.run_all_tests(&active_id);
-                    if r.all_passed {
+                    if r.all_passed && r.total_tests > 0 {
                         streamdeck_clone.update_key_status(6, "OK", Some(&format!("{:.0}ms", r.total_time_ms)));
+                    } else if r.total_tests == 0 {
+                        streamdeck_clone.update_key_status(6, "IDLE", Some("0 testów"));
                     } else {
                         streamdeck_clone.update_key_status(6, "WA", Some(&format!("{}/{}", r.passed_count, r.total_tests)));
                     }
@@ -263,7 +287,7 @@ fn run_daemon(port: u16) {
 
                     let mut triggered = false;
                     let bridge_url = format!("http://127.0.0.1:49152/run?pdir={}", url_encode(&p_dir_str));
-                    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(500)).call() {
+                    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(600)).call() {
                         if res.status() == 200 {
                             triggered = true;
                         }
@@ -272,11 +296,11 @@ fn run_daemon(port: u16) {
                     if !triggered {
                         if !server::is_vscode_open_for_problem(&active_id) {
                             open_in_vscode(&active_id);
-                            std::thread::sleep(std::time::Duration::from_millis(800));
-                            if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(900)).call() {
-                                if res.status() == 200 {
-                                    triggered = true;
-                                }
+                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                        }
+                        if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(1200)).call() {
+                            if res.status() == 200 {
+                                triggered = true;
                             }
                         }
                     }
@@ -383,7 +407,12 @@ fn run_daemon(port: u16) {
     if !problems.is_empty() {
         let mut target_idx = 0;
         let active_file = std::env::temp_dir().join("algodeck_active_task.txt");
-        if let Ok(saved) = std::fs::read_to_string(&active_file) {
+        let mut saved_str = std::fs::read_to_string(&active_file).ok();
+        #[cfg(unix)]
+        if saved_str.is_none() {
+            saved_str = std::fs::read_to_string("/tmp/algodeck_active_task.txt").ok();
+        }
+        if let Some(saved) = saved_str {
             let saved_clean = saved.trim().to_lowercase();
             if let Some(pos) = problems.iter().position(|p| p.problem_id == saved_clean) {
                 target_idx = pos;
@@ -580,13 +609,19 @@ fn url_encode(s: &str) -> String {
 fn ensure_vscode_extension_installed() {
     if let Some(home) = dirs::home_dir() {
         let dest = home.join(".vscode/extensions/algodeck-vscode-bridge");
-        if !dest.join("extension.js").exists() {
+        let pkg = include_str!("../vscode_extension/package.json");
+        let ext = include_str!("../vscode_extension/extension.js");
+        let ext_file = dest.join("extension.js");
+        let pkg_file = dest.join("package.json");
+        let should_update = match std::fs::read_to_string(&ext_file) {
+            Ok(existing) => existing != ext,
+            Err(_) => true,
+        };
+        if should_update {
             let _ = std::fs::create_dir_all(&dest);
-            let pkg = include_str!("../vscode_extension/package.json");
-            let ext = include_str!("../vscode_extension/extension.js");
-            let _ = std::fs::write(dest.join("package.json"), pkg);
-            let _ = std::fs::write(dest.join("extension.js"), ext);
-            println!("✓ Zainstalowano integrację VS Code Bridge w {}", dest.display());
+            let _ = std::fs::write(&pkg_file, pkg);
+            let _ = std::fs::write(&ext_file, ext);
+            println!("✓ Zainstalowano/zaktualizowano integrację VS Code Bridge w {}", dest.display());
         }
     }
 }

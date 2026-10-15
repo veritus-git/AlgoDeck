@@ -223,6 +223,13 @@ impl StreamDeckEngine {
     // ----------------- 2. EKRAN ZADANIA: ALGO_TASK -----------------
     pub fn set_active_problem_with_meta(&self, problem_id: &str, current_idx: usize, total_count: usize) {
         let pid = problem_id.to_lowercase();
+        let upper_pid = pid.to_uppercase();
+        let _ = std::fs::write(std::env::temp_dir().join("algodeck_active_task.txt"), &upper_pid);
+        #[cfg(unix)]
+        {
+            let _ = std::fs::write("/tmp/algodeck_active_task.txt", &upper_pid);
+        }
+
         let mut state = self.state.lock().unwrap();
         state.active_problem_id = Some(pid.clone());
         *self.mode.lock().unwrap() = ScreenMode::Task(pid.clone());

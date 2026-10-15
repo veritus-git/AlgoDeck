@@ -48,16 +48,37 @@ pub struct AutoImportRequest {
     pub memory_limit: Option<u64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ManualTaskRequest {
     pub problem_id: String,
     pub title: String,
+    #[serde(default = "default_manual_time_limit")]
     pub time_limit: f64,
+    #[serde(default = "default_manual_memory_limit")]
     pub memory_limit: u64,
     #[serde(default)]
     pub sample_cin: String,
     #[serde(default)]
     pub sample_cout: String,
+    #[serde(default)]
+    pub tests: Vec<ManualTestRequestItem>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ManualTestRequestItem {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub input: String,
+    #[serde(default)]
+    pub expected_output: String,
+}
+
+fn default_manual_time_limit() -> f64 {
+    1.0
+}
+fn default_manual_memory_limit() -> u64 {
+    128
 }
 
 #[derive(Deserialize, Default)]
@@ -505,7 +526,25 @@ async fn create_manual(
 ) -> Json<serde_json::Value> {
     let pid = req.problem_id.trim().to_lowercase();
     let mut tests = Vec::new();
-    if !req.sample_cin.trim().is_empty() {
+
+    // 1. Zapisz testy przekazane w tablicy tests (z popup.js lub app.js)
+    for (i, t) in req.tests.into_iter().enumerate() {
+        if !t.input.trim().is_empty() || !t.expected_output.trim().is_empty() {
+            let tid = t.id.unwrap_or_else(|| format!("test_{}", i + 1));
+            let tname = t.name.unwrap_or_else(|| format!("Przykład {}", i + 1));
+            tests.push(TestCase {
+                id: tid,
+                name: tname,
+                input: t.input,
+                expected_output: t.expected_output,
+                is_edge_case: false,
+                tag: "[RĘCZNY]".to_string(),
+            });
+        }
+    }
+
+    // 2. Jeśli podano także w polach sample_cin / sample_cout i tablica tests jest pusta:
+    if (!req.sample_cin.trim().is_empty() || !req.sample_cout.trim().is_empty()) && tests.is_empty() {
         tests.push(TestCase {
             id: "test_1".to_string(),
             name: "Przykład 1".to_string(),
@@ -705,16 +744,62 @@ struct StagePathRequest {
     file_path: String,
 }
 
+fn url_decode_path(s: &str) -> String {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(val) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16) {
+                out.push(val);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+pub fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' || b == b'/' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
 async fn stage_by_path(
     Json(req): Json<StagePathRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let mut path = PathBuf::from(&req.file_path);
+    let raw = req.file_path.trim().trim_start_matches("file://");
+    let decoded = url_decode_path(raw);
+    let mut path = PathBuf::from(raw);
     if !path.exists() {
-        if let Some(fname) = path.file_name() {
-            if let Some(dl) = dirs::download_dir() {
-                let candidate = dl.join(fname);
-                if candidate.exists() {
-                    path = candidate;
+        let dec_path = PathBuf::from(&decoded);
+        if dec_path.exists() {
+            path = dec_path;
+        } else {
+            let fname_opt = path.file_name().or_else(|| Path::new(&decoded).file_name()).map(|f| f.to_os_string());
+            if let Some(fname) = fname_opt {
+                if let Some(dl) = dirs::download_dir() {
+                    let candidate = dl.join(&fname);
+                    if candidate.exists() {
+                        path = candidate;
+                    }
+                }
+                if !path.exists() {
+                    if let Some(home) = dirs::home_dir() {
+                        let candidate = home.join("Downloads").join(&fname);
+                        if candidate.exists() {
+                            path = candidate;
+                        }
+                    }
                 }
             }
         }
@@ -1186,7 +1271,28 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     if problem_id.is_empty() {
         return false;
     }
-    #[cfg(not(target_os = "windows"))]
+
+    // 1. Najszybsze i w 100% niezawodne sprawdzenie: mostek HTTP rozszerzenia VS Code
+    if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(300)).call() {
+        if res.status() == 200 {
+            return true;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("pgrep").args(["-f", "Visual Studio Code"]).output() {
+            if output.status.success() && !output.stdout.is_empty() {
+                return true;
+            }
+        }
+        if let Ok(output) = std::process::Command::new("pgrep").args(["-x", "Code"]).output() {
+            if output.status.success() && !output.stdout.is_empty() {
+                return true;
+            }
+        }
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
         if let Ok(output) = std::process::Command::new("wmctrl").arg("-l").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1200,6 +1306,11 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
             }
         }
         if let Ok(output) = std::process::Command::new("pgrep").args(["-f", &format!("code.*{}", problem_id)]).output() {
+            if output.status.success() && !output.stdout.is_empty() {
+                return true;
+            }
+        }
+        if let Ok(output) = std::process::Command::new("pgrep").args(["-f", "/usr/share/code/code"]).output() {
             if output.status.success() && !output.stdout.is_empty() {
                 return true;
             }
@@ -1425,18 +1536,44 @@ async fn press_streamdeck_key(
                 open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
             }
             "run_all" => {
+                let p_dir = WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
+                let p_dir_str = p_dir.to_string_lossy();
+                let bridge_url = format!("http://127.0.0.1:49152/test?pdir={}", url_encode(&p_dir_str));
+                let _ = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(500)).call();
                 ensure_vscode_open_for_problem(&active_id, &state);
                 let _ = state.runner.run_all_tests(&active_id);
             }
             "run_interactive" => {
-                ensure_vscode_open_for_problem(&active_id, &state);
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-                    let _ = std::process::Command::new("x-terminal-emulator")
-                        .args(["-e", &format!("algodeck run {}", active_id)])
-                        .env("DISPLAY", &display)
-                        .spawn();
+                let p_dir = WorkspaceManager::get_problem_dir(&ws_dir, &active_id);
+                let p_dir_str = p_dir.to_string_lossy();
+                let bridge_url = format!("http://127.0.0.1:49152/run?pdir={}", url_encode(&p_dir_str));
+                let mut triggered = false;
+                if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(500)).call() {
+                    if res.status() == 200 {
+                        triggered = true;
+                    }
+                }
+                if !triggered {
+                    ensure_vscode_open_for_problem(&active_id, &state);
+                    #[cfg(target_os = "macos")]
+                    {
+                        let self_exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "algodeck".into());
+                        let script = format!("tell application \"Terminal\" to do script \"\\\"{}\\\" run {}\"", self_exe, active_id);
+                        let _ = std::process::Command::new("osascript").args(["-e", &script]).spawn();
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        let self_exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "algodeck".into());
+                        let _ = std::process::Command::new("cmd").args(["/c", "start", &self_exe, "run", &active_id]).spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
+                        let _ = std::process::Command::new("x-terminal-emulator")
+                            .args(["-e", &format!("algodeck run {}", active_id)])
+                            .env("DISPLAY", &display)
+                            .spawn();
+                    }
                 }
             }
             "kill_process" => {

@@ -346,4 +346,74 @@ fn test_workspace_scripts_and_tasks_generation() {
     let _ = std::fs::remove_dir_all(&ws_path);
 }
 
+#[test]
+fn test_manual_problem_creation_and_execution() {
+    use algodeck::pdf::{ProblemAnalysis, TestCase};
+    use algodeck::workspace::WorkspaceManager;
+
+    let ws_path = std::env::temp_dir().join(format!("algodeck_test_manual_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&ws_path);
+    let _ = std::fs::create_dir_all(&ws_path);
+
+    let analysis = ProblemAnalysis {
+        problem_id: "sum".to_string(),
+        title: "Suma Liczb".to_string(),
+        time_limit_sec: 1.0,
+        memory_limit_mb: 128,
+        tests: vec![
+            TestCase {
+                id: "test_1".to_string(),
+                name: "Przykład 1".to_string(),
+                input: "2 3\n".to_string(),
+                expected_output: "5\n".to_string(),
+                is_edge_case: false,
+                tag: "[RĘCZNY]".to_string(),
+            },
+        ],
+        used_engine: "Ręczny kreator zadania".to_string(),
+    };
+
+    let p_dir = WorkspaceManager::create_problem(&ws_path, &analysis, None).expect("Utworzenie zadania ręcznego musi się udać");
+    assert!(p_dir.exists());
+
+    let test_in = p_dir.join(".algo/tests/test_1.in");
+    let test_out = p_dir.join(".algo/tests/test_1.out");
+    assert!(test_in.exists(), "test_1.in musi zostać utworzony");
+    assert!(test_out.exists(), "test_1.out musi zostać utworzony");
+    assert_eq!(std::fs::read_to_string(test_in).unwrap().trim(), "2 3");
+    assert_eq!(std::fs::read_to_string(test_out).unwrap().trim(), "5");
+
+    let cpp_file = p_dir.join("sum.cpp");
+    assert!(cpp_file.exists());
+    std::fs::write(&cpp_file, r#"#include <iostream>
+using namespace std;
+int main() {
+    int a, b;
+    if (cin >> a >> b) {
+        cout << (a + b) << endl;
+    }
+    return 0;
+}
+"#).unwrap();
+
+    let settings = AppSettings {
+        workspace_dir: ws_path.to_string_lossy().to_string(),
+        ..AppSettings::default()
+    };
+    let runner = TestExecutor::new(Arc::new(RwLock::new(settings)));
+    let summary = runner.run_all_tests("sum");
+    assert!(summary.success, "Kompilacja i wykonanie testów musi się udać");
+    assert_eq!(summary.total_tests, 1);
+    assert_eq!(summary.passed_count, 1);
+    assert!(summary.all_passed);
+
+    let deck = StreamDeckEngine::new();
+    deck.set_active_problem_with_meta("sum", 1, 1);
+    let state = deck.get_state();
+    assert_eq!(state.active_problem_id.as_deref(), Some("sum"));
+
+    let _ = std::fs::remove_dir_all(&ws_path);
+}
+
+
 
