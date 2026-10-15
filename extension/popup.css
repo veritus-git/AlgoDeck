@@ -173,43 +173,39 @@ body.offline-mode .app-container {
 }
 
 /* ==========================================================================
-   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — IDEALNIE SYMETRYCZNE ODSTĘPY
+   STAN 2: DETECTED MODE (Powiadomienie 1-Klik w popupie rozszerzenia)
    ========================================================================== */
 html.detected-mode,
 body.detected-mode {
-  width: 370px !important;
-  min-width: 370px !important;
-  max-width: 370px !important;
-  height: 100% !important;
-  min-height: 100% !important;
+  width: 380px !important;
+  min-width: 380px !important;
+  max-width: 380px !important;
+  height: auto !important;
+  min-height: 0 !important;
   background-color: var(--bg-main) !important;
   overflow: hidden !important;
   margin: 0 !important;
   padding: 0 !important;
   box-sizing: border-box !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
 }
 
 body.detected-mode .app-container {
-  width: 100% !important;
-  height: 100% !important;
+  width: 380px !important;
+  min-width: 380px !important;
+  max-width: 380px !important;
+  height: auto !important;
   min-height: 0 !important;
   background: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
   box-sizing: border-box !important;
 }
 
 body.detected-mode .view-detected {
   width: 100% !important;
-  height: 100% !important;
-  padding: 13px 16px !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 16px 18px !important;
   box-sizing: border-box !important;
   background: transparent !important;
   display: flex !important;
@@ -229,7 +225,7 @@ body.detected-mode .detected-box-card {
   display: flex !important;
   flex-direction: column !important;
   justify-content: center !important;
-  gap: 6px !important;
+  gap: 8px !important;
 }
 
 .det-top-row {
@@ -253,7 +249,7 @@ body.detected-mode .detected-box-card {
 }
 
 .det-title-text {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
   color: #f8fafc;
 }
@@ -276,13 +272,13 @@ body.detected-mode .detected-box-card {
 }
 
 .det-meta-row {
-  font-size: 11px;
+  font-size: 11.5px;
   color: #94a3b8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
-  margin: 1px 0 3px 0;
+  margin: 0;
   padding: 0;
 }
 
@@ -295,24 +291,26 @@ body.detected-mode .detected-box-card {
   background: linear-gradient(135deg, #0284c7, #0369a1);
   color: #fff;
   border: none;
-  border-radius: 6px;
-  padding: 7px 12px;
-  font-size: 12px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   line-height: 1.2;
-  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
   transition: all 0.15s ease;
   margin: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .btn-det-oneclick:hover {
   background: linear-gradient(135deg, #0369a1, #075985);
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.5);
+  box-shadow: 0 6px 18px rgba(2, 132, 199, 0.5);
   transform: translateY(-0.5px);
 }
 

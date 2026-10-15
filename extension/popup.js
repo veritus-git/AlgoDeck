@@ -66,84 +66,6 @@ let isStartingDaemon = false;
 
 // ---------------- Inicjalizacja ----------------
 document.addEventListener("DOMContentLoaded", async () => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const isOneClickMode = urlParams.get("oneclick") === "1";
-
-  // STAN 2: Tryb powiadomienia 1-Klik po pobraniu PDF
-  if (isOneClickMode) {
-    document.documentElement.classList.add("detected-mode");
-    document.body.classList.add("detected-mode");
-    if (viewOffline) viewOffline.classList.add("hidden");
-    if (viewMain) viewMain.classList.add("hidden");
-    if (viewDetected) viewDetected.classList.remove("hidden");
-
-    const fileName = urlParams.get("file") || "zadanie.pdf";
-    const code = urlParams.get("code") || "";
-
-    const detFilenameText = document.getElementById("det-filename-text");
-    const detCodeText = document.getElementById("det-code-text");
-    const btnDetClose = document.getElementById("btn-det-close");
-    const btnDetOneclick = document.getElementById("btn-det-oneclick");
-
-    if (detFilenameText) detFilenameText.textContent = fileName;
-    if (detCodeText) detCodeText.textContent = code ? code.toUpperCase() : "ZAD";
-
-    // Obsługa zamknięcia krzyżykiem X — zamykamy TYLKO okno powiadomienia.
-    // Plik POZOSTAJE zakolejkowany w Rust (/api/staged-state) i czeka na pasku rozszerzenia!
-    if (btnDetClose) {
-      btnDetClose.addEventListener("click", () => {
-        window.close();
-      });
-    }
-
-    // Obsługa przycisku 1-Klik — tworzymy workspace i otwieramy VS Code
-    if (btnDetOneclick) {
-      btnDetOneclick.addEventListener("click", async () => {
-        btnDetOneclick.disabled = true;
-        btnDetOneclick.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace...`;
-
-        try {
-          const res = await fetch(`${API_BASE}/api/start-staged`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({})
-          });
-          const data = await res.json();
-          if (res.ok && data.success) {
-            const pid = (data.problem_id || "zad").toLowerCase();
-            try {
-              await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
-            } catch (_) {}
-            try {
-              if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-                chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
-              }
-            } catch (_) {}
-
-            if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
-              chrome.action.setBadgeText({ text: "" });
-            }
-            btnDetOneclick.innerHTML = `✓ Gotowe! Uruchomiono VS Code`;
-            setTimeout(() => {
-              window.close();
-            }, 600);
-          } else {
-            alert(`Błąd: ${data.error || data.detail || "Nie udało się utworzyć workspace"}`);
-            btnDetOneclick.disabled = false;
-            btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
-          }
-        } catch (e) {
-          alert("Błąd połączenia z AlgoDeck");
-          btnDetOneclick.disabled = false;
-          btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
-        }
-      });
-    }
-
-    return; // Nie inicjalizujemy reszty interfejsu w trybie 1-klik
-  }
-
-  // STAN STANDARDOWY: Normalny popup rozszerzenia
   restoreStagedStorage();
   setupTabs();
   setupStaging();
@@ -151,30 +73,143 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupTasksGallery();
   setupOfflineStarter();
   setupShutdown();
-
-  if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
-    chrome.action.setBadgeText({ text: "" });
-  }
-
-  document.documentElement.classList.remove("detected-mode");
-  document.body.classList.remove("detected-mode");
+  setupDetectedHandlers();
 
   const isOnline = await checkDaemonHealth();
   if (isOnline) {
     await syncRecentDownloads();
-    await loadExistingStagedState();
+    await updatePopupViewState();
     loadTasks();
   }
+
   setInterval(async () => {
     const online = await checkDaemonHealth();
     if (online) {
       const stagedMore = await syncRecentDownloads();
       if (stagedMore) {
-        await loadExistingStagedState();
+        await updatePopupViewState();
       }
     }
   }, 3000);
 });
+
+// Obsługa widoku 1-Klik w popupie rozszerzenia
+function setupDetectedHandlers() {
+  const btnDetClose = document.getElementById("btn-det-close");
+  const btnDetOneclick = document.getElementById("btn-det-oneclick");
+
+  // Kliknięcie X w widoku 1-Klik:
+  // Zgodnie z wymaganiem: plik POZOSTAJE w kolejce!
+  // Przełączamy popup z widoku 1-Klik na widok główny (view-main) z gotową zieloną pastylką pliku!
+  if (btnDetClose) {
+    btnDetClose.addEventListener("click", async () => {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        await chrome.storage.local.set({ dismiss_oneclick: true });
+      }
+      document.documentElement.classList.remove("detected-mode");
+      document.body.classList.remove("detected-mode");
+      viewDetected.classList.add("hidden");
+      viewMain.classList.remove("hidden");
+      await loadExistingStagedState();
+    });
+  }
+
+  // Kliknięcie 1-Klik: tworzy workspace, otwiera VS Code i zamyka popup
+  if (btnDetOneclick) {
+    btnDetOneclick.addEventListener("click", async () => {
+      btnDetOneclick.disabled = true;
+      btnDetOneclick.innerHTML = `<span class="mini-spinner"></span> Tworzenie workspace...`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/start-staged`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const pid = (data.problem_id || "zad").toLowerCase();
+          try {
+            await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+          } catch (_) {}
+          try {
+            if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
+              chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "open_vscode", problem_id: pid }, () => {});
+            }
+          } catch (_) {}
+
+          if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+            chrome.action.setBadgeText({ text: "" });
+          }
+          if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+            chrome.storage.local.remove(["dismiss_oneclick", "last_downloaded_pdf", "detected_task", "cleared_pdf_name"]);
+          }
+
+          btnDetOneclick.innerHTML = `✓ Gotowe! Uruchomiono VS Code`;
+          setTimeout(() => {
+            window.close();
+          }, 600);
+        } else {
+          alert(`Błąd: ${data.error || data.detail || "Nie udało się utworzyć workspace"}`);
+          btnDetOneclick.disabled = false;
+          btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
+        }
+      } catch (e) {
+        alert("Błąd połączenia z AlgoDeck");
+        btnDetOneclick.disabled = false;
+        btnDetOneclick.innerHTML = `<span class="btn-bolt">⚡</span> Utwórz Workspace i Otwórz VS Code (1 Klik)`;
+      }
+    });
+  }
+}
+
+// Sprawdzenie czy pokazać widok 1-Klik, czy widok główny z zakolejkowanym plikiem
+async function updatePopupViewState() {
+  try {
+    const res = await fetch(`${API_BASE}/api/staged-state`);
+    if (!res.ok) {
+      await loadExistingStagedState();
+      return;
+    }
+    const state = await res.json();
+    const hasPdf = Boolean(state.has_pdf || state.has_staged_pdf);
+
+    let isDismissed = false;
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      const stored = await chrome.storage.local.get(["dismiss_oneclick"]);
+      isDismissed = Boolean(stored.dismiss_oneclick);
+    }
+
+    // Jeśli w Rust jest oczekujące zadanie PDF i użytkownik nie kliknął X:
+    if (hasPdf && !isDismissed) {
+      const detFilenameText = document.getElementById("det-filename-text");
+      const detCodeText = document.getElementById("det-code-text");
+      const pdfName = state.pdf_filename || (state.pdf_path ? state.pdf_path.replace(/^.*[\\\/]/, '') : "zadanie.pdf");
+      const code = state.problem_id || "ZAD";
+
+      if (detFilenameText) detFilenameText.textContent = pdfName;
+      if (detCodeText) detCodeText.textContent = code.toUpperCase();
+
+      document.documentElement.classList.add("detected-mode");
+      document.body.classList.add("detected-mode");
+      viewOffline.classList.add("hidden");
+      viewMain.classList.add("hidden");
+      viewDetected.classList.remove("hidden");
+      return;
+    }
+
+    // W przeciwnym razie: standardowy widok z zakolejkowanym plikiem w kafelku
+    document.documentElement.classList.remove("detected-mode");
+    document.body.classList.remove("detected-mode");
+    viewDetected.classList.add("hidden");
+    viewOffline.classList.add("hidden");
+    viewMain.classList.remove("hidden");
+
+    await loadExistingStagedState();
+  } catch (_) {
+    await loadExistingStagedState();
+  }
+}
 
 
 // ---------------- 1. Start AlgoDeck gdy OFFLINE ----------------
@@ -369,7 +404,7 @@ function setupStaging() {
     } catch (_) {}
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ cleared_pdf_name: removedName });
-      chrome.storage.local.remove(["last_downloaded_pdf"]);
+      chrome.storage.local.remove(["last_downloaded_pdf", "dismiss_oneclick", "detected_task"]);
     }
     if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
       chrome.action.setBadgeText({ text: "" });
@@ -426,8 +461,11 @@ function setupStaging() {
           }
         } catch (_) {}
 
+        if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+          chrome.action.setBadgeText({ text: "" });
+        }
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-          chrome.storage.local.remove(["last_downloaded_pdf", "last_downloaded_zip", "cleared_pdf_name", "cleared_zip_name"]);
+          chrome.storage.local.remove(["last_downloaded_pdf", "last_downloaded_zip", "cleared_pdf_name", "cleared_zip_name", "dismiss_oneclick", "detected_task"]);
         }
         clearStagedStorage("all");
         hasPdfStaged = false;

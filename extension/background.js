@@ -58,7 +58,6 @@ async function isDaemonRunning() {
   }
 }
 
-let activeNotificationWindowId = null;
 const processedDownloads = new Set();
 
 // Obsługa zakończonego pobierania (wyłącznie PDF)
@@ -152,8 +151,8 @@ async function handleCompletedDownload(downloadId) {
       }
     } catch (_) {}
 
-    // 6. Otwórz okienko 1-Kliknięcia (singleton, na macOS/błędzie cichy fallback na kolejkę)
-    await openOneClickWindow(baseName, problemId);
+    // 6. Otwórz popup rozszerzenia pod ikoną ⚡ na pasku przeglądarki (nie jako osobne okno systemu!)
+    await triggerExtensionPopup(baseName, problemId);
 
     // 7. Powiadomienie systemowe
     try {
@@ -162,7 +161,7 @@ async function handleCompletedDownload(downloadId) {
           type: "basic",
           iconUrl: "icons/icon128.png",
           title: "AlgoDeck ⚡ Nowe zadanie",
-          message: `Pobrano: ${baseName}\nKliknij, aby utworzyć Workspace w VS Code.`,
+          message: `Pobrano: ${baseName}\nKliknij ikonę ⚡, aby utworzyć Workspace w VS Code.`,
           priority: 2,
           requireInteraction: false
         });
@@ -173,45 +172,34 @@ async function handleCompletedDownload(downloadId) {
   }
 }
 
-// Otwieranie ultra-kompaktowego okna 1-Klik (z zabezpieczeniem singleton)
-async function openOneClickWindow(baseName, problemId) {
+// Otwieranie natywnego popupu rozszerzenia pod ikoną ⚡ (wewnątrz przeglądarki, ZERO osobnych okien systemu)
+async function triggerExtensionPopup(baseName, problemId) {
   try {
-    // Zamknij poprzednie okno powiadomienia, jeśli wciąż jest otwarte (singleton!)
-    if (activeNotificationWindowId !== null) {
+    await chrome.storage.local.set({
+      detected_task: {
+        filename: baseName,
+        code: problemId,
+        ts: Date.now()
+      },
+      dismiss_oneclick: false
+    });
+
+    if (typeof chrome !== "undefined" && chrome.action && chrome.action.openPopup) {
       try {
-        await chrome.windows.remove(activeNotificationWindowId);
-      } catch (_) {}
-      activeNotificationWindowId = null;
-    }
-
-    const popupUrl = chrome.runtime.getURL(
-      `popup.html?oneclick=1&t=${Date.now()}&file=${encodeURIComponent(baseName)}&code=${encodeURIComponent(problemId || "")}`
-    );
-
-    if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.create) {
-      const win = await chrome.windows.create({
-        url: popupUrl,
-        type: "popup",
-        width: 370,
-        height: 114,
-        focused: true
-      });
-      if (win && win.id) {
-        activeNotificationWindowId = win.id;
+        const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        if (activeTab && activeTab.windowId) {
+          await chrome.action.openPopup({ windowId: activeTab.windowId });
+        } else {
+          await chrome.action.openPopup();
+        }
+        console.log("[AlgoDeck] Pomyślnie otworzono popup rozszerzenia pod ikoną ⚡.");
+      } catch (openErr) {
+        console.log("[AlgoDeck] chrome.action.openPopup oczekuje kliknięcia w ikonę ⚡ (zadanie czeka z odznaką 1):", openErr);
       }
     }
   } catch (err) {
-    console.warn("[AlgoDeck] Błąd otwierania okna 1-Klik (np. macOS Safari) — plik pozostaje w kolejce:", err);
-    // Zadanie jest już bezpiecznie w poczekalni (staging) w Rust z zieloną odznaką "1"
+    console.warn("[AlgoDeck] triggerExtensionPopup błąd:", err);
   }
-}
-
-if (typeof chrome !== "undefined" && chrome.windows && chrome.windows.onRemoved) {
-  chrome.windows.onRemoved.addListener((windowId) => {
-    if (windowId === activeNotificationWindowId) {
-      activeNotificationWindowId = null;
-    }
-  });
 }
 
 // Nasłuchiwanie na żywo zdarzeń pobierania

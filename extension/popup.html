@@ -4,20 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AlgoDeck</title>
-  <script>
-    // Błyskawiczna ochrona przed zombi-oknami przywracanymi przez sesję przeglądarki
-    (function() {
-      try {
-        const p = new URLSearchParams(window.location.search);
-        if (p.get("oneclick") === "1") {
-          const t = parseInt(p.get("t") || "0", 10);
-          if (!t || (Date.now() - t) > 15000) {
-            window.close();
-          }
-        }
-      } catch (_) {}
-    })();
-  </script>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
