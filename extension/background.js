@@ -31,13 +31,12 @@ cleanupRestoredWindows();
 // Weryfikacja czy plik to treść zadania PDF
 function isOlympicTaskFile(item) {
   if (!item) return false;
-  const filename = (item.filename || "").toLowerCase();
+  let filename = (item.filename || "").toLowerCase();
+  if (filename.endsWith(".crdownload")) {
+    filename = filename.slice(0, -11);
+  }
   const url = (item.url || "").toLowerCase().split("?")[0];
   const mime = (item.mime || "").toLowerCase();
-
-  if (filename.endsWith(".crdownload") || filename.endsWith(".tmp")) {
-    return false;
-  }
 
   // Wyłącznie pliki .pdf! ZIPy nie są automatycznie zaciągane z pobrań
   return filename.endsWith(".pdf") || mime.includes("pdf") || url.endsWith(".pdf");
@@ -47,7 +46,7 @@ function isOlympicTaskFile(item) {
 async function isDaemonRunning() {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1000);
+    const timer = setTimeout(() => controller.abort(), 1500);
     const res = await fetch(`${API_BASE}/api/status`, {
       signal: controller.signal,
       cache: "no-store"
@@ -60,48 +59,75 @@ async function isDaemonRunning() {
 }
 
 let activeNotificationWindowId = null;
+const processedDownloads = new Set();
 
 // Obsługa zakończonego pobierania (wyłącznie PDF)
 async function handleCompletedDownload(downloadId) {
   if (!downloadId) return;
 
+  if (processedDownloads.has(downloadId)) {
+    return;
+  }
+  processedDownloads.add(downloadId);
+  if (processedDownloads.size > 100) {
+    const oldest = processedDownloads.values().next().value;
+    processedDownloads.delete(oldest);
+  }
+
   try {
-    const items = await chrome.downloads.search({ id: downloadId });
-    if (!items || items.length === 0) return;
-    const item = items[0];
+    // 1. Sprawdź czy usługa AlgoDeck działa
+    const isOnline = await isDaemonRunning();
+    if (!isOnline) {
+      console.log("[AlgoDeck] Demon wyłączony — pomijam zadanie.");
+      return;
+    }
+
+    // 2. Pobierz informacje o pliku z retry (Chrome potrzebuje chwili na usunięcie .crdownload)
+    let item = null;
+    for (let i = 0; i < 15; i++) {
+      const items = await chrome.downloads.search({ id: downloadId });
+      if (items && items.length > 0) {
+        item = items[0];
+        const fn = (item.filename || "").toLowerCase();
+        if (item.state === "complete" && fn && !fn.endsWith(".crdownload") && !fn.endsWith(".tmp")) {
+          break;
+        }
+      }
+      await new Promise(r => setTimeout(r, 150));
+    }
+
+    if (!item) return;
 
     if (!isOlympicTaskFile(item)) return;
 
     // Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
     try {
       const stored = await chrome.storage.local.get(["auto_detect_downloads"]);
-      if (stored.auto_detect_downloads === false) return;
+      if (stored.auto_detect_downloads === false) {
+        console.log("[AlgoDeck] Autowykrywanie wyłączone w opcjach.");
+        return;
+      }
     } catch (_) {}
 
-    const filename = item.filename || "";
+    let filename = item.filename || "";
+    if (filename.endsWith(".crdownload")) {
+      filename = filename.slice(0, -11);
+    }
     if (!filename) return;
 
     const baseName = filename.replace(/^.*[\\\/]/, '');
 
-    // Kiedy usługa AlgoDeck jest wyłączona — nie podejmuj żadnych akcji
-    const isOnline = await isDaemonRunning();
-    if (!isOnline) {
-      console.log("[AlgoDeck] Demon wyłączony — pomijam zadanie:", baseName);
-      return;
-    }
-
     console.log("[AlgoDeck] Wykryto pobranie zadania PDF:", filename);
 
-    // 1. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
+    // 3. Zapisz w chrome.storage.local (tylko ten najnowszy plik)
     await chrome.storage.local.set({
       last_downloaded_pdf: filename,
       last_pdf_name: baseName,
       last_pdf_ts: Date.now()
     });
-    // Nowe pobranie unieważnia ewentualne poprzednie wyczyszczenie
     await chrome.storage.local.remove(["cleared_pdf_name"]);
 
-    // 2. Wyślij do Rust backendu (staging)
+    // 4. Wyślij do Rust backendu (staging)
     let problemId = "";
     try {
       const res = await fetch(`${API_BASE}/api/stage-by-path`, {
@@ -118,7 +144,7 @@ async function handleCompletedDownload(downloadId) {
       console.warn("[AlgoDeck] Błąd przesyłania do /api/stage-by-path:", err);
     }
 
-    // 3. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
+    // 5. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
     try {
       if (chrome.action && chrome.action.setBadgeText) {
         chrome.action.setBadgeText({ text: "1" });
@@ -126,10 +152,10 @@ async function handleCompletedDownload(downloadId) {
       }
     } catch (_) {}
 
-    // 4. Otwórz okienko 1-Kliknięcia (singleton, na macOS/błędzie cichy fallback na kolejkę)
+    // 6. Otwórz okienko 1-Kliknięcia (singleton, na macOS/błędzie cichy fallback na kolejkę)
     await openOneClickWindow(baseName, problemId);
 
-    // 5. Powiadomienie systemowe
+    // 7. Powiadomienie systemowe
     try {
       if (chrome.notifications && chrome.notifications.create) {
         chrome.notifications.create(`algodeck_${downloadId}_${Date.now()}`, {
@@ -167,7 +193,7 @@ async function openOneClickWindow(baseName, problemId) {
         url: popupUrl,
         type: "popup",
         width: 370,
-        height: 104,
+        height: 114,
         focused: true
       });
       if (win && win.id) {
@@ -200,7 +226,10 @@ if (typeof chrome !== "undefined" && chrome.downloads) {
 
   if (chrome.downloads.onChanged) {
     chrome.downloads.onChanged.addListener((delta) => {
-      if (delta && delta.id && delta.state && delta.state.current === "complete") {
+      if (!delta || !delta.id) return;
+      const isComplete = delta.state && delta.state.current === "complete";
+      const isRenamed = delta.filename && !delta.filename.current.endsWith(".crdownload");
+      if (isComplete || isRenamed) {
         handleCompletedDownload(delta.id);
       }
     });

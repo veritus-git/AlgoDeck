@@ -29,16 +29,20 @@ fi
 DISP="${DISPLAY:-:0}"
 CODE_BIN=$(command -v code || echo "/usr/bin/code")
 
-if [ "$VSCODE_MODE" = "single_window" ]; then
-    OPEN_DIR="$WORKSPACE_DIR"
-else
+[ -n "$ALGODECK_VSCODE_MODE" ] && VSCODE_MODE="$ALGODECK_VSCODE_MODE"
+
+if [ "$VSCODE_MODE" = "separate_windows" ]; then
     OPEN_DIR="$TARGET_DIR"
+    WIN_FLAG="--new-window"
+else
+    OPEN_DIR="$WORKSPACE_DIR"
+    WIN_FLAG="--reuse-window"
 fi
 
 if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ]; then
-    "$CODE_BIN" --reuse-window "$OPEN_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
+    "$CODE_BIN" $WIN_FLAG "$OPEN_DIR" "$TARGET_FILE" >/dev/null 2>&1 &
 else
-    "$CODE_BIN" --reuse-window "$OPEN_DIR" >/dev/null 2>&1 &
+    "$CODE_BIN" $WIN_FLAG "$OPEN_DIR" >/dev/null 2>&1 &
 fi
 
 # Geometria monitora głównego (Primary Display)

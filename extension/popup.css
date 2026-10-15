@@ -173,51 +173,48 @@ body.offline-mode .app-container {
 }
 
 /* ==========================================================================
-   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — ULTRA-ŚCIŚNIĘTE NA OSI Y
+   STAN 2: DETECTED MODE (Powiadomienie 1-Klik) — IDEALNIE SYMETRYCZNE ODSTĘPY
    ========================================================================== */
 html.detected-mode,
 body.detected-mode {
   width: 370px !important;
   min-width: 370px !important;
   max-width: 370px !important;
-  height: auto !important;
-  min-height: 0 !important;
-  background: linear-gradient(145deg, #121a2c, #0d1322) !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  background-color: var(--bg-main) !important;
   overflow: hidden !important;
   margin: 0 !important;
   padding: 0 !important;
   box-sizing: border-box !important;
-}
-
-body.detected-mode {
-  border-top: 2px solid #0284c7;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 body.detected-mode .app-container {
-  width: 370px !important;
-  min-width: 370px !important;
-  max-width: 370px !important;
-  height: auto !important;
+  width: 100% !important;
+  height: 100% !important;
   min-height: 0 !important;
   background: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
   display: flex !important;
   flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
 }
 
 body.detected-mode .view-detected {
-  width: 370px !important;
-  min-width: 370px !important;
-  max-width: 370px !important;
-  height: auto !important;
-  min-height: 0 !important;
-  padding: 8px 12px 9px 12px !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 13px 16px !important;
   box-sizing: border-box !important;
   background: transparent !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: flex-start !important;
+  justify-content: center !important;
   gap: 0 !important;
 }
 
@@ -231,15 +228,15 @@ body.detected-mode .detected-box-card {
   margin: 0 !important;
   display: flex !important;
   flex-direction: column !important;
-  justify-content: flex-start !important;
-  gap: 3px !important;
+  justify-content: center !important;
+  gap: 6px !important;
 }
 
 .det-top-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  line-height: 1.1;
+  line-height: 1.2;
   margin: 0;
   padding: 0;
 }

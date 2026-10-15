@@ -182,10 +182,12 @@ fn run_daemon(port: u16) {
 
         #[cfg(target_os = "windows")]
         {
-            let mut args = vec!["--reuse-window".to_string()];
+            let mut args = Vec::new();
             if settings.vscode_mode == "separate_windows" {
+                args.push("--new-window".to_string());
                 args.push(p_dir.to_string_lossy().to_string());
             } else {
+                args.push("--reuse-window".to_string());
                 args.push(ws_dir.to_string_lossy().to_string());
             }
             let pdf_on_left = settings.pdf_position == "left";
@@ -249,16 +251,24 @@ fn run_daemon(port: u16) {
             }
 
             if !script_launched {
-                let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
-                    "/usr/bin/code"
-                } else {
-                    "code"
-                };
+                let candidates = [
+                    "/usr/local/bin/code",
+                    "/opt/homebrew/bin/code",
+                    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+                    "/usr/bin/code",
+                ];
+                let code_bin = candidates
+                    .iter()
+                    .find(|p| std::path::Path::new(p).exists())
+                    .copied()
+                    .unwrap_or("code");
+
                 let mut cmd = std::process::Command::new(code_bin);
-                cmd.arg("--reuse-window");
                 if settings.vscode_mode == "separate_windows" {
+                    cmd.arg("--new-window");
                     cmd.arg(&p_dir);
                 } else {
+                    cmd.arg("--reuse-window");
                     cmd.arg(&ws_dir);
                 }
                 let pdf_on_left = settings.pdf_position == "left";

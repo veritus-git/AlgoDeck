@@ -465,11 +465,11 @@ async fn auto_import_pdf(
                 let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
                 state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
                 let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-                let (split_pdf, pdf_pos, split_ratio) = {
+                let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone(), s.editor_split_ratio)
+                    (s.open_pdf_in_vscode && is_pdf, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
                 };
-                open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+                open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
                 Json(serde_json::json!({
                     "success": true,
                     "problem_id": analysis.problem_id,
@@ -527,11 +527,11 @@ async fn create_manual(
             let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&pid)).map(|i| i + 1).unwrap_or(total);
             state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, total);
             let _ = state.ws_sender.send(format!("active:{}", pid));
-            let (split_pdf, pdf_pos, split_ratio) = {
+            let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
             };
-            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
             Json(serde_json::json!({ "success": true, "problem_id": pid }))
         }
         Err(e) => Json(serde_json::json!({ "success": false, "detail": e })),
@@ -903,11 +903,11 @@ async fn start_staged(
             let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
             state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
             let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-            let (split_pdf, pdf_pos, split_ratio) = {
+            let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
             };
-            open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+            open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
             let _ = clear_staged(None).await;
 
             return Json(serde_json::json!({
@@ -948,11 +948,11 @@ async fn start_staged(
         let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&analysis.problem_id)).map(|i| i + 1).unwrap_or(total);
         state.streamdeck.set_active_problem_with_meta(&analysis.problem_id, cur_idx, total);
         let _ = state.ws_sender.send(format!("active:{}", analysis.problem_id));
-        let (split_pdf, pdf_pos, split_ratio) = {
+        let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
             let s = state.settings.read().unwrap();
-            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
         };
-        open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+        open_in_vscode_internal(&analysis.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
         let _ = clear_staged(None).await;
 
         return Json(serde_json::json!({
@@ -989,15 +989,22 @@ async fn open_vscode(
     state.streamdeck.set_active_problem_with_meta(&id, cur_idx, total);
     let _ = state.ws_sender.send(format!("active:{}", id));
 
-    let (split_pdf, pdf_pos, split_ratio) = {
+    let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
         let s = state.settings.read().unwrap();
-        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
     };
-    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
     Json(serde_json::json!({ "success": true }))
 }
 
-fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bool, pdf_position: &str, split_ratio: u8) {
+fn open_in_vscode_internal(
+    problem_id: &str,
+    workspace_dir: &Path,
+    split_pdf: bool,
+    pdf_position: &str,
+    split_ratio: u8,
+    vscode_mode: &str,
+) {
     let p_dir = WorkspaceManager::get_problem_dir(workspace_dir, problem_id);
     let sol_file = p_dir.join(format!("{}.cpp", problem_id));
     let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
@@ -1017,10 +1024,18 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
     WorkspaceManager::ensure_problem_scripts(workspace_dir, problem_id, problem_id, 1.0);
 
     let pdf_on_left = pdf_position == "left";
+    let is_separate = vscode_mode == "separate_windows";
+    let target_dir = if is_separate { &p_dir } else { workspace_dir };
 
     #[cfg(target_os = "windows")]
     {
-        let mut args = vec!["--reuse-window".to_string(), workspace_dir.to_string_lossy().to_string()];
+        let mut args = Vec::new();
+        if is_separate {
+            args.push("--new-window".to_string());
+        } else {
+            args.push("--reuse-window".to_string());
+        }
+        args.push(target_dir.to_string_lossy().to_string());
         if split_pdf && pdf_on_left {
             if let Some(ref p) = actual_pdf {
                 args.push(p.to_string_lossy().to_string());
@@ -1072,6 +1087,7 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
                     .env("XAUTHORITY", &xauthority)
                     .env("ALGODECK_PDF_POS", pdf_position)
                     .env("ALGODECK_SPLIT_RATIO", split_ratio.to_string())
+                    .env("ALGODECK_VSCODE_MODE", vscode_mode)
                     .spawn();
                 if res.is_ok() {
                     launched = true;
@@ -1080,14 +1096,25 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
         }
 
         if !launched {
-            let code_bin = if std::path::Path::new("/usr/bin/code").exists() {
-                "/usr/bin/code"
-            } else {
-                "code"
-            };
+            let candidates = [
+                "/usr/local/bin/code",
+                "/opt/homebrew/bin/code",
+                "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+                "/usr/bin/code",
+            ];
+            let code_bin = candidates
+                .iter()
+                .find(|p| std::path::Path::new(p).exists())
+                .copied()
+                .unwrap_or("code");
+
             let mut cmd = std::process::Command::new(code_bin);
-            cmd.arg("--reuse-window");
-            cmd.arg(workspace_dir);
+            if is_separate {
+                cmd.arg("--new-window");
+            } else {
+                cmd.arg("--reuse-window");
+            }
+            cmd.arg(target_dir);
             if split_pdf && pdf_on_left {
                 if let Some(ref p) = actual_pdf {
                     cmd.arg(p);
@@ -1101,16 +1128,22 @@ fn open_in_vscode_internal(problem_id: &str, workspace_dir: &Path, split_pdf: bo
                     cmd.arg(p);
                 }
             }
-            cmd.env("DISPLAY", &display);
-            cmd.env("XAUTHORITY", &xauthority);
+            #[cfg(target_os = "linux")]
+            {
+                cmd.env("DISPLAY", &display);
+                cmd.env("XAUTHORITY", &xauthority);
+            }
             let _ = cmd.spawn();
         }
 
-        let _ = std::process::Command::new("notify-send")
-            .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
-            .env("DISPLAY", &display)
-            .env("XAUTHORITY", &xauthority)
-            .spawn();
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("notify-send")
+                .args(["AlgoDeck", &format!("Otwarto zadanie {} w Visual Studio Code", problem_id.to_uppercase())])
+                .env("DISPLAY", &display)
+                .env("XAUTHORITY", &xauthority)
+                .spawn();
+        }
     }
 }
 
@@ -1155,11 +1188,11 @@ pub fn ensure_vscode_open_for_problem(problem_id: &str, state: &AppState) {
     }
     if !is_vscode_open_for_problem(problem_id) {
         let ws_dir = state.settings.read().unwrap().get_workspace_path();
-        let (split_pdf, pdf_pos, split_ratio) = {
+        let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
             let s = state.settings.read().unwrap();
-            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+            (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
         };
-        open_in_vscode_internal(problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+        open_in_vscode_internal(problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
     }
 }
 
@@ -1325,21 +1358,21 @@ async fn press_streamdeck_key(
             let problems = WorkspaceManager::list_problems(&ws_dir);
             let cur_idx = problems.iter().position(|p| p.problem_id == pid).unwrap_or(0) + 1;
             state.streamdeck.set_active_problem_with_meta(&pid, cur_idx, problems.len().max(1));
-            let (split_pdf, pdf_pos, split_ratio) = {
+            let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
                 let s = state.settings.read().unwrap();
-                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+                (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
             };
-            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+            open_in_vscode_internal(&pid, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
             return Json(serde_json::json!({ "success": true, "action": action }));
         }
 
         match action.as_str() {
             "open_vscode" => {
-                let (split_pdf, pdf_pos, split_ratio) = {
+                let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
                     let s = state.settings.read().unwrap();
-                    (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+                    (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
                 };
-                open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+                open_in_vscode_internal(&active_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
             }
             "run_all" => {
                 ensure_vscode_open_for_problem(&active_id, &state);
@@ -1390,11 +1423,11 @@ async fn press_streamdeck_key(
                 let problems = WorkspaceManager::list_problems(&ws_dir);
                 if let Some(first) = problems.first() {
                     state.streamdeck.set_active_problem_with_meta(&first.problem_id, 1, problems.len().max(1));
-                    let (split_pdf, pdf_pos, split_ratio) = {
+                    let (split_pdf, pdf_pos, split_ratio, vscode_mode) = {
                         let s = state.settings.read().unwrap();
-                        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio)
+                        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone())
                     };
-                    open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio);
+                    open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode);
                 } else {
                     let _ = open::that("http://127.0.0.1:8080/");
                 }
