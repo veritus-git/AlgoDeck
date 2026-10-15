@@ -168,20 +168,25 @@ async function updatePopupViewState() {
   try {
     const res = await fetch(`${API_BASE}/api/staged-state`);
     if (!res.ok) {
-      await loadExistingStagedState();
+      await showMainView();
       return;
     }
     const state = await res.json();
     const hasPdf = Boolean(state.has_pdf || state.has_staged_pdf);
 
     let isDismissed = false;
+    let isFresh = false;
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      const stored = await chrome.storage.local.get(["dismiss_oneclick"]);
+      const stored = await chrome.storage.local.get(["dismiss_oneclick", "detected_task"]);
       isDismissed = Boolean(stored.dismiss_oneclick);
+      if (stored.detected_task && stored.detected_task.ts) {
+        // Powiadomienie 1-Klik jest świeże tylko przez 2 minuty od pobrania pliku
+        isFresh = (Date.now() - stored.detected_task.ts < 120000);
+      }
     }
 
-    // Jeśli w Rust jest oczekujące zadanie PDF i użytkownik nie kliknął X:
-    if (hasPdf && !isDismissed) {
+    // Jeśli w Rust jest oczekujące zadanie PDF, użytkownik nie kliknął X i jest to świeże pobranie:
+    if (hasPdf && !isDismissed && isFresh) {
       const detFilenameText = document.getElementById("det-filename-text");
       const detCodeText = document.getElementById("det-code-text");
       const pdfName = state.pdf_filename || (state.pdf_path ? state.pdf_path.replace(/^.*[\\\/]/, '') : "zadanie.pdf");
@@ -190,6 +195,8 @@ async function updatePopupViewState() {
       if (detFilenameText) detFilenameText.textContent = pdfName;
       if (detCodeText) detCodeText.textContent = code.toUpperCase();
 
+      document.documentElement.classList.remove("offline-mode");
+      document.body.classList.remove("offline-mode");
       document.documentElement.classList.add("detected-mode");
       document.body.classList.add("detected-mode");
       viewOffline.classList.add("hidden");
@@ -199,16 +206,21 @@ async function updatePopupViewState() {
     }
 
     // W przeciwnym razie: standardowy widok z zakolejkowanym plikiem w kafelku
-    document.documentElement.classList.remove("detected-mode");
-    document.body.classList.remove("detected-mode");
-    viewDetected.classList.add("hidden");
-    viewOffline.classList.add("hidden");
-    viewMain.classList.remove("hidden");
-
-    await loadExistingStagedState();
+    await showMainView();
   } catch (_) {
-    await loadExistingStagedState();
+    await showMainView();
   }
+}
+
+async function showMainView() {
+  document.documentElement.classList.remove("detected-mode");
+  document.body.classList.remove("detected-mode");
+  document.documentElement.classList.remove("offline-mode");
+  document.body.classList.remove("offline-mode");
+  viewDetected.classList.add("hidden");
+  viewOffline.classList.add("hidden");
+  viewMain.classList.remove("hidden");
+  await loadExistingStagedState();
 }
 
 
@@ -288,23 +300,32 @@ function setupOfflineStarter() {
 
 // ---------------- 2. Sprawdzanie stanu demona ----------------
 async function checkDaemonHealth() {
-  if (isStartingDaemon) return;
+  if (isStartingDaemon) return false;
 
   try {
     const res = await fetch(`${API_BASE}/api/status`, { cache: "no-store" });
     if (res.ok) {
-      // ONLINE: Schowaj widok offline, pokaż główny
+      // ONLINE: Schowaj widok offline
       document.documentElement.classList.remove("offline-mode");
       document.body.classList.remove("offline-mode");
       viewOffline.classList.add("hidden");
-      viewMain.classList.remove("hidden");
+
+      // BARDZO WAŻNE: Jeśli widok 1-Klik jest widoczny, widok główny MUSI pozostać ukryty!
+      if (!viewDetected.classList.contains("hidden")) {
+        viewMain.classList.add("hidden");
+      } else {
+        viewMain.classList.remove("hidden");
+      }
       return true;
     }
   } catch (e) {}
 
   // OFFLINE: Pokaż TYLKO widok offline ze zwartymi, symetrycznymi marginesami
+  document.documentElement.classList.remove("detected-mode");
+  document.body.classList.remove("detected-mode");
   document.documentElement.classList.add("offline-mode");
   document.body.classList.add("offline-mode");
+  viewDetected.classList.add("hidden");
   viewMain.classList.add("hidden");
   viewOffline.classList.remove("hidden");
   return false;
