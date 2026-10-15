@@ -83,11 +83,19 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const isOnline = await checkDaemonHealth();
   if (isOnline) {
-    await syncOfflineDownloadedFiles();
+    await syncRecentDownloads();
     await loadExistingStagedState();
     loadTasks();
   }
-  setInterval(checkDaemonHealth, 3000);
+  setInterval(async () => {
+    const online = await checkDaemonHealth();
+    if (online) {
+      const stagedMore = await syncRecentDownloads();
+      if (stagedMore) {
+        await loadExistingStagedState();
+      }
+    }
+  }, 3000);
 });
 
 
@@ -189,39 +197,102 @@ async function checkDaemonHealth() {
   return false;
 }
 
-// ---------------- 3. Synchronizacja pobranych w tle plików z poczekalnią ----------------
-async function syncOfflineDownloadedFiles() {
+// ---------------- 3. Inteligentne zaciąganie ostatnich pobrań (PDF i ZIP) ----------------
+async function syncRecentDownloads() {
   try {
+    // 1. Sprawdź aktualny stan poczekalni (staging) w backendzie
+    let hasBackendPdf = false;
+    let hasBackendZip = false;
+    try {
+      const stateRes = await fetch(`${API_BASE}/api/staged-state`);
+      if (stateRes.ok) {
+        const stateData = await stateRes.json();
+        hasBackendPdf = !!(stateData.has_pdf || stateData.has_staged_pdf);
+        hasBackendZip = !!(stateData.has_zip || stateData.has_staged_zip);
+      }
+    } catch (_) {}
+
+    // 2. Odczytaj pamięć lokalną rozszerzenia
+    let stored = {};
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      const stored = await chrome.storage.local.get(["last_downloaded_pdf", "last_downloaded_zip"]);
-      let didStage = false;
-      if (stored.last_downloaded_pdf) {
-        try {
-          const res = await fetch(`${API_BASE}/api/stage-by-path`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ file_path: stored.last_downloaded_pdf })
-          });
-          if (res.ok) didStage = true;
-        } catch (_) {}
-        chrome.storage.local.remove(["last_downloaded_pdf"]);
-      }
-      if (stored.last_downloaded_zip) {
-        try {
-          const res = await fetch(`${API_BASE}/api/stage-by-path`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ file_path: stored.last_downloaded_zip })
-          });
-          if (res.ok) didStage = true;
-        } catch (_) {}
-        chrome.storage.local.remove(["last_downloaded_zip"]);
-      }
-      if (didStage) {
-        await loadExistingStagedState();
+      stored = await chrome.storage.local.get([
+        "last_downloaded_pdf",
+        "last_downloaded_zip",
+        "cleared_pdf_name",
+        "cleared_zip_name"
+      ]);
+    }
+
+    let candidatePdf = stored.last_downloaded_pdf || null;
+    let candidateZip = stored.last_downloaded_zip || null;
+
+    // 3. Jeśli brakuje pliku PDF lub ZIP w poczekalni, sprawdź najnowsze pobrania przeglądarki
+    if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
+      try {
+        const recent = await chrome.downloads.search({
+          limit: 30,
+          orderBy: ["-startTime"]
+        });
+
+        for (const item of recent) {
+          if (!item || item.state !== "complete" || !item.filename) continue;
+          const fn = item.filename;
+          const low = fn.toLowerCase();
+          if (low.endsWith(".crdownload") || low.endsWith(".tmp")) continue;
+
+          const bName = fn.replace(/^.*[\\\/]/, '');
+
+          if (low.endsWith(".pdf") && !hasBackendPdf && !candidatePdf) {
+            if (bName !== stored.cleared_pdf_name) {
+              candidatePdf = fn;
+            }
+          }
+
+          if (low.endsWith(".zip") && !hasBackendZip && !candidateZip) {
+            if (bName !== stored.cleared_zip_name) {
+              candidateZip = fn;
+            }
+          }
+
+          if ((hasBackendPdf || candidatePdf) && (hasBackendZip || candidateZip)) {
+            break;
+          }
+        }
+      } catch (err) {
+        console.warn("[AlgoDeck] Błąd downloads.search w popup:", err);
       }
     }
-  } catch (_) {}
+
+    // 4. Jeśli mamy kandydata PDF, zaciągnij do backendu
+    let didStage = false;
+    if (!hasBackendPdf && candidatePdf) {
+      try {
+        const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_path: candidatePdf })
+        });
+        if (res.ok) didStage = true;
+      } catch (_) {}
+    }
+
+    // 5. Jeśli mamy kandydata ZIP, zaciągnij do backendu
+    if (!hasBackendZip && candidateZip) {
+      try {
+        const res = await fetch(`${API_BASE}/api/stage-by-path`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_path: candidateZip })
+        });
+        if (res.ok) didStage = true;
+      } catch (_) {}
+    }
+
+    return didStage;
+  } catch (e) {
+    console.warn("[AlgoDeck] Błąd syncRecentDownloads:", e);
+    return false;
+  }
 }
 
 // ---------------- 4. Nawigacja Zakładek ----------------
@@ -282,6 +353,7 @@ function setupStaging() {
 
   btnRemovePdf.addEventListener("click", async (e) => {
     e.stopPropagation();
+    const removedName = stagedPdfName.textContent;
     try {
       await fetch(`${API_BASE}/api/clear-staged`, {
         method: "POST",
@@ -289,6 +361,10 @@ function setupStaging() {
         body: JSON.stringify({ file_type: "pdf" })
       });
     } catch (_) {}
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ cleared_pdf_name: removedName });
+      chrome.storage.local.remove(["last_downloaded_pdf"]);
+    }
     clearStagedStorage("pdf");
     stagedPdfPill.classList.add("hidden");
     dropPdfBody.classList.remove("hidden");
@@ -299,6 +375,7 @@ function setupStaging() {
 
   btnRemoveZip.addEventListener("click", async (e) => {
     e.stopPropagation();
+    const removedName = stagedZipName.textContent;
     try {
       await fetch(`${API_BASE}/api/clear-staged`, {
         method: "POST",
@@ -306,6 +383,10 @@ function setupStaging() {
         body: JSON.stringify({ file_type: "zip" })
       });
     } catch (_) {}
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ cleared_zip_name: removedName });
+      chrome.storage.local.remove(["last_downloaded_zip"]);
+    }
     clearStagedStorage("zip");
     stagedZipPill.classList.add("hidden");
     dropZipBody.classList.remove("hidden");
@@ -336,6 +417,9 @@ function setupStaging() {
           }
         } catch (_) {}
 
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.remove(["last_downloaded_pdf", "last_downloaded_zip", "cleared_pdf_name", "cleared_zip_name"]);
+        }
         clearStagedStorage("all");
         hasPdfStaged = false;
         hasZipStaged = false;
