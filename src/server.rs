@@ -2377,6 +2377,7 @@ pub fn start_detached_daemon() {
     }
 
     crate::streamdeck::kill_streamdeck_conflicts();
+    crate::native_host::ensure_native_manifests();
 
     #[cfg(target_os = "linux")]
     {

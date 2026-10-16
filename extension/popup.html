@@ -53,6 +53,7 @@
           <span class="brand-title">AlgoDeck</span>
         </div>
         <div class="header-actions">
+          <button type="button" id="btn-header-tab" class="btn-header-tab" title="Otwórz AlgoDeck w pełnej karcie (nie zamyka się przy wyborze/przeciąganiu plików)">⛶</button>
           <button type="button" id="btn-header-settings" class="btn-header-settings" title="Ustawienia i konfiguracja">⚙</button>
           <button type="button" id="btn-header-stop" class="btn-header-stop" title="Zatrzymaj AlgoDeck i wyłącz daemona">Wyłącz</button>
         </div>
@@ -76,7 +77,7 @@
                   <span class="card-icon">📄</span>
                   <div class="drop-card-meta">
                     <span class="card-title">Treść zadania (.pdf)</span>
-                    <p class="drop-hint">Przeciągnij plik PDF tutaj</p>
+                    <p class="drop-hint">Przeciągnij plik PDF tutaj lub kliknij</p>
                   </div>
                 </div>
                 <button type="button" class="btn-file-select" id="btn-browse-pdf">Wybierz PDF</button>
@@ -100,7 +101,7 @@
                   <span class="card-icon">📦</span>
                   <div class="drop-card-meta">
                     <span class="card-title">Testy w archiwum (.zip)</span>
-                    <p class="drop-hint">Przeciągnij archiwum ZIP tutaj</p>
+                    <p class="drop-hint">Przeciągnij archiwum ZIP tutaj lub kliknij</p>
                   </div>
                 </div>
                 <button type="button" class="btn-file-select" id="btn-browse-zip">Wybierz ZIP</button>
@@ -116,6 +117,10 @@
                 <button type="button" class="btn-remove-file" id="btn-remove-zip" title="Usuń plik">✕</button>
               </div>
             </div>
+          </div>
+
+          <div class="linux-tip-box" id="linux-tip-box">
+            💡 <span>Wskazówka: jeśli wybierasz lub przeciągasz pliki z Dolphin/katalogu, możesz kliknąć <button type="button" id="btn-link-tab" class="btn-link-inline">⛶ Otwórz w karcie</button>, aby okno nie znikało.</span>
           </div>
 
           <button type="button" id="btn-submit-files" class="btn-primary w-full" disabled>

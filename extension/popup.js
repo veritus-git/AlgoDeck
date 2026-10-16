@@ -66,6 +66,12 @@ let isStartingDaemon = false;
 
 // ---------------- Inicjalizacja ----------------
 document.addEventListener("DOMContentLoaded", async () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const isTab = urlParams.get("mode") === "tab" || window.innerWidth > 550;
+  if (isTab) {
+    document.body.classList.add("mode-tab");
+  }
+
   restoreStagedStorage();
   setupTabs();
   setupStaging();
@@ -74,6 +80,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupOfflineStarter();
   setupShutdown();
   setupDetectedHandlers();
+
+  const autoTrigger = urlParams.get("trigger");
+  if (autoTrigger === "pdf" || autoTrigger === "zip") {
+    setTimeout(() => {
+      const el = autoTrigger === "pdf" ? fileInputPdf : fileInputZip;
+      if (el) el.click();
+    }, 250);
+  }
 
   const isOnline = await checkDaemonHealth();
   if (isOnline) {
@@ -431,10 +445,25 @@ function setupTabs() {
 
 // ---------------- 5. Staging Plików PDF i ZIP ----------------
 function setupStaging() {
+  const isLinux = /Linux/i.test(navigator.platform || navigator.userAgent);
+  const isTabMode = window.location.search.includes("mode=tab") || window.innerWidth > 550;
+
+  function triggerPicker(type) {
+    if (isLinux && !isTabMode) {
+      if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
+        chrome.tabs.create({ url: chrome.runtime.getURL(`popup.html?mode=tab&trigger=${type}`) });
+        window.close();
+        return;
+      }
+    }
+    if (type === "pdf") fileInputPdf.click();
+    else fileInputZip.click();
+  }
+
   // Kliknięcie w dowolne miejsce karty wywołuje wybór pliku (chyba że kliknięto usunięcie)
   dropPdf.addEventListener("click", (e) => {
     if (e.target.closest("#btn-remove-pdf") || e.target.closest("#staged-pdf-pill")) return;
-    fileInputPdf.click();
+    triggerPicker("pdf");
   });
   fileInputPdf.addEventListener("change", (e) => {
     if (e.target.files.length > 0) uploadStagedFile(e.target.files[0], "pdf");
@@ -442,7 +471,7 @@ function setupStaging() {
 
   dropZip.addEventListener("click", (e) => {
     if (e.target.closest("#btn-remove-zip") || e.target.closest("#staged-zip-pill")) return;
-    fileInputZip.click();
+    triggerPicker("zip");
   });
   fileInputZip.addEventListener("change", (e) => {
     if (e.target.files.length > 0) uploadStagedFile(e.target.files[0], "zip");
@@ -942,6 +971,34 @@ function setupShutdown() {
         chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
       } else {
         window.open("settings.html", "_blank");
+      }
+    });
+  }
+
+  const btnHeaderTab = document.getElementById("btn-header-tab");
+  if (btnHeaderTab) {
+    if (window.location.search.includes("mode=tab") || window.innerWidth > 550) {
+      btnHeaderTab.style.display = "none";
+    } else {
+      btnHeaderTab.addEventListener("click", () => {
+        if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
+          chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?mode=tab") });
+          window.close();
+        } else {
+          window.open("popup.html?mode=tab", "_blank");
+        }
+      });
+    }
+  }
+
+  const btnLinkTab = document.getElementById("btn-link-tab");
+  if (btnLinkTab) {
+    btnLinkTab.addEventListener("click", () => {
+      if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
+        chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?mode=tab") });
+        window.close();
+      } else {
+        window.open("popup.html?mode=tab", "_blank");
       }
     });
   }

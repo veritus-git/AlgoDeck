@@ -138,3 +138,121 @@ fn handle_native_message(msg: &Value) -> Value {
         }
     }
 }
+
+pub fn ensure_native_manifests() {
+    let allowed_origins = vec![
+        "chrome-extension://jglgkkeklbipodmhcncnmdnippdijjcp/",
+        "chrome-extension://cdgdnkfkkbadljdgjjjbaefefcbelplf/",
+        "chrome-extension://jnfimdneicefaomnlikmogffogcadabf/",
+    ];
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let bin_dir = home.join(".local/bin");
+            let _ = std::fs::create_dir_all(&bin_dir);
+            let wrapper_path = bin_dir.join("algodeck-native-host");
+
+            let current_exe = std::env::current_exe().unwrap_or_else(|_| bin_dir.join("algodeck"));
+            let wrapper_script = format!(
+                "#!/bin/sh\nexec \"{}\" native-host\n",
+                current_exe.to_string_lossy()
+            );
+            let _ = std::fs::write(&wrapper_path, wrapper_script);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&wrapper_path, std::fs::Permissions::from_mode(0o755));
+            }
+
+            let manifest = serde_json::json!({
+                "name": "com.algodeck.launcher",
+                "description": "AlgoDeck 100% Rust Native Messaging Host",
+                "path": wrapper_path.to_string_lossy(),
+                "type": "stdio",
+                "allowed_origins": allowed_origins
+            });
+            let manifest_str = serde_json::to_string_pretty(&manifest).unwrap_or_default();
+
+            let target_dirs = [
+                home.join(".config/google-chrome/NativeMessagingHosts"),
+                home.join(".config/chromium/NativeMessagingHosts"),
+                home.join(".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"),
+                home.join(".config/microsoft-edge/NativeMessagingHosts"),
+                home.join(".config/vivaldi/NativeMessagingHosts"),
+                home.join(".config/opera/NativeMessagingHosts"),
+            ];
+
+            for dir in &target_dirs {
+                let _ = std::fs::create_dir_all(dir);
+                let manifest_file = dir.join("com.algodeck.launcher.json");
+                let _ = std::fs::write(manifest_file, &manifest_str);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let bin_dir = home.join(".local/bin");
+            let _ = std::fs::create_dir_all(&bin_dir);
+            let wrapper_path = bin_dir.join("algodeck-native-host");
+
+            let current_exe = std::env::current_exe().unwrap_or_else(|_| bin_dir.join("algodeck"));
+            let wrapper_script = format!(
+                "#!/bin/sh\nexec \"{}\" native-host\n",
+                current_exe.to_string_lossy()
+            );
+            let _ = std::fs::write(&wrapper_path, wrapper_script);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&wrapper_path, std::fs::Permissions::from_mode(0o755));
+            }
+
+            let manifest = serde_json::json!({
+                "name": "com.algodeck.launcher",
+                "description": "AlgoDeck 100% Rust Native Messaging Host for macOS",
+                "path": wrapper_path.to_string_lossy(),
+                "type": "stdio",
+                "allowed_origins": allowed_origins
+            });
+            let manifest_str = serde_json::to_string_pretty(&manifest).unwrap_or_default();
+
+            let target_dirs = [
+                home.join("Library/Application Support/Google/Chrome/NativeMessagingHosts"),
+                home.join("Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"),
+                home.join("Library/Application Support/Chromium/NativeMessagingHosts"),
+                home.join("Library/Application Support/Microsoft Edge/NativeMessagingHosts"),
+                home.join("Library/Application Support/Vivaldi/NativeMessagingHosts"),
+            ];
+
+            for dir in &target_dirs {
+                let _ = std::fs::create_dir_all(dir);
+                let manifest_file = dir.join("com.algodeck.launcher.json");
+                let _ = std::fs::write(manifest_file, &manifest_str);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let app_dir = std::path::PathBuf::from(&local).join("AlgoDeck");
+            let _ = std::fs::create_dir_all(&app_dir);
+            let exe_path = std::env::current_exe().unwrap_or_else(|_| app_dir.join("algodeck.exe"));
+            let manifest = serde_json::json!({
+                "name": "com.algodeck.launcher",
+                "description": "AlgoDeck 100% Rust Native Messaging Host for Windows",
+                "path": exe_path.to_string_lossy(),
+                "type": "stdio",
+                "allowed_origins": allowed_origins
+            });
+            let manifest_file = app_dir.join("com.algodeck.launcher.json");
+            if let Ok(manifest_str) = serde_json::to_string_pretty(&manifest) {
+                let _ = std::fs::write(&manifest_file, &manifest_str);
+            }
+        }
+    }
+}
+

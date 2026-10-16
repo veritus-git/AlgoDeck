@@ -66,6 +66,9 @@ fn main() {
         return;
     }
 
+    // Automatyczna samonaprawa manifestów native host przy każdym uruchomieniu
+    native_host::ensure_native_manifests();
+
     let cli = Cli::parse();
 
     match cli.command {
