@@ -197,10 +197,10 @@ fn run_daemon(port: u16) {
                 }
             }
             "new_task" => {
-                let _ = open::that("http://127.0.0.1:8080/#new");
+                server::open_browser_foreground("http://127.0.0.1:8080/#new");
             }
             "open_settings" => {
-                let _ = open::that("http://127.0.0.1:8080/settings");
+                server::open_browser_foreground("http://127.0.0.1:8080/settings");
             }
             "open_menu" => {
                 let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
@@ -229,7 +229,7 @@ fn run_daemon(port: u16) {
                     let _ = ws_sender_cb.send(format!("active:{}", first.problem_id));
                     open_in_vscode(&first.problem_id);
                 } else {
-                    let _ = open::that("http://127.0.0.1:8080/");
+                    server::open_browser_foreground("http://127.0.0.1:8080/");
                 }
             }
             "next_task" | "prev_task" => {

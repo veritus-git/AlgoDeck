@@ -92,9 +92,12 @@ function runInAlgoTerminal(name, scriptName, pdir) {
 
     const isWin = process.platform === 'win32';
     const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
+    const promptMsg = 'Naciśnij Enter, aby zamknąć...';
     const cmd = isWin
-        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
-        : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
+        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript} & pause & exit` : `.algo\\${actualScript} & pause & exit`)
+        : (pdir
+            ? `cd "${pdir}" && bash .algo/${actualScript}; echo ''; read -p "${promptMsg}" -r; exit`
+            : `bash .algo/${actualScript}; echo ''; read -p "${promptMsg}" -r; exit`);
 
     let term = vscode.window.terminals.find(t => t.name === name || t.name === 'AlgoDeck');
     const isNew = !term;
@@ -228,6 +231,24 @@ function getRequestHandler() {
             const file = parsed.searchParams.get('file');
 
             if (parsed.pathname === '/open') {
+                const mode = parsed.searchParams.get('mode') || '';
+                const isSeparate = mode === 'separate_windows';
+                const targetPdir = pdir ? path.resolve(pdir) : null;
+                const currentWs = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
+                    ? path.resolve(vscode.workspace.workspaceFolders[0].uri.fsPath)
+                    : null;
+
+                // Jeśli włączony jest tryb osobnych workspace'ów i to okno ma inny workspace niż zadanie:
+                if (isSeparate && targetPdir && currentWs && currentWs !== targetPdir) {
+                    const folderUri = vscode.Uri.file(targetPdir);
+                    await vscode.commands.executeCommand('vscode.openFolder', folderUri, {
+                        forceReuseWindow: true
+                    });
+                    res.writeHead(200);
+                    res.end(JSON.stringify({ status: 'ok', action: 'switch_workspace', pdir: targetPdir }));
+                    return;
+                }
+
                 await openProblemFile(file, pdir);
                 res.writeHead(200);
                 res.end(JSON.stringify({ status: 'ok', action: 'open' }));
@@ -436,7 +457,17 @@ function activate(context) {
                 } else if (data.action === 'kill') {
                     handleKill();
                 } else if (data.action === 'open') {
-                    openProblemFile(data.file, pdir);
+                    const targetPdir = pdir ? path.resolve(pdir) : null;
+                    const currentWs = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
+                        ? path.resolve(vscode.workspace.workspaceFolders[0].uri.fsPath)
+                        : null;
+                    if (data.mode === 'separate_windows' && targetPdir && currentWs && currentWs !== targetPdir) {
+                        vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(targetPdir), {
+                            forceReuseWindow: true
+                        });
+                    } else {
+                        openProblemFile(data.file, pdir);
+                    }
                 }
 
                 try { fs.writeFileSync(ackPath, JSON.stringify({ ack: true, time: Date.now() })); } catch (_) {}

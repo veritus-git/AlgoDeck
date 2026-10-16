@@ -433,8 +433,96 @@ fn apply_autostart_setting(enable: bool) {
     }
 }
 
+fn which_bin_exists(bin: &str) -> bool {
+    if let Ok(path) = std::env::var("PATH") {
+        for p in std::env::split_paths(&path) {
+            let full = p.join(bin);
+            if full.exists() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn open_browser_foreground(url: &str) {
+    let url_str = url.to_string();
+
+    #[cfg(target_os = "linux")]
+    {
+        let mut launched = false;
+        if let Ok(output) = std::process::Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
+            let def_desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !def_desktop.is_empty() && def_desktop.ends_with(".desktop") {
+                if std::process::Command::new("gtk-launch").arg(&def_desktop).arg(&url_str).spawn().is_ok() {
+                    launched = true;
+                }
+            }
+        }
+
+        if !launched {
+            let browsers = ["brave-browser", "google-chrome", "chromium", "firefox", "microsoft-edge", "opera", "vivaldi"];
+            for b in browsers {
+                if which_bin_exists(b) {
+                    if std::process::Command::new(b).arg(&url_str).spawn().is_ok() {
+                        launched = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !launched {
+            let _ = open::that(&url_str);
+        }
+
+        std::thread::spawn(move || {
+            for delay in [100, 300, 600] {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                let _ = std::process::Command::new("wmctrl").args(["-a", "AlgoDeck"]).output();
+                let _ = std::process::Command::new("xdotool").args(["search", "--name", "AlgoDeck", "windowactivate"]).output();
+
+                for class_name in ["brave-browser", "google-chrome", "chromium", "firefox", "microsoft-edge", "vivaldi"] {
+                    let _ = std::process::Command::new("wmctrl").args(["-x", "-a", class_name]).output();
+                    let _ = std::process::Command::new("xdotool").args(["search", "--onlyvisible", "--class", class_name, "windowactivate"]).output();
+                }
+            }
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = open::that(&url_str);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let script = r#"
+                tell application "System Events"
+                    set bList to {"Brave Browser", "Google Chrome", "Arc", "Chromium", "Safari", "Firefox", "Microsoft Edge"}
+                    repeat with b in bList
+                        if exists (process b) then
+                            tell application b to activate
+                            exit repeat
+                        end if
+                    end repeat
+                end tell
+            "#;
+            let _ = std::process::Command::new("osascript").args(["-e", script]).output();
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = open::that(&url_str);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let ps_cmd = r#"$w = New-Object -ComObject WScript.Shell; $p = Get-Process | Where-Object { $_.MainWindowTitle -like '*AlgoDeck*' -or $_.ProcessName -match 'chrome|brave|msedge|firefox' } | Sort-Object -Descending -Property StartTime | Select-Object -First 1; if ($p) { $w.AppActivate($p.MainWindowTitle) }"#;
+            let _ = std::process::Command::new("powershell").args(["-NoProfile", "-Command", ps_cmd]).spawn();
+        });
+    }
+}
+
 async fn open_gui() -> Json<serde_json::Value> {
-    let _ = open::that("http://127.0.0.1:8080/");
+    open_browser_foreground("http://127.0.0.1:8080/");
     Json(serde_json::json!({ "success": true }))
 }
 
@@ -1343,7 +1431,7 @@ pub fn open_in_vscode_internal(
     // 1. Spróbuj otworzyć plik natychmiast przez mostek IPC bez uruchamiania procesów CLI
     let sol_str = sol_file.to_string_lossy().to_string();
     let p_dir_str = p_dir.to_string_lossy().to_string();
-    if send_bridge_open(problem_id, &p_dir_str, &sol_str) {
+    if send_bridge_open(problem_id, &p_dir_str, &sol_str, vscode_mode) {
         return;
     }
 
@@ -1364,11 +1452,7 @@ pub fn open_in_vscode_internal(
     #[cfg(target_os = "windows")]
     {
         let mut args = Vec::new();
-        if is_separate {
-            args.push("--new-window".to_string());
-        } else {
-            args.push("--reuse-window".to_string());
-        }
+        args.push("--reuse-window".to_string());
         args.push(target_dir.to_string_lossy().to_string());
         if split_pdf && pdf_on_left {
             if let Some(ref p) = actual_pdf {
@@ -1421,11 +1505,7 @@ pub fn open_in_vscode_internal(
             .unwrap_or("code");
 
         let mut cmd = std::process::Command::new(code_bin);
-        if is_separate {
-            cmd.arg("--new-window");
-        } else {
-            cmd.arg("--reuse-window");
-        }
+        cmd.arg("--reuse-window");
         cmd.arg(target_dir);
 
         #[cfg(target_os = "macos")]
@@ -1714,7 +1794,7 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     false
 }
 
-pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str) -> bool {
+pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str, vscode_mode: &str) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;
@@ -1724,9 +1804,10 @@ pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str) 
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(120)));
                 let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(120)));
                 let req = format!(
-                    "POST /open?pdir={}&file={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    "POST /open?pdir={}&file={}&mode={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                     url_encode(p_dir_str),
-                    url_encode(file_path_str)
+                    url_encode(file_path_str),
+                    url_encode(vscode_mode)
                 );
                 if stream.write_all(req.as_bytes()).is_ok() {
                     let mut buf = [0u8; 1024];
@@ -1741,7 +1822,7 @@ pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str) 
     }
 
     for port in get_candidate_bridge_ports() {
-        let bridge_url = format!("http://127.0.0.1:{}/open?pdir={}&file={}", port, url_encode(p_dir_str), url_encode(file_path_str));
+        let bridge_url = format!("http://127.0.0.1:{}/open?pdir={}&file={}&mode={}", port, url_encode(p_dir_str), url_encode(file_path_str), url_encode(vscode_mode));
         if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(120)).call() {
             if res.status() == 200 {
                 return true;
@@ -1797,7 +1878,7 @@ pub fn spawn_in_system_terminal(endpoint: &str, p_dir: &std::path::Path, _proble
     #[cfg(target_os = "linux")]
     {
         let script_str = script_path.to_string_lossy();
-        let cmd = format!("cd '{}' && bash '{}'; echo ''; read -p 'Naciśnij Enter, aby zamknąć...' -r", p_dir.display(), script_str);
+        let cmd = format!("cd '{}' && bash '{}'; echo ''; read -p 'Naciśnij Enter, aby zamknąć...' -r; exit", p_dir.display(), script_str);
 
         let p_dir_str = p_dir.to_string_lossy().to_string();
         let terminals = [
@@ -2194,10 +2275,10 @@ async fn press_streamdeck_key(
                 }
             }
             "new_task" => {
-                let _ = open::that("http://127.0.0.1:8080/#new");
+                open_browser_foreground("http://127.0.0.1:8080/#new");
             }
             "open_settings" => {
-                let _ = open::that("http://127.0.0.1:8080/settings");
+                open_browser_foreground("http://127.0.0.1:8080/settings");
             }
             "open_menu" => {
                 let problems = WorkspaceManager::list_problems(&ws_dir);
@@ -2226,7 +2307,7 @@ async fn press_streamdeck_key(
                     };
                     open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
                 } else {
-                    let _ = open::that("http://127.0.0.1:8080/");
+                    open_browser_foreground("http://127.0.0.1:8080/");
                 }
             }
             "prev_task" => {

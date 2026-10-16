@@ -887,14 +887,23 @@ fi
 }"#;
         let _ = fs::write(p_tasks_path, universal_tasks_json);
 
-        // Problem .vscode/settings.json (disable workspace trust restrictions)
+        // Problem .vscode/settings.json (disable workspace trust restrictions + auto-close terminal on exit)
         let p_settings_path = p_vscode.join("settings.json");
-        if !p_settings_path.exists() {
-            let p_settings_json = r#"{
-    "security.workspace.trust.enabled": false,
-    "window.newWindowDimensions": "maximized"
-}"#;
-            let _ = fs::write(p_settings_path, p_settings_json);
+        let mut p_settings = if p_settings_path.exists() {
+            fs::read_to_string(&p_settings_path)
+                .ok()
+                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        if let Some(obj) = p_settings.as_object_mut() {
+            obj.insert("security.workspace.trust.enabled".to_string(), serde_json::json!(false));
+            obj.insert("window.newWindowDimensions".to_string(), serde_json::json!("maximized"));
+            obj.insert("terminal.integrated.closeOnExit".to_string(), serde_json::json!("always"));
+        }
+        if let Ok(ser) = serde_json::to_string_pretty(&p_settings) {
+            let _ = fs::write(p_settings_path, ser);
         }
 
         // 6. Ensure Root Workspace .vscode/tasks.json
@@ -950,14 +959,23 @@ fi
 }"#;
         let _ = fs::write(root_tasks_path, root_tasks_json);
 
-        // Root Workspace .vscode/settings.json (disable workspace trust restrictions)
+        // Root Workspace .vscode/settings.json (disable workspace trust restrictions + auto-close terminal on exit)
         let root_settings_path = root_vscode.join("settings.json");
-        if !root_settings_path.exists() {
-            let root_settings_json = r#"{
-    "security.workspace.trust.enabled": false,
-    "window.newWindowDimensions": "maximized"
-}"#;
-            let _ = fs::write(root_settings_path, root_settings_json);
+        let mut root_settings = if root_settings_path.exists() {
+            fs::read_to_string(&root_settings_path)
+                .ok()
+                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        if let Some(obj) = root_settings.as_object_mut() {
+            obj.insert("security.workspace.trust.enabled".to_string(), serde_json::json!(false));
+            obj.insert("window.newWindowDimensions".to_string(), serde_json::json!("maximized"));
+            obj.insert("terminal.integrated.closeOnExit".to_string(), serde_json::json!("always"));
+        }
+        if let Ok(ser) = serde_json::to_string_pretty(&root_settings) {
+            let _ = fs::write(root_settings_path, ser);
         }
     }
 }

@@ -461,7 +461,7 @@ async fn test_vscode_detection_and_multi_socket_bridge() {
             assert!(sent, "send_bridge_request musi nawiązać połączenie przez socket");
 
             // send_bridge_open powinien natychmiast przekazać polecenie otwarcia pliku
-            let opened = algodeck::server::send_bridge_open("kol", "/tmp/pdir", "/tmp/pdir/kol.cpp");
+            let opened = algodeck::server::send_bridge_open("kol", "/tmp/pdir", "/tmp/pdir/kol.cpp", "auto");
             assert!(opened, "send_bridge_open musi nawiązać połączenie przez socket i otworzyć plik");
 
             let _ = handle.join();
