@@ -857,7 +857,8 @@ fi
                 "reveal": "always",
                 "panel": "shared",
                 "focus": true,
-                "clear": true
+                "clear": true,
+                "showReuseMessage": true
             },
             "group": {
                 "kind": "build",
@@ -876,7 +877,8 @@ fi
                 "reveal": "always",
                 "panel": "shared",
                 "focus": true,
-                "clear": true
+                "clear": true,
+                "showReuseMessage": true
             },
             "group": {
                 "kind": "test",
@@ -887,7 +889,7 @@ fi
 }"#;
         let _ = fs::write(p_tasks_path, universal_tasks_json);
 
-        // Problem .vscode/settings.json (disable workspace trust restrictions + auto-close terminal on exit)
+        // Problem .vscode/settings.json (disable workspace trust restrictions)
         let p_settings_path = p_vscode.join("settings.json");
         let mut p_settings = if p_settings_path.exists() {
             fs::read_to_string(&p_settings_path)
@@ -900,7 +902,7 @@ fi
         if let Some(obj) = p_settings.as_object_mut() {
             obj.insert("security.workspace.trust.enabled".to_string(), serde_json::json!(false));
             obj.insert("window.newWindowDimensions".to_string(), serde_json::json!("maximized"));
-            obj.insert("terminal.integrated.closeOnExit".to_string(), serde_json::json!("always"));
+            obj.remove("terminal.integrated.closeOnExit");
         }
         if let Ok(ser) = serde_json::to_string_pretty(&p_settings) {
             let _ = fs::write(p_settings_path, ser);
@@ -929,7 +931,8 @@ fi
                 "reveal": "always",
                 "panel": "shared",
                 "focus": true,
-                "clear": true
+                "clear": true,
+                "showReuseMessage": true
             },
             "group": {
                 "kind": "build",
@@ -948,7 +951,8 @@ fi
                 "reveal": "always",
                 "panel": "shared",
                 "focus": true,
-                "clear": true
+                "clear": true,
+                "showReuseMessage": true
             },
             "group": {
                 "kind": "test",
@@ -959,7 +963,7 @@ fi
 }"#;
         let _ = fs::write(root_tasks_path, root_tasks_json);
 
-        // Root Workspace .vscode/settings.json (disable workspace trust restrictions + auto-close terminal on exit)
+        // Root Workspace .vscode/settings.json (disable workspace trust restrictions)
         let root_settings_path = root_vscode.join("settings.json");
         let mut root_settings = if root_settings_path.exists() {
             fs::read_to_string(&root_settings_path)
@@ -972,7 +976,7 @@ fi
         if let Some(obj) = root_settings.as_object_mut() {
             obj.insert("security.workspace.trust.enabled".to_string(), serde_json::json!(false));
             obj.insert("window.newWindowDimensions".to_string(), serde_json::json!("maximized"));
-            obj.insert("terminal.integrated.closeOnExit".to_string(), serde_json::json!("always"));
+            obj.remove("terminal.integrated.closeOnExit");
         }
         if let Ok(ser) = serde_json::to_string_pretty(&root_settings) {
             let _ = fs::write(root_settings_path, ser);

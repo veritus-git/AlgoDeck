@@ -82,7 +82,47 @@ function handleKill() {
     }
 }
 
-function runInAlgoTerminal(name, scriptName, pdir) {
+function createAlgoTask(name, scriptName, pdir) {
+    const isWin = process.platform === 'win32';
+    const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
+
+    let wsFolder = undefined;
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        if (pdir) {
+            const pNorm = path.resolve(pdir);
+            wsFolder = vscode.workspace.workspaceFolders.find(f => {
+                const fNorm = path.resolve(f.uri.fsPath);
+                return pNorm === fNorm || pNorm.startsWith(fNorm + path.sep);
+            }) || vscode.workspace.workspaceFolders[0];
+        } else {
+            wsFolder = vscode.workspace.workspaceFolders[0];
+        }
+    }
+    const scope = wsFolder || vscode.TaskScope.Workspace;
+
+    const cmd = isWin
+        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
+        : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
+
+    const execution = new vscode.ShellExecution(cmd, { cwd: pdir || undefined });
+    const task = new vscode.Task(
+        { type: 'shell', task: name },
+        scope,
+        name,
+        'AlgoDeck',
+        execution
+    );
+    task.presentationOptions = {
+        reveal: vscode.TaskRevealKind.Always,
+        panel: vscode.TaskPanelKind.Shared,
+        focus: true,
+        clear: true,
+        showReuseMessage: true
+    };
+    return task;
+}
+
+async function runAlgoTask(name, scriptName, pdir) {
     const now = Date.now();
     if (lastActionType === name && (now - lastActionTime) < 250) {
         return true;
@@ -90,36 +130,70 @@ function runInAlgoTerminal(name, scriptName, pdir) {
     lastActionType = name;
     lastActionTime = now;
 
+    handleKill();
+
     const isWin = process.platform === 'win32';
     const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
-    const promptMsg = 'Naciśnij Enter, aby zamknąć...';
-    const cmd = isWin
-        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript} & pause & exit` : `.algo\\${actualScript} & pause & exit`)
-        : (pdir
-            ? `cd "${pdir}" && bash .algo/${actualScript}; echo ''; read -p "${promptMsg}" -r; exit`
-            : `bash .algo/${actualScript}; echo ''; read -p "${promptMsg}" -r; exit`);
+    const taskKeyword = name.includes('ODPAL') ? 'ODPAL' : 'TESTUJ';
 
-    let term = vscode.window.terminals.find(t => t.name === name || t.name === 'AlgoDeck');
-    const isNew = !term;
-    if (isNew) {
-        term = vscode.window.createTerminal({
-            name: name,
-            cwd: pdir || undefined
-        });
+    // 1. Uruchom zadanie z tasks.json (dokładnie tak jak z menu VS Code: Terminal -> Run Task)
+    try {
+        const allTasks = await Promise.race([
+            vscode.tasks.fetchTasks(),
+            new Promise(res => setTimeout(() => res([]), 250))
+        ]);
+        if (allTasks && allTasks.length > 0) {
+            const match = allTasks.find(t => {
+                if (!t.name) return false;
+                if (t.name === name || t.name === `AlgoDeck: ${taskKeyword}`) return true;
+                if (t.name.includes(taskKeyword) && t.name.includes('AlgoDeck')) return true;
+                return false;
+            });
+            if (match) {
+                await vscode.tasks.executeTask(match);
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn('[AlgoDeck Bridge] fetchTasks warning:', e);
     }
-    term.show(false);
 
-    if (isNew) {
-        setTimeout(() => {
-            term.sendText(cmd, true);
-        }, 300);
-    } else {
-        term.sendText('\x03', false);
-        setTimeout(() => {
-            term.sendText(cmd, true);
-        }, 120);
+    // 2. Jeśli tasks.json nie został jeszcze sparsowany, utwórz dedykowany vscode.Task
+    try {
+        const task = createAlgoTask(name, scriptName, pdir);
+        await vscode.tasks.executeTask(task);
+        return true;
+    } catch (taskErr) {
+        console.error('[AlgoDeck Bridge] createAlgoTask error:', taskErr);
     }
-    return true;
+
+    // 3. Fallback do akcji wbudowanych workbench
+    try {
+        if (taskKeyword === 'ODPAL') {
+            await vscode.commands.executeCommand('workbench.action.tasks.build');
+        } else {
+            await vscode.commands.executeCommand('workbench.action.tasks.test');
+        }
+        return true;
+    } catch (cmdErr) {
+        console.error('[AlgoDeck Bridge] workbench tasks command error:', cmdErr);
+    }
+
+    // 4. Ostateczny fallback w razie specyficznych restrykcji
+    try {
+        const cmd = isWin
+            ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
+            : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
+        let term = vscode.window.terminals.find(t => t.name === name || t.name === 'AlgoDeck');
+        if (!term) {
+            term = vscode.window.createTerminal({ name: name, cwd: pdir || undefined });
+        }
+        term.show(false);
+        term.sendText(cmd, true);
+        return true;
+    } catch (_) {}
+
+    return false;
 }
 
 function writeActivePointers(sockPath, port) {
@@ -271,36 +345,8 @@ function getRequestHandler() {
 
             if (parsed.pathname === '/test') {
                 try {
-                    handleKill();
-                    let executed = false;
                     const targetDir = pdir || getActiveProblemDir();
-
-                    if (targetDir) {
-                        try {
-                            runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', targetDir);
-                            executed = true;
-                        } catch (termErr) {
-                            console.error('[AlgoDeck Bridge] runInAlgoTerminal error:', termErr);
-                        }
-                    }
-
-                    if (!executed) {
-                        try {
-                            const allTasks = await vscode.tasks.fetchTasks();
-                            const match = allTasks.find(t => t.name === 'AlgoDeck: TESTUJ' || (t.name && t.name.includes('TESTUJ')));
-                            if (match) {
-                                await vscode.tasks.executeTask(match);
-                                executed = true;
-                            }
-                        } catch (e) {
-                            console.error('[AlgoDeck Bridge] fetchTasks error:', e);
-                        }
-                    }
-
-                    if (!executed) {
-                        await vscode.commands.executeCommand('workbench.action.tasks.test');
-                    }
-
+                    await runAlgoTask('AlgoDeck: TESTUJ', 'test.sh', targetDir);
                     res.writeHead(200);
                     res.end(JSON.stringify({ status: 'ok', action: 'test' }));
                 } catch (err) {
@@ -312,36 +358,8 @@ function getRequestHandler() {
 
             if (parsed.pathname === '/run') {
                 try {
-                    handleKill();
-                    let executed = false;
                     const targetDir = pdir || getActiveProblemDir();
-
-                    if (targetDir) {
-                        try {
-                            runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', targetDir);
-                            executed = true;
-                        } catch (termErr) {
-                            console.error('[AlgoDeck Bridge] runInAlgoTerminal error:', termErr);
-                        }
-                    }
-
-                    if (!executed) {
-                        try {
-                            const allTasks = await vscode.tasks.fetchTasks();
-                            const match = allTasks.find(t => t.name === 'AlgoDeck: ODPAL' || (t.name && t.name.includes('ODPAL')));
-                            if (match) {
-                                await vscode.tasks.executeTask(match);
-                                executed = true;
-                            }
-                        } catch (e) {
-                            console.error('[AlgoDeck Bridge] fetchTasks error:', e);
-                        }
-                    }
-
-                    if (!executed) {
-                        await vscode.commands.executeCommand('workbench.action.tasks.build');
-                    }
-
+                    await runAlgoTask('AlgoDeck: ODPAL', 'run.sh', targetDir);
                     res.writeHead(200);
                     res.end(JSON.stringify({ status: 'ok', action: 'run' }));
                 } catch (err) {
@@ -386,11 +404,11 @@ function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('algodeck.test', (args) => {
             const pdir = (args && args.pdir) || getActiveProblemDir();
-            runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', pdir);
+            runAlgoTask('AlgoDeck: TESTUJ', 'test.sh', pdir);
         }),
         vscode.commands.registerCommand('algodeck.run', (args) => {
             const pdir = (args && args.pdir) || getActiveProblemDir();
-            runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', pdir);
+            runAlgoTask('AlgoDeck: ODPAL', 'run.sh', pdir);
         }),
         vscode.commands.registerCommand('algodeck.kill', () => {
             handleKill();
@@ -451,9 +469,9 @@ function activate(context) {
                 const ackPath = path.join(path.dirname(uri.fsPath), 'trigger_ack.json');
 
                 if (data.action === 'run') {
-                    runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', pdir);
+                    runAlgoTask('AlgoDeck: ODPAL', 'run.sh', pdir);
                 } else if (data.action === 'test') {
-                    runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', pdir);
+                    runAlgoTask('AlgoDeck: TESTUJ', 'test.sh', pdir);
                 } else if (data.action === 'kill') {
                     handleKill();
                 } else if (data.action === 'open') {

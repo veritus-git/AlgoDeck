@@ -1946,6 +1946,10 @@ where
 {
     let p_dir = WorkspaceManager::get_problem_dir(ws_dir, problem_id);
     let p_dir_str = p_dir.to_string_lossy().to_string();
+    let upper_pid = problem_id.to_uppercase();
+    let _ = std::fs::write(std::env::temp_dir().join("algodeck_active_task.txt"), &upper_pid);
+    #[cfg(unix)]
+    let _ = std::fs::write("/tmp/algodeck_active_task.txt", &upper_pid);
 
     // 1. ZAPISZ TRIGGER FILE (File IPC) - natychmiastowe, odporne na SELinux, sandbox, flatpak, sieć
     let algo_dir = p_dir.join(".algo");
