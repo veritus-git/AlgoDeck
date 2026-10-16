@@ -305,7 +305,8 @@ async fn post_settings(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     state.streamdeck.set_brightness(new_settings.streamdeck_brightness);
     apply_autostart_setting(new_settings.autostart_on_boot);
-    apply_macos_vscode_window_setting(&new_settings.macos_window_mode);
+    let ws_path = new_settings.get_workspace_path();
+    apply_macos_vscode_window_setting(&new_settings.macos_window_mode, Some(&ws_path));
     let _ = new_settings.save();
     {
         let mut w = state.settings.write().unwrap();
@@ -314,31 +315,70 @@ async fn post_settings(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
-fn apply_macos_vscode_window_setting(mode: &str) {
+pub fn apply_macos_vscode_window_setting(mode: &str, workspace_dir: Option<&Path>) {
+    // 1. Zapisz w katalogu workspace (.vscode/settings.json) - natywna obsługa VS Code na każdym OS
+    if let Some(ws) = workspace_dir {
+        let ws_vscode = ws.join(".vscode");
+        let _ = fs::create_dir_all(&ws_vscode);
+        let s_file = ws_vscode.join("settings.json");
+        let mut json_val: serde_json::Value = if s_file.exists() {
+            fs::read_to_string(&s_file)
+                .ok()
+                .and_then(|c| serde_json::from_str(&c).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        if let Some(obj) = json_val.as_object_mut() {
+            let dim_val = match mode {
+                "maximized" => "maximized",
+                "fullscreen" => "fullscreen",
+                _ => "default",
+            };
+            obj.insert("window.newWindowDimensions".to_string(), serde_json::Value::String(dim_val.to_string()));
+            if mode == "maximized" || mode == "fullscreen" {
+                obj.insert("window.restoreWindows".to_string(), serde_json::Value::String("none".to_string()));
+            }
+            if let Ok(formatted) = serde_json::to_string_pretty(&json_val) {
+                let _ = fs::write(&s_file, formatted);
+            }
+        }
+    }
+
+    // 2. Globalne ustawienia użytkownika w macOS Application Support
     #[cfg(target_os = "macos")]
     {
         if let Some(home) = dirs::home_dir() {
-            let vscode_user_dir = home.join("Library/Application Support/Code/User");
-            if vscode_user_dir.exists() {
-                let settings_file = vscode_user_dir.join("settings.json");
-                let mut json_val: serde_json::Value = if settings_file.exists() {
-                    fs::read_to_string(&settings_file)
-                        .ok()
-                        .and_then(|c| serde_json::from_str(&c).ok())
-                        .unwrap_or_else(|| serde_json::json!({}))
-                } else {
-                    serde_json::json!({})
-                };
-
-                if let Some(obj) = json_val.as_object_mut() {
-                    let dim_val = match mode {
-                        "maximized" => "maximized",
-                        "fullscreen" => "fullscreen",
-                        _ => "default",
+            let user_dirs = [
+                home.join("Library/Application Support/Code/User"),
+                home.join("Library/Application Support/VSCodium/User"),
+                home.join("Library/Application Support/Code - Insiders/User"),
+            ];
+            for vscode_user_dir in &user_dirs {
+                if vscode_user_dir.exists() {
+                    let settings_file = vscode_user_dir.join("settings.json");
+                    let mut json_val: serde_json::Value = if settings_file.exists() {
+                        fs::read_to_string(&settings_file)
+                            .ok()
+                            .and_then(|c| serde_json::from_str(&c).ok())
+                            .unwrap_or_else(|| serde_json::json!({}))
+                    } else {
+                        serde_json::json!({})
                     };
-                    obj.insert("window.newWindowDimensions".to_string(), serde_json::Value::String(dim_val.to_string()));
-                    if let Ok(formatted) = serde_json::to_string_pretty(&json_val) {
-                        let _ = fs::write(&settings_file, formatted);
+
+                    if let Some(obj) = json_val.as_object_mut() {
+                        let dim_val = match mode {
+                            "maximized" => "maximized",
+                            "fullscreen" => "fullscreen",
+                            _ => "default",
+                        };
+                        obj.insert("window.newWindowDimensions".to_string(), serde_json::Value::String(dim_val.to_string()));
+                        if mode == "maximized" || mode == "fullscreen" {
+                            obj.insert("window.restoreWindows".to_string(), serde_json::Value::String("none".to_string()));
+                        }
+                        if let Ok(formatted) = serde_json::to_string_pretty(&json_val) {
+                            let _ = fs::write(&settings_file, formatted);
+                        }
                     }
                 }
             }
@@ -1150,7 +1190,9 @@ pub fn ensure_vscode_extension_installed() {
         let targets = [
             home.join(".vscode/extensions/algodeck-vscode-bridge"),
             home.join(".vscode/extensions/algodeck.algodeck-vscode-bridge-2.0.0"),
+            home.join(".vscode/extensions/algodeck.algodeck-vscode-bridge-2.1.0"),
             home.join(".var/app/com.visualstudio.code/data/vscode/extensions/algodeck-vscode-bridge"),
+            home.join(".var/app/com.visualstudio.code/data/vscode/extensions/algodeck.algodeck-vscode-bridge-2.1.0"),
         ];
         let pkg = include_str!("../vscode_extension/package.json");
         let ext = include_str!("../vscode_extension/extension.js");
@@ -1183,17 +1225,6 @@ pub fn open_in_vscode_internal(
     vscode_mode: &str,
     macos_window_mode: &str,
 ) {
-    ensure_vscode_extension_installed();
-    static LAST_VSCODE_LAUNCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    let last = LAST_VSCODE_LAUNCH.swap(now, std::sync::atomic::Ordering::Relaxed);
-    if now.saturating_sub(last) < 1000 {
-        return;
-    }
-
     let p_dir = WorkspaceManager::get_problem_dir(workspace_dir, problem_id);
     let sol_file = p_dir.join(format!("{}.cpp", problem_id));
     let pdf_file = p_dir.join(format!("{}.pdf", problem_id));
@@ -1209,8 +1240,30 @@ pub fn open_in_vscode_internal(
     let temp_task_file = std::env::temp_dir().join("algodeck_active_task.txt");
     let _ = std::fs::write(&temp_task_file, problem_id.to_uppercase());
 
-    // Upewnij się, że zadanie posiada skrypty i .vscode/tasks.json
-    WorkspaceManager::ensure_problem_scripts(workspace_dir, problem_id, problem_id, 1.0);
+    // Upewnij się, że zadanie posiada skrypty i .vscode/tasks.json (tylko jeśli jeszcze nie istnieją)
+    if !p_dir.join(".algo").join("run.sh").exists() {
+        WorkspaceManager::ensure_problem_scripts(workspace_dir, problem_id, problem_id, 1.0);
+    }
+
+    // Ustaw natywne parametry okna VS Code w .vscode/settings.json
+    apply_macos_vscode_window_setting(macos_window_mode, Some(workspace_dir));
+
+    // 1. Spróbuj otworzyć plik natychmiast przez mostek IPC bez uruchamiania procesów CLI
+    let sol_str = sol_file.to_string_lossy().to_string();
+    let p_dir_str = p_dir.to_string_lossy().to_string();
+    if send_bridge_open(problem_id, &p_dir_str, &sol_str) {
+        return;
+    }
+
+    static LAST_VSCODE_LAUNCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let last = LAST_VSCODE_LAUNCH.swap(now, std::sync::atomic::Ordering::Relaxed);
+    if now.saturating_sub(last) < 600 {
+        return;
+    }
 
     let pdf_on_left = pdf_position == "left";
     let is_separate = vscode_mode == "separate_windows";
@@ -1323,22 +1376,32 @@ pub fn open_in_vscode_internal(
             let win_mode = macos_window_mode.to_string();
             if win_mode == "maximized" || win_mode == "fullscreen" {
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    if win_mode == "fullscreen" {
-                        let script = r#"
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    let script = if win_mode == "fullscreen" {
+                        r#"
                             tell application "Visual Studio Code" to activate
                             delay 0.1
                             tell application "System Events"
-                                tell process "Code"
-                                    if exists window 1 then
-                                        set value of attribute "AXFullScreen" of window 1 to true
+                                set codeProc to missing value
+                                repeat with p in (get processes)
+                                    if name of p is "Visual Studio Code" or name of p is "Code" then
+                                        set codeProc to p
+                                        exit repeat
                                     end if
-                                end tell
+                                end repeat
+                                if codeProc is not missing value then
+                                    tell codeProc
+                                        if exists window 1 then
+                                            try
+                                                set value of attribute "AXFullScreen" of window 1 to true
+                                            end try
+                                        end if
+                                    end tell
+                                end if
                             end tell
-                        "#;
-                        let _ = std::process::Command::new("osascript").args(["-e", script]).output();
-                    } else if win_mode == "maximized" {
-                        let script = r#"
+                        "#
+                    } else {
+                        r#"
                             tell application "Visual Studio Code" to activate
                             delay 0.1
                             tell application "Finder"
@@ -1346,22 +1409,36 @@ pub fn open_in_vscode_internal(
                                 set screenW to item 3 of db
                                 set screenH to item 4 of db
                             end tell
-                            tell application "System Events"
-                                tell process "Code"
-                                    if exists window 1 then
-                                        try
-                                            click (first button whose subrole is "AXZoomButton") of window 1
-                                        end try
-                                        try
-                                            set position of window 1 to {0, 25}
-                                            set size of window 1 to {screenW, screenH - 25}
-                                        end try
-                                    end if
+                            try
+                                tell application "Visual Studio Code"
+                                    set bounds of window 1 to {0, 25, screenW, screenH}
                                 end tell
+                            end try
+                            tell application "System Events"
+                                set codeProc to missing value
+                                repeat with p in (get processes)
+                                    if name of p is "Visual Studio Code" or name of p is "Code" then
+                                        set codeProc to p
+                                        exit repeat
+                                    end if
+                                end repeat
+                                if codeProc is not missing value then
+                                    tell codeProc
+                                        if exists window 1 then
+                                            try
+                                                click (first button whose subrole is "AXZoomButton") of window 1
+                                            end try
+                                            try
+                                                set position of window 1 to {0, 25}
+                                                set size of window 1 to {screenW, screenH - 25}
+                                            end try
+                                        end if
+                                    end tell
+                                end if
                             end tell
-                        "#;
-                        let _ = std::process::Command::new("osascript").args(["-e", script]).output();
-                    }
+                        "#
+                    };
+                    let _ = std::process::Command::new("osascript").args(["-e", script]).output();
                 });
             }
         }
@@ -1376,7 +1453,7 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
 
     #[cfg(unix)]
     {
-        use std::io::Write;
+        use std::io::{Write, Read};
         let p_lower = problem_id.to_lowercase();
         let mut candidate_socks = vec![
             format!("/tmp/algodeck_vscode_{}.sock", p_lower),
@@ -1393,14 +1470,18 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         for sock_path in candidate_socks {
             if std::path::Path::new(&sock_path).exists() {
                 if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
-                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(200)));
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(100)));
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(100)));
                     let req = format!("GET /ping?problem_id={} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", url_encode(problem_id));
                     if stream.write_all(req.as_bytes()).is_ok() {
-                        let mut resp = String::new();
-                        use std::io::Read;
-                        if stream.read_to_string(&mut resp).is_ok() && resp.contains("200 OK") {
-                            return true;
+                        let mut buf = [0u8; 1024];
+                        if let Ok(n) = stream.read(&mut buf) {
+                            if n > 0 {
+                                let resp = String::from_utf8_lossy(&buf[..n]);
+                                if resp.contains("200 OK") {
+                                    return true;
+                                }
+                            }
                         }
                     }
                 }
@@ -1410,14 +1491,14 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
 
     // 1. Sprawdź czy mostek HTTP potwierdza otwarcie zadania lub obecność edytora
     let ping_url = format!("http://127.0.0.1:49152/ping?problem_id={}", url_encode(problem_id));
-    if let Ok(res) = ureq::get(&ping_url).timeout(std::time::Duration::from_millis(300)).call() {
+    if let Ok(res) = ureq::get(&ping_url).timeout(std::time::Duration::from_millis(100)).call() {
         if res.status() == 200 {
             return true;
         }
     }
 
     // 2. Jeśli mostek ogólny odpowiada, VS Code żyje i jest aktywny
-    if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(200)).call() {
+    if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(100)).call() {
         if res.status() == 200 {
             return true;
         }
@@ -1441,6 +1522,7 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         // Sprawdź proces Code na Linuxie (Fedora RPM, Ubuntu deb, Arch, Flatpak)
         let is_proc_running = std::process::Command::new("pgrep").args(["-x", "code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
             || std::process::Command::new("pgrep").args(["-f", "code.*electron"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
+            || std::process::Command::new("pgrep").args(["-f", "/usr/lib64/vscode/code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
             || std::process::Command::new("pgrep").args(["-f", "com.visualstudio.code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false);
 
         if is_proc_running {
@@ -1456,6 +1538,60 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
             }
         }
     }
+    false
+}
+
+pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        use std::io::{Write, Read};
+        let p_lower = problem_id.to_lowercase();
+        let mut candidate_socks = vec![
+            format!("/tmp/algodeck_vscode_{}.sock", p_lower),
+            "/tmp/algodeck_vscode_algodeckworkspace.sock".to_string(),
+            "/tmp/algodeck_vscode_default.sock".to_string(),
+        ];
+        if let Ok(act) = std::fs::read_to_string("/tmp/algodeck_vscode_active.sock") {
+            let act_trimmed = act.trim().to_string();
+            if !act_trimmed.is_empty() && !candidate_socks.contains(&act_trimmed) {
+                candidate_socks.insert(0, act_trimmed);
+            }
+        }
+
+        for sock_path in candidate_socks {
+            if std::path::Path::new(&sock_path).exists() {
+                if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(150)));
+                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(150)));
+                    let req = format!(
+                        "POST /open?pdir={}&file={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        url_encode(p_dir_str),
+                        url_encode(file_path_str)
+                    );
+                    if stream.write_all(req.as_bytes()).is_ok() {
+                        let mut buf = [0u8; 1024];
+                        if let Ok(n) = stream.read(&mut buf) {
+                            if n > 0 {
+                                let resp = String::from_utf8_lossy(&buf[..n]);
+                                if resp.contains("200 OK") {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let bridge_url = format!("http://127.0.0.1:49152/open?pdir={}&file={}", url_encode(p_dir_str), url_encode(file_path_str));
+    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(150)).call() {
+        if res.status() == 200 {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -1480,17 +1616,22 @@ pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) ->
         for sock_path in candidate_socks {
             if std::path::Path::new(&sock_path).exists() {
                 if let Ok(mut stream) = UnixStream::connect(&sock_path) {
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(600)));
-                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(600)));
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(150)));
+                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(150)));
                     let req = format!(
                         "POST /{}?pdir={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                         endpoint,
                         url_encode(p_dir_str)
                     );
                     if stream.write_all(req.as_bytes()).is_ok() {
-                        let mut resp = String::new();
-                        if stream.read_to_string(&mut resp).is_ok() && resp.contains("200 OK") {
-                            return true;
+                        let mut buf = [0u8; 1024];
+                        if let Ok(n) = stream.read(&mut buf) {
+                            if n > 0 {
+                                let resp = String::from_utf8_lossy(&buf[..n]);
+                                if resp.contains("200 OK") {
+                                    return true;
+                                }
+                            }
                         }
                     }
                 }
@@ -1499,13 +1640,79 @@ pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) ->
     }
 
     let bridge_url = format!("http://127.0.0.1:49152/{}?pdir={}", endpoint, url_encode(p_dir_str));
-    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(600)).call() {
+    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(150)).call() {
         if res.status() == 200 {
             return true;
         }
     }
 
     false
+}
+
+fn which_exists(bin: &str) -> bool {
+    if let Ok(path) = std::env::var("PATH") {
+        for p in std::env::split_paths(&path) {
+            let full = p.join(bin);
+            if full.exists() && full.is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn spawn_in_system_terminal(endpoint: &str, p_dir: &std::path::Path, _problem_id: &str) {
+    let script_name = if endpoint == "test" { "test.sh" } else { "run.sh" };
+    let script_path = p_dir.join(".algo").join(script_name);
+
+    #[cfg(target_os = "linux")]
+    {
+        let script_str = script_path.to_string_lossy();
+        let cmd = format!("cd '{}' && bash '{}'; echo ''; read -p 'Naciśnij Enter, aby zamknąć...' -r", p_dir.display(), script_str);
+
+        // Wykryj terminal: konsole (KDE Plasma!), gnome-terminal, xfce4-terminal, kitty, alacritty, xterm
+        let p_dir_str = p_dir.to_string_lossy().to_string();
+        let terminals = [
+            ("konsole", vec!["--workdir", &p_dir_str, "-e", "bash", "-c", &cmd]),
+            ("gnome-terminal", vec!["--working-directory", &p_dir_str, "--", "bash", "-c", &cmd]),
+            ("xfce4-terminal", vec!["--working-directory", &p_dir_str, "-e", &cmd]),
+            ("kitty", vec!["--directory", &p_dir_str, "bash", "-c", &cmd]),
+            ("alacritty", vec!["--working-directory", &p_dir_str, "-e", "bash", "-c", &cmd]),
+            ("x-terminal-emulator", vec!["-e", "bash", "-c", &cmd]),
+            ("xterm", vec!["-e", "bash", "-c", &cmd]),
+        ];
+
+        for (term_bin, args) in terminals {
+            if which_exists(term_bin) {
+                if std::process::Command::new(term_bin).args(&args).spawn().is_ok() {
+                    println!("🚀 AlgoDeck: Uruchomiono {} w terminalu {}", script_name, term_bin);
+                    return;
+                }
+            }
+        }
+
+        let _ = std::process::Command::new("bash").arg(&script_path).current_dir(p_dir).spawn();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script_str = script_path.to_string_lossy();
+        let osa_cmd = format!(
+            "tell application \"Terminal\" to do script \"cd '{}' && bash '{}'\"",
+            p_dir.display(),
+            script_str
+        );
+        let _ = std::process::Command::new("osascript").args(["-e", &osa_cmd]).spawn();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let cmd_script = if endpoint == "test" { "test.cmd" } else { "run.cmd" };
+        let cmd_path = p_dir.join(".algo").join(cmd_script);
+        let mut cmd = std::process::Command::new("cmd.exe");
+        cmd.args(["/C", "start", "cmd.exe", "/K", &format!("cd /d \"{}\" && \"{}\"", p_dir.display(), cmd_path.display())]);
+        let _ = cmd.spawn();
+    }
 }
 
 pub fn trigger_vscode_action<F>(endpoint: &str, problem_id: &str, ws_dir: &std::path::Path, open_vscode: F) -> bool
@@ -1521,19 +1728,43 @@ where
     }
 
     // 2. Jeśli okno nie jest jeszcze otwarte, otwórz je
-    if !is_vscode_open_for_problem(problem_id) {
+    let was_open = is_vscode_open_for_problem(problem_id);
+    if !was_open {
         open_vscode(problem_id);
     }
 
-    // 3. Poczekaj na inicjalizację rozszerzenia VS Code (do 2s)
-    for _ in 0..14 {
-        std::thread::sleep(std::time::Duration::from_millis(150));
+    // 3. Poczekaj krótko na mostek (do 800ms)
+    for _ in 0..4 {
+        std::thread::sleep(std::time::Duration::from_millis(200));
         if send_bridge_request(endpoint, problem_id, &p_dir_str) {
             return true;
         }
     }
 
-    false
+    // 4. Fallback A: Wywołaj bezpośrednio zarejestrowaną komendę przez code CLI
+    let vscode_cmd_name = if endpoint == "test" { "algodeck.test" } else { "algodeck.run" };
+    #[cfg(unix)]
+    {
+        let candidates = [
+            "/usr/local/bin/code",
+            "/opt/homebrew/bin/code",
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "/usr/bin/code",
+        ];
+        let code_bin = candidates.iter().find(|p| std::path::Path::new(p).exists()).copied().unwrap_or("code");
+        if let Ok(st) = std::process::Command::new(code_bin)
+            .args(["--reuse-window", "--command", vscode_cmd_name])
+            .status()
+        {
+            if st.success() {
+                return true;
+            }
+        }
+    }
+
+    // 5. Fallback B: Uruchomienie w natywnym terminalu systemowym (KDE Konsole, GNOME, Terminal.app itp.)
+    spawn_in_system_terminal(endpoint, &p_dir, problem_id);
+    true
 }
 
 pub fn ensure_vscode_open_for_problem(problem_id: &str, state: &AppState) {

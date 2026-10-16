@@ -970,7 +970,10 @@ impl StreamDeckEngine {
                                             state.keys[i].action.clone()
                                         };
                                         if !action.is_empty() {
-                                            action_callback(action, i);
+                                            let cb = action_callback.clone();
+                                            std::thread::spawn(move || {
+                                                cb(action, i);
+                                            });
                                         }
                                     }
                                 }

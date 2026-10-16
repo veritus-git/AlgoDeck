@@ -124,6 +124,8 @@ fn run_daemon(port: u16) {
     {
         let s = settings.read().unwrap();
         streamdeck.set_brightness(s.streamdeck_brightness);
+        let ws_path = s.get_workspace_path();
+        server::apply_macos_vscode_window_setting(&s.macos_window_mode, Some(&ws_path));
     }
     let (ws_sender, _) = broadcast::channel(100);
     let shutdown_signal = Arc::new(AtomicBool::new(false));

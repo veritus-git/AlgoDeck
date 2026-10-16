@@ -444,11 +444,11 @@ async fn test_vscode_detection_and_multi_socket_bridge() {
 
         if let Ok(listener) = UnixListener::bind(sock_path) {
             let handle = std::thread::spawn(move || {
-                for _ in 0..2 {
+                for _ in 0..3 {
                     if let Ok((mut stream, _)) = listener.accept() {
                         let mut buf = [0u8; 128];
                         let _ = stream.read(&mut buf);
-                        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
+                        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nOK");
                     }
                 }
             });
@@ -459,6 +459,10 @@ async fn test_vscode_detection_and_multi_socket_bridge() {
             // send_bridge_request również powinien przesłać zapytanie
             let sent = algodeck::server::send_bridge_request("test", "kol", "/tmp/pdir");
             assert!(sent, "send_bridge_request musi nawiązać połączenie przez socket");
+
+            // send_bridge_open powinien natychmiast przekazać polecenie otwarcia pliku
+            let opened = algodeck::server::send_bridge_open("kol", "/tmp/pdir", "/tmp/pdir/kol.cpp");
+            assert!(opened, "send_bridge_open musi nawiązać połączenie przez socket i otworzyć plik");
 
             let _ = handle.join();
             let _ = std::fs::remove_file(sock_path);

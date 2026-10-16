@@ -21,7 +21,7 @@ function forwardToSocket(targetSock, req, res) {
             remoteRes.on('end', resolve);
         });
         client.on('error', (err) => {
-            res.writeHead(502);
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Connection': 'close' });
             res.end(JSON.stringify({ status: 'bad_gateway', error: err.message }));
             resolve();
         });
@@ -29,31 +29,54 @@ function forwardToSocket(targetSock, req, res) {
     });
 }
 
-function createAlgoTask(name, scriptName, pdir) {
-    const wsFolder = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
-        ? vscode.workspace.workspaceFolders[0]
-        : vscode.TaskScope.Global;
+function getActiveProblemDir() {
+    if (vscode.window.activeTextEditor) {
+        return path.dirname(vscode.window.activeTextEditor.document.uri.fsPath);
+    }
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        return vscode.workspace.workspaceFolders[0].uri.fsPath;
+    }
+    return null;
+}
 
-    const isWin = process.platform === 'win32';
-    const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
-    const cmd = isWin
-        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
-        : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
-    const execution = new vscode.ShellExecution(cmd);
-    const task = new vscode.Task(
-        { type: 'shell', task: name },
-        wsFolder,
-        name,
-        'AlgoDeck',
-        execution
-    );
-    task.presentationOptions = {
-        reveal: vscode.TaskRevealKind.Always,
-        panel: vscode.TaskPanelKind.Shared,
-        focus: true,
-        clear: true
-    };
-    return task;
+async function openProblemFile(filePath, pdir) {
+    try {
+        let target = filePath;
+        if (!target && pdir) {
+            const prob = path.basename(pdir);
+            const cand = path.join(pdir, `${prob}.cpp`);
+            if (fs.existsSync(cand)) {
+                target = cand;
+            }
+        }
+        if (target && fs.existsSync(target)) {
+            const doc = await vscode.workspace.openTextDocument(target);
+            await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+            return true;
+        }
+    } catch (e) {
+        console.error('[AlgoDeck Bridge] openProblemFile error:', e);
+    }
+    return false;
+}
+
+function handleKill() {
+    try {
+        for (const execution of vscode.tasks.taskExecutions) {
+            if (execution.task && execution.task.name && execution.task.name.includes('AlgoDeck')) {
+                execution.terminate();
+            }
+        }
+        for (const term of vscode.window.terminals) {
+            if (term.name.includes('AlgoDeck') || term.name.includes('ODPAL') || term.name.includes('TESTUJ')) {
+                term.sendText('\x03', false);
+            }
+        }
+        return true;
+    } catch (e) {
+        console.error('[AlgoDeck Bridge] handleKill error:', e);
+        return false;
+    }
 }
 
 function runInAlgoTerminal(name, scriptName, pdir) {
@@ -64,15 +87,25 @@ function runInAlgoTerminal(name, scriptName, pdir) {
         : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
 
     let term = vscode.window.terminals.find(t => t.name === name || t.name === 'AlgoDeck');
-    if (!term) {
+    const isNew = !term;
+    if (isNew) {
         term = vscode.window.createTerminal({
             name: name,
             cwd: pdir || undefined
         });
     }
     term.show(true);
-    term.sendText('\x03', false);
-    term.sendText(cmd, true);
+
+    if (isNew) {
+        setTimeout(() => {
+            term.sendText(cmd, true);
+        }, 300);
+    } else {
+        term.sendText('\x03', false);
+        setTimeout(() => {
+            term.sendText(cmd, true);
+        }, 120);
+    }
     return true;
 }
 
@@ -81,6 +114,7 @@ function getRequestHandler() {
         try {
             const parsed = new URL(req.url, `http://127.0.0.1:${PORT}`);
             res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Connection', 'close');
 
             if (parsed.pathname === '/ping') {
                 const qProb = parsed.searchParams.get('problem_id');
@@ -124,7 +158,7 @@ function getRequestHandler() {
                         }
                     }
 
-                    // 4. Jeśli ten edytor ma otwarty jakikolwiek workspace AlgoDeck, uznajemy go za otwarty
+                    // 4. Jeśli ten edytor ma otwarty jakikolwiek workspace AlgoDeck
                     if (!isOpen && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
                         isOpen = true;
                     }
@@ -145,30 +179,24 @@ function getRequestHandler() {
             }
 
             if (parsed.pathname === '/kill') {
-                try {
-                    // 1. Anuluj aktywne zadania VS Code
-                    for (const execution of vscode.tasks.taskExecutions) {
-                        if (execution.task && execution.task.name && execution.task.name.includes('AlgoDeck')) {
-                            execution.terminate();
-                        }
-                    }
-                    // 2. Wyślij SIGINT do terminali AlgoDeck
-                    for (const term of vscode.window.terminals) {
-                        if (term.name.includes('AlgoDeck') || term.name.includes('ODPAL') || term.name.includes('TESTUJ')) {
-                            term.sendText('\x03', false);
-                        }
-                    }
-                    res.writeHead(200);
-                    res.end(JSON.stringify({ status: 'ok', action: 'kill' }));
-                } catch (err) {
-                    res.writeHead(500);
-                    res.end(JSON.stringify({ status: 'error', error: String(err) }));
-                }
+                handleKill();
+                res.writeHead(200);
+                res.end(JSON.stringify({ status: 'ok', action: 'kill' }));
+                return;
+            }
+
+            const pdir = parsed.searchParams.get('pdir');
+            const file = parsed.searchParams.get('file');
+
+            // Błyskawiczne otwieranie/przełączanie plików w edytorze
+            if (parsed.pathname === '/open') {
+                await openProblemFile(file, pdir);
+                res.writeHead(200);
+                res.end(JSON.stringify({ status: 'ok', action: 'open' }));
                 return;
             }
 
             // Sprawdź przekierowanie do innego okna w trybie separate_windows
-            const pdir = parsed.searchParams.get('pdir');
             if (process.platform !== 'win32' && pdir) {
                 const targetProb = path.basename(pdir).toLowerCase();
                 const myWs = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
@@ -185,26 +213,19 @@ function getRequestHandler() {
 
             if (parsed.pathname === '/test') {
                 try {
-                    // Przerwij poprzednie wykonanie jeśli nadal trwa
-                    for (const execution of vscode.tasks.taskExecutions) {
-                        if (execution.task && execution.task.name && execution.task.name.includes('AlgoDeck')) {
-                            execution.terminate();
-                        }
-                    }
-
+                    handleKill();
                     let executed = false;
+                    const targetDir = pdir || getActiveProblemDir();
 
-                    // 1. Zawsze uruchom w niezawodnym dedykowanym terminalu AlgoDeck
-                    if (pdir) {
+                    if (targetDir) {
                         try {
-                            runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', pdir);
+                            runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', targetDir);
                             executed = true;
                         } catch (termErr) {
                             console.error('[AlgoDeck Bridge] runInAlgoTerminal error:', termErr);
                         }
                     }
 
-                    // 2. Fallback zadania VS Code Task jeśli terminal nie wystartował
                     if (!executed) {
                         try {
                             const allTasks = await vscode.tasks.fetchTasks();
@@ -218,7 +239,6 @@ function getRequestHandler() {
                         }
                     }
 
-                    // 3. Fallback: workbench test action
                     if (!executed) {
                         await vscode.commands.executeCommand('workbench.action.tasks.test');
                     }
@@ -234,26 +254,19 @@ function getRequestHandler() {
 
             if (parsed.pathname === '/run') {
                 try {
-                    // Przerwij poprzednie wykonanie jeśli nadal trwa
-                    for (const execution of vscode.tasks.taskExecutions) {
-                        if (execution.task && execution.task.name && execution.task.name.includes('AlgoDeck')) {
-                            execution.terminate();
-                        }
-                    }
-
+                    handleKill();
                     let executed = false;
+                    const targetDir = pdir || getActiveProblemDir();
 
-                    // 1. Zawsze uruchom w niezawodnym dedykowanym terminalu AlgoDeck
-                    if (pdir) {
+                    if (targetDir) {
                         try {
-                            runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', pdir);
+                            runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', targetDir);
                             executed = true;
                         } catch (termErr) {
                             console.error('[AlgoDeck Bridge] runInAlgoTerminal error:', termErr);
                         }
                     }
 
-                    // 2. Fallback zadania VS Code Task jeśli terminal nie wystartował
                     if (!executed) {
                         try {
                             const allTasks = await vscode.tasks.fetchTasks();
@@ -267,7 +280,6 @@ function getRequestHandler() {
                         }
                     }
 
-                    // 3. Fallback: workbench build action
                     if (!executed) {
                         await vscode.commands.executeCommand('workbench.action.tasks.build');
                     }
@@ -309,10 +321,30 @@ function tryBindHttpServer(handler) {
 function activate(context) {
     const handler = getRequestHandler();
 
-    // 1. Serwer HTTP na stałym porcie (wieloplatformowy: macOS, Linux, Windows)
+    // 1. Zarejestruj bezpośrednie komendy VS Code dostępne z CLI i palety komend
+    context.subscriptions.push(
+        vscode.commands.registerCommand('algodeck.test', (args) => {
+            const pdir = (args && args.pdir) || getActiveProblemDir();
+            runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', pdir);
+        }),
+        vscode.commands.registerCommand('algodeck.run', (args) => {
+            const pdir = (args && args.pdir) || getActiveProblemDir();
+            runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', pdir);
+        }),
+        vscode.commands.registerCommand('algodeck.kill', () => {
+            handleKill();
+        }),
+        vscode.commands.registerCommand('algodeck.open', (args) => {
+            const file = args && args.file;
+            const pdir = args && args.pdir;
+            openProblemFile(file, pdir);
+        })
+    );
+
+    // 2. Serwer HTTP na stałym porcie (wieloplatformowy: macOS, Linux, Windows)
     tryBindHttpServer(handler);
 
-    // 2. Dedykowany UNIX domain socket dla każdego okna/workspace (macOS i Linux)
+    // 3. Dedykowany UNIX domain socket dla każdego okna/workspace (macOS i Linux)
     if (process.platform !== 'win32') {
         const folders = vscode.workspace.workspaceFolders;
         if (folders && folders.length > 0) {
@@ -339,7 +371,7 @@ function activate(context) {
         }
     }
 
-    // 3. Obsługa przełączania fokusu okien VS Code
+    // 4. Obsługa przełączania fokusu okien VS Code
     vscode.window.onDidChangeWindowState((e) => {
         if (e.focused) {
             tryBindHttpServer(handler);

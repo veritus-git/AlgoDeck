@@ -2,13 +2,34 @@
   "name": "algodeck-vscode-bridge",
   "displayName": "AlgoDeck Bridge",
   "description": "Wbudowana integracja AlgoDeck Stream Deck z Visual Studio Code",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "publisher": "algodeck",
   "engines": {
     "vscode": "^1.70.0"
   },
   "activationEvents": [
+    "onStartupFinished",
     "*"
   ],
-  "main": "./extension.js"
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "algodeck.test",
+        "title": "AlgoDeck: Testuj Zadanie"
+      },
+      {
+        "command": "algodeck.run",
+        "title": "AlgoDeck: Odpal Program Interaktywnie"
+      },
+      {
+        "command": "algodeck.kill",
+        "title": "AlgoDeck: Zatrzymaj Program"
+      },
+      {
+        "command": "algodeck.open",
+        "title": "AlgoDeck: Otwórz Zadanie"
+      }
+    ]
+  }
 }
