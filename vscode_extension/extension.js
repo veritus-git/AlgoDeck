@@ -5,8 +5,11 @@ const path = require('path');
 
 let server = null;
 let sockServer = null;
-let sockPath = null;
-const PORT = 49152;
+let activeSockPath = null;
+let lastActionTime = 0;
+let lastActionType = '';
+
+const BASE_PORT = 49152;
 
 function forwardToSocket(targetSock, req, res) {
     return new Promise((resolve) => {
@@ -80,6 +83,13 @@ function handleKill() {
 }
 
 function runInAlgoTerminal(name, scriptName, pdir) {
+    const now = Date.now();
+    if (lastActionType === name && (now - lastActionTime) < 250) {
+        return true;
+    }
+    lastActionType = name;
+    lastActionTime = now;
+
     const isWin = process.platform === 'win32';
     const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
     const cmd = isWin
@@ -94,7 +104,7 @@ function runInAlgoTerminal(name, scriptName, pdir) {
             cwd: pdir || undefined
         });
     }
-    term.show(true);
+    term.show(false);
 
     if (isNew) {
         setTimeout(() => {
@@ -109,10 +119,43 @@ function runInAlgoTerminal(name, scriptName, pdir) {
     return true;
 }
 
+function writeActivePointers(sockPath, port) {
+    const home = process.env.HOME || '';
+    const cfgDir = path.join(home, '.config', 'algodeck');
+    try { fs.mkdirSync(cfgDir, { recursive: true }); } catch (_) {}
+
+    const sockLocations = [
+        process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'algodeck_vscode_active.sock') : null,
+        '/tmp/algodeck_vscode_active.sock',
+        path.join(cfgDir, 'algodeck_vscode_active.sock')
+    ];
+
+    if (sockPath) {
+        for (const loc of sockLocations) {
+            if (loc) {
+                try { fs.writeFileSync(loc, sockPath); } catch (_) {}
+            }
+        }
+    }
+
+    if (port) {
+        const portLocations = [
+            process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'algodeck_bridge_port.txt') : null,
+            '/tmp/algodeck_bridge_port.txt',
+            path.join(cfgDir, 'bridge_port.txt')
+        ];
+        for (const loc of portLocations) {
+            if (loc) {
+                try { fs.writeFileSync(loc, String(port)); } catch (_) {}
+            }
+        }
+    }
+}
+
 function getRequestHandler() {
     return async (req, res) => {
         try {
-            const parsed = new URL(req.url, `http://127.0.0.1:${PORT}`);
+            const parsed = new URL(req.url, `http://127.0.0.1:${BASE_PORT}`);
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Connection', 'close');
 
@@ -122,7 +165,6 @@ function getRequestHandler() {
                     const qLower = qProb.toLowerCase();
                     let isOpen = false;
 
-                    // 1. Sprawdź foldery otwarte w workspace
                     if (vscode.workspace.workspaceFolders) {
                         for (const f of vscode.workspace.workspaceFolders) {
                             const fName = f.name.toLowerCase();
@@ -140,7 +182,6 @@ function getRequestHandler() {
                         }
                     }
 
-                    // 2. Sprawdź aktywny edytor
                     if (!isOpen && vscode.window.activeTextEditor) {
                         const curPath = vscode.window.activeTextEditor.document.uri.fsPath.toLowerCase();
                         if (curPath.includes(qLower)) {
@@ -148,7 +189,6 @@ function getRequestHandler() {
                         }
                     }
 
-                    // 3. Sprawdź otwarte dokumenty
                     if (!isOpen) {
                         for (const doc of vscode.workspace.textDocuments) {
                             if (doc.uri.fsPath.toLowerCase().includes(qLower)) {
@@ -158,7 +198,6 @@ function getRequestHandler() {
                         }
                     }
 
-                    // 4. Jeśli ten edytor ma otwarty jakikolwiek workspace AlgoDeck
                     if (!isOpen && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
                         isOpen = true;
                     }
@@ -188,7 +227,6 @@ function getRequestHandler() {
             const pdir = parsed.searchParams.get('pdir');
             const file = parsed.searchParams.get('file');
 
-            // Błyskawiczne otwieranie/przełączanie plików w edytorze
             if (parsed.pathname === '/open') {
                 await openProblemFile(file, pdir);
                 res.writeHead(200);
@@ -196,14 +234,13 @@ function getRequestHandler() {
                 return;
             }
 
-            // Sprawdź przekierowanie do innego okna w trybie separate_windows
             if (process.platform !== 'win32' && pdir) {
                 const targetProb = path.basename(pdir).toLowerCase();
                 const myWs = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0)
                     ? vscode.workspace.workspaceFolders[0].name.toLowerCase()
                     : '';
                 const targetSock = `/tmp/algodeck_vscode_${targetProb}.sock`;
-                if (myWs !== targetProb && myWs !== 'algodeckworkspace' && fs.existsSync(targetSock) && targetSock !== sockPath) {
+                if (myWs !== targetProb && myWs !== 'algodeckworkspace' && fs.existsSync(targetSock) && targetSock !== activeSockPath) {
                     try {
                         await forwardToSocket(targetSock, req, res);
                         return;
@@ -304,17 +341,20 @@ function getRequestHandler() {
     };
 }
 
-function tryBindHttpServer(handler) {
+function tryBindHttpServer(handler, portOffset = 0) {
     if (server) return;
+    if (portOffset > 5) return;
+    const port = BASE_PORT + portOffset;
     const s = http.createServer(handler);
     s.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {
-            server = null;
+            tryBindHttpServer(handler, portOffset + 1);
         }
     });
-    s.listen(PORT, '127.0.0.1', () => {
+    s.listen(port, '127.0.0.1', () => {
         server = s;
-        console.log(`[AlgoDeck Bridge] Nasłuchiwanie na 127.0.0.1:${PORT}`);
+        console.log(`[AlgoDeck Bridge] Nasłuchiwanie na 127.0.0.1:${port}`);
+        writeActivePointers(activeSockPath, port);
     });
 }
 
@@ -341,44 +381,113 @@ function activate(context) {
         })
     );
 
-    // 2. Serwer HTTP na stałym porcie (wieloplatformowy: macOS, Linux, Windows)
+    // 2. Serwer HTTP na porcie 49152+ (zapisuje port do bridge_port.txt)
     tryBindHttpServer(handler);
 
-    // 3. Dedykowany UNIX domain socket dla każdego okna/workspace (macOS i Linux)
+    // 3. Dedykowany UNIX domain socket w XDG_RUNTIME_DIR oraz /tmp (macOS i Linux)
     if (process.platform !== 'win32') {
         const folders = vscode.workspace.workspaceFolders;
-        if (folders && folders.length > 0) {
-            const wsName = folders[0].name.toLowerCase();
-            sockPath = `/tmp/algodeck_vscode_${wsName}.sock`;
-        } else {
-            sockPath = `/tmp/algodeck_vscode_default.sock`;
-        }
+        const wsName = (folders && folders.length > 0) ? folders[0].name.toLowerCase() : 'default';
 
-        if (sockPath) {
-            if (fs.existsSync(sockPath)) {
-                try { fs.unlinkSync(sockPath); } catch (_) {}
+        const socketCandidates = [
+            process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, `algodeck_vscode_${wsName}.sock`) : null,
+            `/tmp/algodeck_vscode_${wsName}.sock`,
+            path.join(process.env.HOME || '', '.config', 'algodeck', `algodeck_vscode_${wsName}.sock`)
+        ].filter(Boolean);
+
+        for (const candidate of socketCandidates) {
+            try {
+                if (fs.existsSync(candidate)) {
+                    try { fs.unlinkSync(candidate); } catch (_) {}
+                }
+                const s = http.createServer(handler);
+                s.on('error', (err) => {
+                    console.log('[AlgoDeck Bridge] UNIX socket error:', err.message);
+                });
+                s.listen(candidate, () => {
+                    sockServer = s;
+                    activeSockPath = candidate;
+                    console.log(`[AlgoDeck Bridge] Nasłuchiwanie na gnieździe UNIX: ${candidate}`);
+                    writeActivePointers(activeSockPath, server ? server.address().port : BASE_PORT);
+                });
+                break;
+            } catch (e) {
+                console.warn('[AlgoDeck Bridge] Nie udało się otworzyć socketu:', candidate, e);
             }
-            sockServer = http.createServer(handler);
-            sockServer.on('error', (err) => {
-                console.log('[AlgoDeck Bridge] UNIX socket error:', err.message);
-            });
-            sockServer.listen(sockPath, () => {
-                console.log(`[AlgoDeck Bridge] Nasłuchiwanie na gnieździe UNIX: ${sockPath}`);
-                try {
-                    fs.writeFileSync('/tmp/algodeck_vscode_active.sock', sockPath);
-                } catch (_) {}
-            });
         }
     }
 
-    // 4. Obsługa przełączania fokusu okien VS Code
+    // 4. File Watcher IPC dla .algo/trigger.json oraz algodeck_trigger.json (niezawodny, działa niezależnie od sieci, portów i SELinux)
+    try {
+        const handleTrigger = (uri) => {
+            try {
+                if (!fs.existsSync(uri.fsPath)) return;
+                const raw = fs.readFileSync(uri.fsPath, 'utf8');
+                const data = JSON.parse(raw);
+                if (!data || !data.action) return;
+
+                const pdir = data.pdir || path.dirname(path.dirname(uri.fsPath));
+                const ackPath = path.join(path.dirname(uri.fsPath), 'trigger_ack.json');
+
+                if (data.action === 'run') {
+                    runInAlgoTerminal('AlgoDeck: ODPAL', 'run.sh', pdir);
+                } else if (data.action === 'test') {
+                    runInAlgoTerminal('AlgoDeck: TESTUJ', 'test.sh', pdir);
+                } else if (data.action === 'kill') {
+                    handleKill();
+                } else if (data.action === 'open') {
+                    openProblemFile(data.file, pdir);
+                }
+
+                try { fs.writeFileSync(ackPath, JSON.stringify({ ack: true, time: Date.now() })); } catch (_) {}
+                try { fs.unlinkSync(uri.fsPath); } catch (_) {}
+            } catch (e) {
+                console.error('[AlgoDeck Bridge] trigger file error:', e);
+            }
+        };
+
+        const watcher1 = vscode.workspace.createFileSystemWatcher('**/.algo/trigger.json');
+        watcher1.onDidChange(handleTrigger);
+        watcher1.onDidCreate(handleTrigger);
+        context.subscriptions.push(watcher1);
+
+        const watcher2 = vscode.workspace.createFileSystemWatcher('**/algodeck_trigger.json');
+        watcher2.onDidChange(handleTrigger);
+        watcher2.onDidCreate(handleTrigger);
+        context.subscriptions.push(watcher2);
+
+        // Dodatkowy szybki poller (co 80ms) jako fallback w razie limitów inotify w systemie Linux
+        const pollInterval = setInterval(() => {
+            try {
+                if (vscode.workspace.workspaceFolders) {
+                    for (const f of vscode.workspace.workspaceFolders) {
+                        const cand1 = path.join(f.uri.fsPath, '.algo', 'trigger.json');
+                        const cand2 = path.join(f.uri.fsPath, 'algodeck_trigger.json');
+                        if (fs.existsSync(cand1)) handleTrigger({ fsPath: cand1 });
+                        if (fs.existsSync(cand2)) handleTrigger({ fsPath: cand2 });
+                    }
+                }
+                if (vscode.window.activeTextEditor) {
+                    const dir = path.dirname(vscode.window.activeTextEditor.document.uri.fsPath);
+                    const cand1 = path.join(dir, '.algo', 'trigger.json');
+                    const cand2 = path.join(dir, 'algodeck_trigger.json');
+                    if (fs.existsSync(cand1)) handleTrigger({ fsPath: cand1 });
+                    if (fs.existsSync(cand2)) handleTrigger({ fsPath: cand2 });
+                }
+            } catch (_) {}
+        }, 80);
+
+        context.subscriptions.push({ dispose: () => clearInterval(pollInterval) });
+    } catch (e) {
+        console.error('[AlgoDeck Bridge] Failed to create triggerWatcher:', e);
+    }
+
+    // 5. Obsługa przełączania fokusu okien VS Code
     vscode.window.onDidChangeWindowState((e) => {
         if (e.focused) {
             tryBindHttpServer(handler);
-            if (sockPath) {
-                try {
-                    fs.writeFileSync('/tmp/algodeck_vscode_active.sock', sockPath);
-                } catch (_) {}
+            if (activeSockPath) {
+                writeActivePointers(activeSockPath, server ? server.address().port : BASE_PORT);
             }
         }
     });
@@ -393,8 +502,8 @@ function activate(context) {
                 try { sockServer.close(); } catch (_) {}
                 sockServer = null;
             }
-            if (sockPath && fs.existsSync(sockPath)) {
-                try { fs.unlinkSync(sockPath); } catch (_) {}
+            if (activeSockPath && fs.existsSync(activeSockPath)) {
+                try { fs.unlinkSync(activeSockPath); } catch (_) {}
             }
         }
     });
@@ -409,8 +518,8 @@ function deactivate() {
         try { sockServer.close(); } catch (_) {}
         sockServer = null;
     }
-    if (sockPath && fs.existsSync(sockPath)) {
-        try { fs.unlinkSync(sockPath); } catch (_) {}
+    if (activeSockPath && fs.existsSync(activeSockPath)) {
+        try { fs.unlinkSync(activeSockPath); } catch (_) {}
     }
 }
 

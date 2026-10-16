@@ -7,6 +7,11 @@
   "engines": {
     "vscode": "^1.70.0"
   },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
   "activationEvents": [
     "onStartupFinished",
     "*"

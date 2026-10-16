@@ -166,9 +166,29 @@ if [ -f "$REPO_DIR/Cargo.toml" ] && command -v cargo &> /dev/null; then
     if [ -d "$REPO_DIR/extension" ]; then
         cp -r "$REPO_DIR/extension/"* "$SHARE_DIR/extension/"
     fi
+    install_vscode_ext() {
+        local src="$1"
+        local roots=(
+            "$HOME/.vscode/extensions"
+            "$HOME/.vscode-oss/extensions"
+            "$HOME/.var/app/com.visualstudio.code/data/vscode/extensions"
+            "$HOME/.var/app/com.vscodium.codium/data/vscode/extensions"
+        )
+        for r in "${roots[@]}"; do
+            if [ "$r" = "$HOME/.vscode/extensions" ] || [ -d "$(dirname "$r")" ] || [ -d "$r" ]; then
+                mkdir -p "$r/algodeck.algodeck-vscode-bridge-2.1.0" "$r/algodeck-vscode-bridge"
+                cp -r "$src/"* "$r/algodeck.algodeck-vscode-bridge-2.1.0/" 2>/dev/null || true
+                cp -r "$src/"* "$r/algodeck-vscode-bridge/" 2>/dev/null || true
+                rm -rf "$r/algodeck.algodeck-vscode-bridge-2.0.0" 2>/dev/null || true
+                if [ -f "$r/.obsolete" ]; then
+                    sed -i '/algodeck/d' "$r/.obsolete" 2>/dev/null || true
+                fi
+            fi
+        done
+    }
+
     if [ -d "$REPO_DIR/vscode_extension" ]; then
-        mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
-        cp -r "$REPO_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+        install_vscode_ext "$REPO_DIR/vscode_extension"
     fi
 elif [ -f "$REPO_DIR/algodeck" ]; then
     # Jeśli uruchomiono w wypakowanej paczce release tar.gz
@@ -183,8 +203,7 @@ elif [ -f "$REPO_DIR/algodeck" ]; then
         cp -r "$REPO_DIR/extension/"* "$SHARE_DIR/extension/"
     fi
     if [ -d "$REPO_DIR/vscode_extension" ]; then
-        mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
-        cp -r "$REPO_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+        install_vscode_ext "$REPO_DIR/vscode_extension"
     fi
 fi
 
@@ -210,8 +229,7 @@ if [ "$INSTALLED_BIN" = false ]; then
             cp -r "$TMP_DIR/extension/"* "$SHARE_DIR/extension/"
         fi
         if [ -d "$TMP_DIR/vscode_extension" ]; then
-            mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
-            cp -r "$TMP_DIR/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+            install_vscode_ext "$TMP_DIR/vscode_extension"
         fi
         rm -rf "$TMP_TAR" "$TMP_DIR"
         INSTALLED_BIN=true
@@ -236,8 +254,7 @@ if [ "$INSTALLED_BIN" = false ]; then
                 cp -r "$ROOT_EXTRACT/extension/"* "$SHARE_DIR/extension/"
             fi
             if [ -n "$ROOT_EXTRACT" ] && [ -d "$ROOT_EXTRACT/vscode_extension" ]; then
-                mkdir -p "$HOME/.vscode/extensions/algodeck-vscode-bridge"
-                cp -r "$ROOT_EXTRACT/vscode_extension/"* "$HOME/.vscode/extensions/algodeck-vscode-bridge/" 2>/dev/null || true
+                install_vscode_ext "$ROOT_EXTRACT/vscode_extension"
             fi
             rm -rf "$TMP_ZIP" "$TMP_DIR"
         fi
@@ -354,6 +371,7 @@ ExecStart=$HOME/.local/bin/algodeck daemon
 Restart=on-failure
 RestartSec=2s
 Environment="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
 
 [Install]
 WantedBy=default.target

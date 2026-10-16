@@ -1185,20 +1185,103 @@ async fn stage_refresh() -> Json<serde_json::Value> {
     get_staged_state().await
 }
 
+fn register_in_vscode_extensions_json(ext_dir: &std::path::Path, rel_location: &str) {
+    if let Some(parent) = ext_dir.parent() {
+        let extensions_json_path = parent.join("extensions.json");
+        let obsolete_json_path = parent.join(".obsolete");
+
+        // 1. Usuń wpisy algodeck z .obsolete
+        if obsolete_json_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&obsolete_json_path) {
+                if content.contains("algodeck") {
+                    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(obj) = val.as_object_mut() {
+                            obj.retain(|k, _| !k.contains("algodeck"));
+                        }
+                        if let Ok(new_content) = serde_json::to_string(&val) {
+                            let _ = std::fs::write(&obsolete_json_path, new_content);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Zaktualizuj lub dodaj wpis w extensions.json
+        let dest_str = ext_dir.to_string_lossy().to_string();
+        let mut extensions_list: Vec<serde_json::Value> = if extensions_json_path.exists() {
+            std::fs::read_to_string(&extensions_json_path)
+                .ok()
+                .and_then(|c| serde_json::from_str(&c).ok())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        // Usuń stare wpisy algodeck
+        extensions_list.retain(|item| {
+            if let Some(id) = item.pointer("/identifier/id").and_then(|v| v.as_str()) {
+                if id == "algodeck.algodeck-vscode-bridge" {
+                    return false;
+                }
+            }
+            if let Some(rel) = item.get("relativeLocation").and_then(|v| v.as_str()) {
+                if rel.contains("algodeck") {
+                    return false;
+                }
+            }
+            true
+        });
+
+        // Dodaj aktualny wpis dla wersji 2.1.0
+        let new_entry = serde_json::json!({
+            "identifier": {
+                "id": "algodeck.algodeck-vscode-bridge"
+            },
+            "version": "2.1.0",
+            "location": {
+                "$mid": 1,
+                "fsPath": dest_str,
+                "path": dest_str,
+                "scheme": "file"
+            },
+            "relativeLocation": rel_location,
+            "metadata": {
+                "installedTimestamp": 1729000000000u64,
+                "source": "gallery"
+            }
+        });
+
+        extensions_list.push(new_entry);
+
+        if let Ok(serialized) = serde_json::to_string_pretty(&extensions_list) {
+            let _ = std::fs::write(&extensions_json_path, serialized);
+        }
+    }
+}
+
 pub fn ensure_vscode_extension_installed() {
     if let Some(home) = dirs::home_dir() {
-        let targets = [
-            home.join(".vscode/extensions/algodeck-vscode-bridge"),
-            home.join(".vscode/extensions/algodeck.algodeck-vscode-bridge-2.0.0"),
-            home.join(".vscode/extensions/algodeck.algodeck-vscode-bridge-2.1.0"),
-            home.join(".var/app/com.visualstudio.code/data/vscode/extensions/algodeck-vscode-bridge"),
-            home.join(".var/app/com.visualstudio.code/data/vscode/extensions/algodeck.algodeck-vscode-bridge-2.1.0"),
+        let ext_roots = [
+            home.join(".vscode/extensions"),
+            home.join(".vscode-oss/extensions"),
+            home.join(".var/app/com.visualstudio.code/data/vscode/extensions"),
+            home.join(".var/app/com.vscodium.codium/data/vscode/extensions"),
+            home.join("snap/code/common/.vscode/extensions"),
         ];
+
         let pkg = include_str!("../vscode_extension/package.json");
         let ext = include_str!("../vscode_extension/extension.js");
 
-        for dest in &targets {
-            if dest.parent().map(|p| p.exists()).unwrap_or(false) || dest.exists() {
+        for root in &ext_roots {
+            let should_process = root == &ext_roots[0] || root.parent().map(|p| p.exists()).unwrap_or(false);
+            if !should_process {
+                continue;
+            }
+
+            let versioned_dir = root.join("algodeck.algodeck-vscode-bridge-2.1.0");
+            let unversioned_dir = root.join("algodeck-vscode-bridge");
+
+            for dest in [&versioned_dir, &unversioned_dir] {
                 let ext_file = dest.join("extension.js");
                 let pkg_file = dest.join("package.json");
                 let should_update = match std::fs::read_to_string(&ext_file) {
@@ -1212,6 +1295,15 @@ pub fn ensure_vscode_extension_installed() {
                     println!("✓ Zainstalowano/zaktualizowano integrację VS Code Bridge w {}", dest.display());
                 }
             }
+
+            // Usuń przestarzały katalog 2.0.0
+            let old_2_0 = root.join("algodeck.algodeck-vscode-bridge-2.0.0");
+            if old_2_0.exists() {
+                let _ = std::fs::remove_dir_all(&old_2_0);
+            }
+
+            // Zarejestruj w extensions.json i wyczyść .obsolete
+            register_in_vscode_extensions_json(&versioned_dir, "algodeck.algodeck-vscode-bridge-2.1.0");
         }
     }
 }
@@ -1315,14 +1407,12 @@ pub fn open_in_vscode_internal(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into());
-        let xauthority = std::env::var("XAUTHORITY").unwrap_or_else(|_| "/home/linux/.Xauthority".into());
-
         let candidates = [
             "/usr/local/bin/code",
             "/opt/homebrew/bin/code",
             "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
             "/usr/bin/code",
+            "/usr/bin/codium",
         ];
         let code_bin = candidates
             .iter()
@@ -1364,11 +1454,37 @@ pub fn open_in_vscode_internal(
                 cmd.arg(p);
             }
         }
+
         #[cfg(target_os = "linux")]
         {
-            cmd.env("DISPLAY", &display);
-            cmd.env("XAUTHORITY", &xauthority);
+            if let Ok(wayland) = std::env::var("WAYLAND_DISPLAY") {
+                cmd.env("WAYLAND_DISPLAY", wayland);
+            } else if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+                if std::path::Path::new(&runtime).join("wayland-0").exists() {
+                    cmd.env("WAYLAND_DISPLAY", "wayland-0");
+                }
+            }
+            if let Ok(disp) = std::env::var("DISPLAY") {
+                cmd.env("DISPLAY", disp);
+            } else {
+                cmd.env("DISPLAY", ":0");
+            }
+            if let Ok(xauth) = std::env::var("XAUTHORITY") {
+                cmd.env("XAUTHORITY", xauth);
+            } else if let Some(home) = dirs::home_dir() {
+                let default_xauth = home.join(".Xauthority");
+                if default_xauth.exists() {
+                    cmd.env("XAUTHORITY", default_xauth);
+                }
+            }
+            if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+                cmd.env("XDG_RUNTIME_DIR", runtime);
+            }
+            if let Ok(dbus) = std::env::var("DBUS_SESSION_BUS_ADDRESS") {
+                cmd.env("DBUS_SESSION_BUS_ADDRESS", dbus);
+            }
         }
+
         let _ = cmd.spawn();
 
         #[cfg(target_os = "macos")]
@@ -1446,6 +1562,87 @@ pub fn open_in_vscode_internal(
     }
 }
 
+fn get_candidate_bridge_sockets(problem_id: &str) -> Vec<std::path::PathBuf> {
+    let mut list = Vec::new();
+    let p_lower = problem_id.to_lowercase();
+    let sock_names = [
+        format!("algodeck_vscode_{}.sock", p_lower),
+        "algodeck_vscode_algodeckworkspace.sock".to_string(),
+        "algodeck_vscode_default.sock".to_string(),
+    ];
+
+    let mut base_dirs = Vec::new();
+    if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        let pb = std::path::PathBuf::from(runtime);
+        if pb.exists() {
+            base_dirs.push(pb);
+        }
+    }
+    base_dirs.push(std::path::PathBuf::from("/tmp"));
+    if let Some(home) = dirs::home_dir() {
+        base_dirs.push(home.join(".config").join("algodeck"));
+    }
+
+    // 1. Sprawdź aktywne wskaźniki (algodeck_vscode_active.sock)
+    for b in &base_dirs {
+        let active_file = b.join("algodeck_vscode_active.sock");
+        if let Ok(content) = std::fs::read_to_string(&active_file) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                let p = std::path::PathBuf::from(trimmed);
+                if p.exists() && !list.contains(&p) {
+                    list.push(p);
+                }
+            }
+        }
+    }
+
+    // 2. Sprawdź znane nazwy socketów
+    for b in &base_dirs {
+        for name in &sock_names {
+            let p = b.join(name);
+            if p.exists() && !list.contains(&p) {
+                list.push(p);
+            }
+        }
+    }
+
+    list
+}
+
+fn get_candidate_bridge_ports() -> Vec<u16> {
+    let mut ports = Vec::new();
+    let mut base_dirs = Vec::new();
+    if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        base_dirs.push(std::path::PathBuf::from(runtime));
+    }
+    base_dirs.push(std::path::PathBuf::from("/tmp"));
+    if let Some(home) = dirs::home_dir() {
+        base_dirs.push(home.join(".config").join("algodeck"));
+    }
+
+    for b in &base_dirs {
+        for fname in &["algodeck_bridge_port.txt", "bridge_port.txt"] {
+            let p = b.join(fname);
+            if let Ok(content) = std::fs::read_to_string(&p) {
+                if let Ok(port) = content.trim().parse::<u16>() {
+                    if port >= 49152 && port <= 49165 && !ports.contains(&port) {
+                        ports.push(port);
+                    }
+                }
+            }
+        }
+    }
+
+    for p in 49152..=49157 {
+        if !ports.contains(&p) {
+            ports.push(p);
+        }
+    }
+
+    ports
+}
+
 pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     if problem_id.is_empty() {
         return false;
@@ -1454,34 +1651,16 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     #[cfg(unix)]
     {
         use std::io::{Write, Read};
-        let p_lower = problem_id.to_lowercase();
-        let mut candidate_socks = vec![
-            format!("/tmp/algodeck_vscode_{}.sock", p_lower),
-            "/tmp/algodeck_vscode_algodeckworkspace.sock".to_string(),
-            "/tmp/algodeck_vscode_default.sock".to_string(),
-        ];
-        if let Ok(act) = std::fs::read_to_string("/tmp/algodeck_vscode_active.sock") {
-            let act_trimmed = act.trim().to_string();
-            if !act_trimmed.is_empty() && !candidate_socks.contains(&act_trimmed) {
-                candidate_socks.insert(0, act_trimmed);
-            }
-        }
-
-        for sock_path in candidate_socks {
-            if std::path::Path::new(&sock_path).exists() {
-                if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
-                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(100)));
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(100)));
-                    let req = format!("GET /ping?problem_id={} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", url_encode(problem_id));
-                    if stream.write_all(req.as_bytes()).is_ok() {
-                        let mut buf = [0u8; 1024];
-                        if let Ok(n) = stream.read(&mut buf) {
-                            if n > 0 {
-                                let resp = String::from_utf8_lossy(&buf[..n]);
-                                if resp.contains("200 OK") {
-                                    return true;
-                                }
-                            }
+        for sock_path in get_candidate_bridge_sockets(problem_id) {
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(80)));
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(80)));
+                let req = format!("GET /ping?problem_id={} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n", url_encode(problem_id));
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    let mut buf = [0u8; 1024];
+                    if let Ok(n) = stream.read(&mut buf) {
+                        if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("200 OK") {
+                            return true;
                         }
                     }
                 }
@@ -1489,18 +1668,12 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
         }
     }
 
-    // 1. Sprawdź czy mostek HTTP potwierdza otwarcie zadania lub obecność edytora
-    let ping_url = format!("http://127.0.0.1:49152/ping?problem_id={}", url_encode(problem_id));
-    if let Ok(res) = ureq::get(&ping_url).timeout(std::time::Duration::from_millis(100)).call() {
-        if res.status() == 200 {
-            return true;
-        }
-    }
-
-    // 2. Jeśli mostek ogólny odpowiada, VS Code żyje i jest aktywny
-    if let Ok(res) = ureq::get("http://127.0.0.1:49152/ping").timeout(std::time::Duration::from_millis(100)).call() {
-        if res.status() == 200 {
-            return true;
+    for port in get_candidate_bridge_ports() {
+        let ping_url = format!("http://127.0.0.1:{}/ping?problem_id={}", port, url_encode(problem_id));
+        if let Ok(res) = ureq::get(&ping_url).timeout(std::time::Duration::from_millis(80)).call() {
+            if res.status() == 200 {
+                return true;
+            }
         }
     }
 
@@ -1519,11 +1692,11 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     }
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        // Sprawdź proces Code na Linuxie (Fedora RPM, Ubuntu deb, Arch, Flatpak)
         let is_proc_running = std::process::Command::new("pgrep").args(["-x", "code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
             || std::process::Command::new("pgrep").args(["-f", "code.*electron"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
             || std::process::Command::new("pgrep").args(["-f", "/usr/lib64/vscode/code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
-            || std::process::Command::new("pgrep").args(["-f", "com.visualstudio.code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false);
+            || std::process::Command::new("pgrep").args(["-f", "com.visualstudio.code"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
+            || std::process::Command::new("pgrep").args(["-x", "codium"]).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false);
 
         if is_proc_running {
             return true;
@@ -1546,38 +1719,20 @@ pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str) 
     {
         use std::os::unix::net::UnixStream;
         use std::io::{Write, Read};
-        let p_lower = problem_id.to_lowercase();
-        let mut candidate_socks = vec![
-            format!("/tmp/algodeck_vscode_{}.sock", p_lower),
-            "/tmp/algodeck_vscode_algodeckworkspace.sock".to_string(),
-            "/tmp/algodeck_vscode_default.sock".to_string(),
-        ];
-        if let Ok(act) = std::fs::read_to_string("/tmp/algodeck_vscode_active.sock") {
-            let act_trimmed = act.trim().to_string();
-            if !act_trimmed.is_empty() && !candidate_socks.contains(&act_trimmed) {
-                candidate_socks.insert(0, act_trimmed);
-            }
-        }
-
-        for sock_path in candidate_socks {
-            if std::path::Path::new(&sock_path).exists() {
-                if let Ok(mut stream) = UnixStream::connect(&sock_path) {
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(150)));
-                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(150)));
-                    let req = format!(
-                        "POST /open?pdir={}&file={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        url_encode(p_dir_str),
-                        url_encode(file_path_str)
-                    );
-                    if stream.write_all(req.as_bytes()).is_ok() {
-                        let mut buf = [0u8; 1024];
-                        if let Ok(n) = stream.read(&mut buf) {
-                            if n > 0 {
-                                let resp = String::from_utf8_lossy(&buf[..n]);
-                                if resp.contains("200 OK") {
-                                    return true;
-                                }
-                            }
+        for sock_path in get_candidate_bridge_sockets(problem_id) {
+            if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(120)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(120)));
+                let req = format!(
+                    "POST /open?pdir={}&file={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    url_encode(p_dir_str),
+                    url_encode(file_path_str)
+                );
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    let mut buf = [0u8; 1024];
+                    if let Ok(n) = stream.read(&mut buf) {
+                        if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("200 OK") {
+                            return true;
                         }
                     }
                 }
@@ -1585,10 +1740,12 @@ pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str) 
         }
     }
 
-    let bridge_url = format!("http://127.0.0.1:49152/open?pdir={}&file={}", url_encode(p_dir_str), url_encode(file_path_str));
-    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(150)).call() {
-        if res.status() == 200 {
-            return true;
+    for port in get_candidate_bridge_ports() {
+        let bridge_url = format!("http://127.0.0.1:{}/open?pdir={}&file={}", port, url_encode(p_dir_str), url_encode(file_path_str));
+        if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(120)).call() {
+            if res.status() == 200 {
+                return true;
+            }
         }
     }
 
@@ -1600,38 +1757,20 @@ pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) ->
     {
         use std::os::unix::net::UnixStream;
         use std::io::{Write, Read};
-        let p_lower = problem_id.to_lowercase();
-        let mut candidate_socks = vec![
-            format!("/tmp/algodeck_vscode_{}.sock", p_lower),
-            "/tmp/algodeck_vscode_algodeckworkspace.sock".to_string(),
-            "/tmp/algodeck_vscode_default.sock".to_string(),
-        ];
-        if let Ok(act) = std::fs::read_to_string("/tmp/algodeck_vscode_active.sock") {
-            let act_trimmed = act.trim().to_string();
-            if !act_trimmed.is_empty() && !candidate_socks.contains(&act_trimmed) {
-                candidate_socks.insert(0, act_trimmed);
-            }
-        }
-
-        for sock_path in candidate_socks {
-            if std::path::Path::new(&sock_path).exists() {
-                if let Ok(mut stream) = UnixStream::connect(&sock_path) {
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(150)));
-                    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(150)));
-                    let req = format!(
-                        "POST /{}?pdir={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        endpoint,
-                        url_encode(p_dir_str)
-                    );
-                    if stream.write_all(req.as_bytes()).is_ok() {
-                        let mut buf = [0u8; 1024];
-                        if let Ok(n) = stream.read(&mut buf) {
-                            if n > 0 {
-                                let resp = String::from_utf8_lossy(&buf[..n]);
-                                if resp.contains("200 OK") {
-                                    return true;
-                                }
-                            }
+        for sock_path in get_candidate_bridge_sockets(problem_id) {
+            if let Ok(mut stream) = UnixStream::connect(&sock_path) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(120)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(120)));
+                let req = format!(
+                    "POST /{}?pdir={} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    endpoint,
+                    url_encode(p_dir_str)
+                );
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    let mut buf = [0u8; 1024];
+                    if let Ok(n) = stream.read(&mut buf) {
+                        if n > 0 && String::from_utf8_lossy(&buf[..n]).contains("200 OK") {
+                            return true;
                         }
                     }
                 }
@@ -1639,25 +1778,15 @@ pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) ->
         }
     }
 
-    let bridge_url = format!("http://127.0.0.1:49152/{}?pdir={}", endpoint, url_encode(p_dir_str));
-    if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(150)).call() {
-        if res.status() == 200 {
-            return true;
-        }
-    }
-
-    false
-}
-
-fn which_exists(bin: &str) -> bool {
-    if let Ok(path) = std::env::var("PATH") {
-        for p in std::env::split_paths(&path) {
-            let full = p.join(bin);
-            if full.exists() && full.is_file() {
+    for port in get_candidate_bridge_ports() {
+        let bridge_url = format!("http://127.0.0.1:{}/{}?pdir={}", port, endpoint, url_encode(p_dir_str));
+        if let Ok(res) = ureq::post(&bridge_url).timeout(std::time::Duration::from_millis(120)).call() {
+            if res.status() == 200 {
                 return true;
             }
         }
     }
+
     false
 }
 
@@ -1670,7 +1799,6 @@ pub fn spawn_in_system_terminal(endpoint: &str, p_dir: &std::path::Path, _proble
         let script_str = script_path.to_string_lossy();
         let cmd = format!("cd '{}' && bash '{}'; echo ''; read -p 'Naciśnij Enter, aby zamknąć...' -r", p_dir.display(), script_str);
 
-        // Wykryj terminal: konsole (KDE Plasma!), gnome-terminal, xfce4-terminal, kitty, alacritty, xterm
         let p_dir_str = p_dir.to_string_lossy().to_string();
         let terminals = [
             ("konsole", vec!["--workdir", &p_dir_str, "-e", "bash", "-c", &cmd]),
@@ -1683,11 +1811,27 @@ pub fn spawn_in_system_terminal(endpoint: &str, p_dir: &std::path::Path, _proble
         ];
 
         for (term_bin, args) in terminals {
-            if which_exists(term_bin) {
-                if std::process::Command::new(term_bin).args(&args).spawn().is_ok() {
-                    println!("🚀 AlgoDeck: Uruchomiono {} w terminalu {}", script_name, term_bin);
-                    return;
+            let mut proc = std::process::Command::new(term_bin);
+            proc.args(&args);
+            if let Ok(wayland) = std::env::var("WAYLAND_DISPLAY") {
+                proc.env("WAYLAND_DISPLAY", wayland);
+            } else if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+                if std::path::Path::new(&runtime).join("wayland-0").exists() {
+                    proc.env("WAYLAND_DISPLAY", "wayland-0");
                 }
+            }
+            if let Ok(disp) = std::env::var("DISPLAY") {
+                proc.env("DISPLAY", disp);
+            }
+            if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+                proc.env("XDG_RUNTIME_DIR", runtime);
+            }
+            if let Ok(dbus) = std::env::var("DBUS_SESSION_BUS_ADDRESS") {
+                proc.env("DBUS_SESSION_BUS_ADDRESS", dbus);
+            }
+            if proc.spawn().is_ok() {
+                println!("🚀 AlgoDeck: Uruchomiono {} w terminalu {}", script_name, term_bin);
+                return;
             }
         }
 
@@ -1720,49 +1864,88 @@ where
     F: Fn(&str),
 {
     let p_dir = WorkspaceManager::get_problem_dir(ws_dir, problem_id);
-    let p_dir_str = p_dir.to_string_lossy();
+    let p_dir_str = p_dir.to_string_lossy().to_string();
 
-    // 1. Spróbuj wysłać natychmiast do aktywnego mostka VS Code
+    // 1. ZAPISZ TRIGGER FILE (File IPC) - natychmiastowe, odporne na SELinux, sandbox, flatpak, sieć
+    let algo_dir = p_dir.join(".algo");
+    let _ = std::fs::create_dir_all(&algo_dir);
+    let trigger_algo = algo_dir.join("trigger.json");
+    let trigger_root = p_dir.join("algodeck_trigger.json");
+    let ack_algo = algo_dir.join("trigger_ack.json");
+    let ack_root = p_dir.join("trigger_ack.json");
+
+    // Usuń stare potwierdzenia ACK
+    let _ = std::fs::remove_file(&ack_algo);
+    let _ = std::fs::remove_file(&ack_root);
+
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let trigger_payload = serde_json::json!({
+        "action": endpoint,
+        "pdir": p_dir_str,
+        "problem_id": problem_id,
+        "timestamp": now_ts
+    }).to_string();
+
+    let _ = std::fs::write(&trigger_algo, &trigger_payload);
+    let _ = std::fs::write(&trigger_root, &trigger_payload);
+
+    // 2. Spróbuj wysłać żądanie przez bezpośredni socket UNIX lub serwer HTTP (jeśli aktywny)
     if send_bridge_request(endpoint, problem_id, &p_dir_str) {
+        let _ = std::fs::remove_file(&trigger_algo);
+        let _ = std::fs::remove_file(&trigger_root);
         return true;
     }
 
-    // 2. Jeśli okno nie jest jeszcze otwarte, otwórz je
-    let was_open = is_vscode_open_for_problem(problem_id);
-    if !was_open {
-        open_vscode(problem_id);
-    }
-
-    // 3. Poczekaj krótko na mostek (do 800ms)
-    for _ in 0..4 {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    // 3. Sprawdź czy VS Code odebrał trigger przez File Watcher (krótki poll do 250ms)
+    for _ in 0..5 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let consumed = !trigger_algo.exists() || !trigger_root.exists() || ack_algo.exists() || ack_root.exists();
+        if consumed {
+            let _ = std::fs::remove_file(&trigger_algo);
+            let _ = std::fs::remove_file(&trigger_root);
+            let _ = std::fs::remove_file(&ack_algo);
+            let _ = std::fs::remove_file(&ack_root);
+            return true;
+        }
         if send_bridge_request(endpoint, problem_id, &p_dir_str) {
+            let _ = std::fs::remove_file(&trigger_algo);
+            let _ = std::fs::remove_file(&trigger_root);
             return true;
         }
     }
 
-    // 4. Fallback A: Wywołaj bezpośrednio zarejestrowaną komendę przez code CLI
-    let vscode_cmd_name = if endpoint == "test" { "algodeck.test" } else { "algodeck.run" };
-    #[cfg(unix)]
-    {
-        let candidates = [
-            "/usr/local/bin/code",
-            "/opt/homebrew/bin/code",
-            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-            "/usr/bin/code",
-        ];
-        let code_bin = candidates.iter().find(|p| std::path::Path::new(p).exists()).copied().unwrap_or("code");
-        if let Ok(st) = std::process::Command::new(code_bin)
-            .args(["--reuse-window", "--command", vscode_cmd_name])
-            .status()
-        {
-            if st.success() {
+    // 4. Jeśli okno VS Code nie jest otwarte dla tego zadania, otwórz je
+    let was_open = is_vscode_open_for_problem(problem_id);
+    if !was_open {
+        open_vscode(problem_id);
+        // Poczekaj chwilę na start okna i File Watchera w VS Code
+        for _ in 0..6 {
+            std::thread::sleep(std::time::Duration::from_millis(70));
+            let consumed = !trigger_algo.exists() || !trigger_root.exists() || ack_algo.exists() || ack_root.exists();
+            if consumed {
+                let _ = std::fs::remove_file(&trigger_algo);
+                let _ = std::fs::remove_file(&trigger_root);
+                let _ = std::fs::remove_file(&ack_algo);
+                let _ = std::fs::remove_file(&ack_root);
+                return true;
+            }
+            if send_bridge_request(endpoint, problem_id, &p_dir_str) {
+                let _ = std::fs::remove_file(&trigger_algo);
+                let _ = std::fs::remove_file(&trigger_root);
                 return true;
             }
         }
     }
 
-    // 5. Fallback B: Uruchomienie w natywnym terminalu systemowym (KDE Konsole, GNOME, Terminal.app itp.)
+    // Posprzątaj triggery przed uruchomieniem w terminalu systemowym
+    let _ = std::fs::remove_file(&trigger_algo);
+    let _ = std::fs::remove_file(&trigger_root);
+
+    // 5. Niezawodny Fallback: Uruchomienie w natywnym oknie terminala systemowego (KDE Konsole, GNOME, itp.)
     spawn_in_system_terminal(endpoint, &p_dir, problem_id);
     true
 }
