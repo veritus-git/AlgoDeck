@@ -409,3 +409,101 @@ async function syncSettingsFromBackend() {
 }
 syncSettingsFromBackend();
 setInterval(syncSettingsFromBackend, 15000);
+
+// -----------------------------------------------------------------------------
+// WEBSOCKET: PRZEŁĄCZANIE KART I SYNCHRONIZACJA W CZASIE RZECZYWISTYM
+// -----------------------------------------------------------------------------
+let daemonWs = null;
+let wsReconnectTimer = null;
+
+function connectDaemonWebSocket() {
+  if (daemonWs && (daemonWs.readyState === WebSocket.OPEN || daemonWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  try {
+    const wsUrl = "ws://127.0.0.1:8080/ws";
+    daemonWs = new WebSocket(wsUrl);
+
+    daemonWs.onopen = () => {
+      console.log("[AlgoDeck Extension] WebSocket połączony z daemonem.");
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+    };
+
+    daemonWs.onmessage = async (evt) => {
+      try {
+        const msg = evt.data;
+        if (!msg || typeof msg !== "string") return;
+
+        if (msg.startsWith("navigate:")) {
+          const target = msg.substring("navigate:".length).trim();
+          handleTabNavigation(target);
+        }
+      } catch (err) {
+        console.warn("[AlgoDeck Extension] Błąd parsowania wiadomości WS:", err);
+      }
+    };
+
+    daemonWs.onclose = () => {
+      daemonWs = null;
+      if (!wsReconnectTimer) {
+        wsReconnectTimer = setTimeout(connectDaemonWebSocket, 3000);
+      }
+    };
+
+    daemonWs.onerror = () => {
+      if (daemonWs) daemonWs.close();
+    };
+  } catch (_) {
+    if (!wsReconnectTimer) {
+      wsReconnectTimer = setTimeout(connectDaemonWebSocket, 3000);
+    }
+  }
+}
+
+async function handleTabNavigation(target) {
+  if (typeof chrome === "undefined" || !chrome.tabs) return;
+
+  try {
+    const tabs = await chrome.tabs.query({});
+    if (target === "settings") {
+      const match = tabs.find(t => t.url && (t.url.includes("/settings") || t.url.includes("settings.html")));
+      if (match) {
+        await chrome.tabs.update(match.id, { active: true });
+        if (chrome.windows && match.windowId) {
+          await chrome.windows.update(match.windowId, { focused: true });
+        }
+      } else {
+        await chrome.tabs.create({ url: "http://127.0.0.1:8080/settings" });
+      }
+    } else if (target === "new_task") {
+      const match = tabs.find(t => t.url && (t.url.includes("popup.html") || t.url.includes("trigger=pdf")));
+      if (match) {
+        await chrome.tabs.update(match.id, { active: true, url: "http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf" });
+        if (chrome.windows && match.windowId) {
+          await chrome.windows.update(match.windowId, { focused: true });
+        }
+      } else {
+        await chrome.tabs.create({ url: "http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf" });
+      }
+    } else if (target === "web_hub") {
+      const match = tabs.find(t => t.url && (t.url === "http://127.0.0.1:8080/" || t.url.startsWith("http://127.0.0.1:8080/#") || t.url === "http://localhost:8080/"));
+      if (match) {
+        await chrome.tabs.update(match.id, { active: true });
+        if (chrome.windows && match.windowId) {
+          await chrome.windows.update(match.windowId, { focused: true });
+        }
+      } else {
+        await chrome.tabs.create({ url: "http://127.0.0.1:8080/" });
+      }
+    }
+  } catch (err) {
+    console.warn("[AlgoDeck Extension] handleTabNavigation error:", err);
+  }
+}
+
+connectDaemonWebSocket();
+setInterval(connectDaemonWebSocket, 10000);

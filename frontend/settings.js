@@ -647,4 +647,18 @@ document.addEventListener("DOMContentLoaded", () => {
   pollStreamDeckTimer = setInterval(() => {
     refreshStreamDeckVirtualGrid();
   }, 3000);
+
+  // Live WebSocket dla ustawień — wyciąganie na pierwszy plan
+  try {
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsHost = window.location.host || "127.0.0.1:8080";
+    const ws = new WebSocket(`${wsProto}//${wsHost}/ws`);
+    ws.onmessage = (e) => {
+      if (e.data === "navigate:settings") {
+        window.focus();
+        document.body.classList.add("focus-glow");
+        setTimeout(() => document.body.classList.remove("focus-glow"), 1000);
+      }
+    };
+  } catch (_) {}
 });

@@ -201,10 +201,10 @@ fn run_daemon(port: u16) {
                 }
             }
             "new_task" => {
-                server::open_browser_foreground("http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf");
+                server::open_browser_tab_or_focus("http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf", "new_task", &ws_sender_cb);
             }
             "open_settings" => {
-                server::open_browser_foreground("http://127.0.0.1:8080/settings");
+                server::open_browser_tab_or_focus("http://127.0.0.1:8080/settings", "settings", &ws_sender_cb);
             }
             "open_menu" => {
                 let problems = workspace::WorkspaceManager::list_problems(&ws_dir);
@@ -233,7 +233,7 @@ fn run_daemon(port: u16) {
                     let _ = ws_sender_cb.send(format!("active:{}", first.problem_id));
                     open_in_vscode(&first.problem_id);
                 } else {
-                    server::open_browser_foreground("http://127.0.0.1:8080/");
+                    server::open_browser_tab_or_focus("http://127.0.0.1:8080/", "web_hub", &ws_sender_cb);
                 }
             }
             "next_task" | "prev_task" => {

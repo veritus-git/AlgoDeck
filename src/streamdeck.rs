@@ -1079,35 +1079,99 @@ pub fn kill_streamdeck_conflicts() {
             .status();
 
         let my_pid = std::process::id();
-        let conflict_patterns = [
-            "streamcontroller",
-            "StreamController",
+        let parent_pid = unsafe { libc::getppid() as u32 };
+
+        // Ścisłe procesy binarne
+        let exact_binaries = [
             "boatswain",
             "deckmaster",
-            "streamdeck-ui",
+            "streamcontroller",
             "opendeck",
         ];
 
-        for pattern in &conflict_patterns {
+        for bin in &exact_binaries {
             let pgrep = std::process::Command::new("pgrep")
-                .args(["-f", pattern])
+                .args(["-x", bin])
                 .output();
             if let Ok(out) = pgrep {
                 let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
                     .lines()
                     .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .filter(|&pid| pid != my_pid)
+                    .filter(|&pid| pid != my_pid && pid != parent_pid && pid > 1)
                     .collect();
 
-                if !pids.is_empty() {
-                    for pid in &pids {
-                        let _ = std::process::Command::new("kill")
-                            .args(["-9", &pid.to_string()])
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .status();
-                    }
-                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {} (PID: {:?})\x1b[0m", pattern, pids);
+                for pid in &pids {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {} (PID: {})\x1b[0m", bin, pid);
+                    killed = true;
+                }
+            }
+        }
+
+        // Sprawdź procesy Python StreamController i streamdeck-ui
+        // z rygorystyczną ochroną powłoki (bash, sh, zsh, curl), instalatora i AlgoDeck
+        let pgrep_py = std::process::Command::new("pgrep")
+            .args(["-f", "streamcontroller|streamdeck-ui|streamdeck_ui"])
+            .output();
+        if let Ok(out) = pgrep_py {
+            let candidate_pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| l.trim().parse::<u32>().ok())
+                .filter(|&pid| pid != my_pid && pid != parent_pid && pid > 1)
+                .collect();
+
+            for pid in candidate_pids {
+                let comm_path = format!("/proc/{}/comm", pid);
+                let cmdline_path = format!("/proc/{}/cmdline", pid);
+
+                let comm = std::fs::read_to_string(&comm_path)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_lowercase();
+                let cmdline = std::fs::read_to_string(&cmdline_path)
+                    .unwrap_or_default()
+                    .to_lowercase();
+
+                // BEZWZGLĘDNA OCHRONA powłok, narzędzi systemowych, instalatora i kompilacji
+                let protected_comms = [
+                    "bash", "sh", "zsh", "dash", "fish", "curl", "wget", "git",
+                    "systemd", "gnome-shell", "kwin", "kwin_wayland", "kwin_x11",
+                    "plasmashell", "plasma-workspace", "code", "codium", "algodeck",
+                    "cargo", "rustc",
+                ];
+                if protected_comms.iter().any(|&p| comm == p || comm.starts_with(p)) {
+                    continue;
+                }
+
+                if cmdline.contains("bootstrap.sh")
+                    || cmdline.contains("install.sh")
+                    || cmdline.contains("algodeck")
+                    || cmdline.contains("cargo")
+                    || cmdline.contains("target/release")
+                    || cmdline.contains("target/debug")
+                {
+                    continue;
+                }
+
+                // Sprawdzamy czy to rzeczywiście proces Pythona odpalanego jako StreamController lub streamdeck-ui
+                let is_python_conflict = comm.contains("python")
+                    && (cmdline.contains("streamcontroller")
+                        || cmdline.contains("streamdeck-ui")
+                        || cmdline.contains("streamdeck_ui"));
+
+                let is_exact_conflict = exact_binaries.iter().any(|&b| comm == b);
+
+                if is_python_conflict || is_exact_conflict {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego procesu: {} (PID: {})\x1b[0m", comm, pid);
                     killed = true;
                 }
             }
@@ -1117,6 +1181,8 @@ pub fn kill_streamdeck_conflicts() {
     #[cfg(target_os = "macos")]
     {
         let my_pid = std::process::id();
+        let parent_pid = unsafe { libc::getppid() as u32 };
+
         let conflict_patterns = [
             "Stream Deck",
             "StreamDeck",
@@ -1135,18 +1201,25 @@ pub fn kill_streamdeck_conflicts() {
                 let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
                     .lines()
                     .filter_map(|l| l.trim().parse::<u32>().ok())
-                    .filter(|&pid| pid != my_pid)
+                    .filter(|&pid| pid != my_pid && pid != parent_pid && pid > 1)
                     .collect();
 
-                if !pids.is_empty() {
-                    for pid in &pids {
-                        let _ = std::process::Command::new("kill")
-                            .args(["-9", &pid.to_string()])
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .status();
+                for pid in pids {
+                    // Sprawdź czy to nie jest bash/sh/curl/algodeck
+                    let ps_comm = std::process::Command::new("ps")
+                        .args(["-p", &pid.to_string(), "-o", "comm="])
+                        .output();
+                    let comm_str = ps_comm.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase()).unwrap_or_default();
+                    if comm_str.contains("bash") || comm_str.contains("sh") || comm_str.contains("zsh") || comm_str.contains("curl") || comm_str.contains("algodeck") || comm_str.contains("cargo") {
+                        continue;
                     }
-                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {} (PID: {:?})\x1b[0m", pattern, pids);
+
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status();
+                    eprintln!("\x1b[1;33m⚡ [AlgoDeck] Wymuszono zamknięcie kolidującego programu: {} (PID: {})\x1b[0m", pattern, pid);
                     killed = true;
                 }
             }

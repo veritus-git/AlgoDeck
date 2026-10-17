@@ -267,6 +267,8 @@ impl WorkspaceManager {
         let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("Błąd rozpakowywania ZIP: {}", e))?;
 
         let mut added = 0;
+        // Zbierz wszystkie pliki z zachowaniem pełnej ścieżki i nazwy bazowej
+        let mut full_path_files: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
         let mut extracted_files: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
 
         for i in 0..archive.len() {
@@ -282,44 +284,99 @@ impl WorkspaceManager {
                 if !clean_name.starts_with('.') {
                     let mut buffer = Vec::new();
                     let _ = file.read_to_end(&mut buffer);
+                    full_path_files.insert(fname.clone(), buffer.clone());
                     extracted_files.insert(clean_name, buffer);
                 }
             }
         }
 
-        // Pair up .in with .out or .ans
-        let mut in_stems: Vec<String> = Vec::new();
-        for name in extracted_files.keys() {
+        // Obsługiwane rozszerzenia wejścia i wyjścia (standardy Olimpiady Informatycznej, Szkopuł, SIO2, OIJ)
+        let in_exts = ["in", "we"];
+        let out_exts = ["out", "ans", "roz", "ok", "wy"];
+
+        // 1. Zidentyfikuj wszystkie potencjalne testy wejściowe
+        let mut test_pairs: Vec<(String, Vec<u8>, Option<Vec<u8>>)> = Vec::new();
+        let mut handled_stems: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for (name, in_bytes) in &extracted_files {
             let p = Path::new(name);
-            if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
-                if ext.eq_ignore_ascii_case("in") {
-                    if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                        in_stems.push(stem.to_string());
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+
+            if in_exts.contains(&ext.as_str()) && !stem.is_empty() {
+                if handled_stems.contains(&stem) {
+                    continue;
+                }
+                handled_stems.insert(stem.clone());
+
+                // Szukaj pasującego wyjścia w extracted_files
+                let mut matched_out: Option<Vec<u8>> = None;
+                for o_ext in &out_exts {
+                    let o_name = format!("{}.{}", stem, o_ext);
+                    if let Some(ob) = extracted_files.get(&o_name) {
+                        matched_out = Some(ob.clone());
+                        break;
+                    }
+                }
+
+                // Jeśli nie znaleziono pod bezpośrednią nazwą, przeszukaj podfoldery out/ i output/
+                if matched_out.is_none() {
+                    for (fp, bytes) in &full_path_files {
+                        let fp_lower = fp.to_lowercase();
+                        if fp_lower.contains("/out/") || fp_lower.contains("/output/") || fp_lower.starts_with("out/") || fp_lower.starts_with("output/") {
+                            let f_stem = Path::new(fp).file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            if f_stem == stem {
+                                matched_out = Some(bytes.clone());
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                test_pairs.push((stem, in_bytes.clone(), matched_out));
+            }
+        }
+
+        // 2. Jeśli nie znaleziono plików po rozszerzeniu .in/.we, przeszukaj foldery in/ i input/
+        if test_pairs.is_empty() {
+            for (fp, in_bytes) in &full_path_files {
+                let fp_lower = fp.to_lowercase();
+                if fp_lower.contains("/in/") || fp_lower.contains("/input/") || fp_lower.starts_with("in/") || fp_lower.starts_with("input/") {
+                    let p = Path::new(fp);
+                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    if !stem.is_empty() && !handled_stems.contains(&stem) {
+                        handled_stems.insert(stem.clone());
+
+                        // Szukaj w out/ lub output/
+                        let mut matched_out: Option<Vec<u8>> = None;
+                        for (ofp, obytes) in &full_path_files {
+                            let ofp_lower = ofp.to_lowercase();
+                            if ofp_lower.contains("/out/") || ofp_lower.contains("/output/") || ofp_lower.starts_with("out/") || ofp_lower.starts_with("output/") {
+                                let o_stem = Path::new(ofp).file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                                if o_stem == stem {
+                                    matched_out = Some(obytes.clone());
+                                    break;
+                                }
+                            }
+                        }
+
+                        test_pairs.push((stem, in_bytes.clone(), matched_out));
                     }
                 }
             }
         }
 
-        for stem in in_stems {
-            let in_name = format!("{}.in", stem);
-            if let Some(in_bytes) = extracted_files.get(&in_name) {
-                let target_in = tests_dir.join(format!("{}.in", stem));
-                let _ = fs::write(&target_in, in_bytes);
+        // Zapisz pary testów na dysku
+        for (stem, in_bytes, out_bytes_opt) in test_pairs {
+            let target_in = tests_dir.join(format!("{}.in", stem));
+            let _ = fs::write(&target_in, in_bytes);
 
-                // Look for out or ans
-                let out_name = format!("{}.out", stem);
-                let ans_name = format!("{}.ans", stem);
-
-                if let Some(out_bytes) = extracted_files.get(&out_name) {
-                    let target_out = tests_dir.join(format!("{}.out", stem));
-                    let _ = fs::write(&target_out, out_bytes);
-                } else if let Some(ans_bytes) = extracted_files.get(&ans_name) {
-                    let target_out = tests_dir.join(format!("{}.out", stem));
-                    let _ = fs::write(&target_out, ans_bytes);
-                }
-
-                added += 1;
+            if let Some(out_bytes) = out_bytes_opt {
+                let target_out = tests_dir.join(format!("{}.out", stem));
+                let _ = fs::write(&target_out, out_bytes);
             }
+
+            added += 1;
         }
 
         // Update manifest with new test list

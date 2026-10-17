@@ -2,7 +2,7 @@
 # ==============================================================================
 # AlgoDeck ⚡ Koło MAP - 100% Rust One-Click Installer (Linux)
 # W 100% zautomatyzowana, lekka instalacja natywnego środowiska olimpijskiego.
-# ZERO Pythona, ZERO StreamControllera, ZERO uvicorn/venv.
+# ZERO Pythona, ZERO zewnętrznych aplikacji, ZERO uvicorn/venv.
 # ==============================================================================
 
 set -e
@@ -364,7 +364,7 @@ if command -v systemctl &> /dev/null && systemctl --user list-units &> /dev/null
     mkdir -p "$HOME/.config/systemd/user"
     cat << SERVICE_EOF > "$HOME/.config/systemd/user/algodeck.service"
 [Unit]
-Description=AlgoDeck ⚡ Koło MAP - 100% Rust Daemon & Stream Deck Controller
+Description=AlgoDeck ⚡ Koło MAP - 100% Rust Daemon & USB Stream Deck Engine
 After=network.target
 
 [Service]

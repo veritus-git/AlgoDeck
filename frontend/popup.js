@@ -1224,14 +1224,29 @@ function setupShutdown() {
     btnStop.textContent = "Wyłącz";
   });
 
+  function openOrFocusBrowserTab(urlKeyword, fallbackUrl, targetWindowName) {
+    if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.query) {
+      chrome.tabs.query({}, (tabs) => {
+        const match = (tabs || []).find(t => t.url && t.url.includes(urlKeyword));
+        if (match) {
+          chrome.tabs.update(match.id, { active: true });
+          if (chrome.windows && match.windowId) {
+            chrome.windows.update(match.windowId, { focused: true });
+          }
+        } else {
+          const fullUrl = (chrome.runtime && chrome.runtime.getURL) ? chrome.runtime.getURL(urlKeyword) : fallbackUrl;
+          chrome.tabs.create({ url: fullUrl });
+        }
+      });
+    } else {
+      window.open(fallbackUrl, targetWindowName || "_blank");
+    }
+  }
+
   const btnSettings = document.getElementById("btn-header-settings");
   if (btnSettings) {
     btnSettings.addEventListener("click", () => {
-      if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
-        chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
-      } else {
-        window.open("settings.html", "_blank");
-      }
+      openOrFocusBrowserTab("settings.html", "http://127.0.0.1:8080/settings", "algodeck_settings");
     });
   }
 
@@ -1241,12 +1256,8 @@ function setupShutdown() {
       btnHeaderTab.style.display = "none";
     } else {
       btnHeaderTab.addEventListener("click", () => {
-        if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
-          chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?mode=tab") });
-          window.close();
-        } else {
-          window.open("popup.html?mode=tab", "_blank");
-        }
+        openOrFocusBrowserTab("popup.html?mode=tab", "http://127.0.0.1:8080/popup.html?mode=tab", "algodeck_tab");
+        window.close();
       });
     }
   }
@@ -1254,12 +1265,8 @@ function setupShutdown() {
   const btnLinkTab = document.getElementById("btn-link-tab");
   if (btnLinkTab) {
     btnLinkTab.addEventListener("click", () => {
-      if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.create) {
-        chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?mode=tab") });
-        window.close();
-      } else {
-        window.open("popup.html?mode=tab", "_blank");
-      }
+      openOrFocusBrowserTab("popup.html?mode=tab", "http://127.0.0.1:8080/popup.html?mode=tab", "algodeck_tab");
+      window.close();
     });
   }
 

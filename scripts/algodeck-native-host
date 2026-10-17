@@ -2,7 +2,7 @@
 """
 AlgoDeck Native Messaging Host
 Umożliwia rozszerzeniu przeglądarki bezpośrednie uruchamianie i zatrzymywanie
-środowiska AlgoDeck (nawet gdy daemon i StreamController są całkowicie offline).
+środowiska AlgoDeck (nawet gdy daemon jest offline).
 """
 import sys, json, struct, subprocess, os
 

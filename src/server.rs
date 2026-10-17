@@ -130,7 +130,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/shutdown", post(shutdown_server))
         .route("/streamdeck/state", get(get_streamdeck_state))
         .route("/streamdeck/brightness", post(set_streamdeck_brightness))
-        .route("/streamdeck/press/:key_id", post(press_streamdeck_key));
+        .route("/streamdeck/press/:key_id", post(press_streamdeck_key))
+        .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024));
 
     let mut router = Router::new()
         .nest("/api", api_routes)
@@ -140,6 +141,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/favicon.ico", get(serve_favicon))
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::permissive())
+        .layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024))
         .with_state(app_state);
 
     // Serve static frontend if directory exists
@@ -1008,8 +1010,56 @@ pub fn open_browser_foreground(url: &str) {
     }
 }
 
-async fn open_gui() -> Json<serde_json::Value> {
-    open_browser_foreground("http://127.0.0.1:8080/");
+pub fn open_browser_tab_or_focus(url: &str, nav_target: &str, ws_sender: &tokio::sync::broadcast::Sender<String>) {
+    // Wyślij sygnał nawigacji przez WebSocket do otwartych kart i rozszerzenia
+    let _ = ws_sender.send(format!("navigate:{}", nav_target));
+
+    if ws_sender.receiver_count() > 0 {
+        // Podłączone rozszerzenie lub karta natychmiast przełącza i aktywuje kartę w przeglądarce
+        #[cfg(target_os = "linux")]
+        {
+            let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"];
+            activate_linux_window(&targets);
+            std::thread::spawn(move || {
+                for delay in [80, 200, 450, 800] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    activate_linux_window(&["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"]);
+                }
+            });
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let script = r#"
+                    tell application "System Events"
+                        set bList to {"Brave Browser", "Google Chrome", "Arc", "Chromium", "Safari", "Firefox", "Microsoft Edge"}
+                        repeat with b in bList
+                            if exists (process b) then
+                                tell application b to activate
+                                exit repeat
+                            end if
+                        end repeat
+                    end tell
+                "#;
+                let _ = std::process::Command::new("osascript").args(["-e", script]).output();
+            });
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let ps_cmd = r#"$w = New-Object -ComObject WScript.Shell; $p = Get-Process | Where-Object { $_.ProcessName -match 'chrome|brave|msedge|firefox|opera|vivaldi' } | Sort-Object -Descending -Property StartTime | Select-Object -First 1; if ($p) { $w.AppActivate($p.MainWindowTitle) }"#;
+                let _ = std::process::Command::new("powershell").args(["-NoProfile", "-Command", ps_cmd]).spawn();
+            });
+        }
+    } else {
+        open_browser_foreground(url);
+    }
+}
+
+async fn open_gui(State(state): State<AppState>) -> Json<serde_json::Value> {
+    open_browser_tab_or_focus("http://127.0.0.1:8080/", "web_hub", &state.ws_sender);
     Json(serde_json::json!({ "success": true }))
 }
 
@@ -1413,8 +1463,11 @@ async fn stage_file(
         if let Ok(mut archive) = zip::ZipArchive::new(reader) {
             for i in 0..archive.len() {
                 if let Ok(file) = archive.by_index(i) {
-                    if file.name().to_lowercase().ends_with(".in") {
-                        tests_count += 1;
+                    if file.is_file() {
+                        let name = file.name().to_lowercase();
+                        if name.ends_with(".in") || name.ends_with(".we") || name.contains("/in/") || name.starts_with("in/") {
+                            tests_count += 1;
+                        }
                     }
                 }
             }
@@ -3090,10 +3143,10 @@ async fn press_streamdeck_key(
                 }
             }
             "new_task" => {
-                open_browser_foreground("http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf");
+                open_browser_tab_or_focus("http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf", "new_task", &state.ws_sender);
             }
             "open_settings" => {
-                open_browser_foreground("http://127.0.0.1:8080/settings");
+                open_browser_tab_or_focus("http://127.0.0.1:8080/settings", "settings", &state.ws_sender);
             }
             "open_menu" => {
                 let problems = WorkspaceManager::list_problems(&ws_dir);
@@ -3122,7 +3175,7 @@ async fn press_streamdeck_key(
                     };
                     open_in_vscode_internal(&first.problem_id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
                 } else {
-                    open_browser_foreground("http://127.0.0.1:8080/");
+                    open_browser_tab_or_focus("http://127.0.0.1:8080/", "web_hub", &state.ws_sender);
                 }
             }
             "prev_task" => {

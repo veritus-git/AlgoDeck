@@ -512,6 +512,111 @@ fn test_download_registry_deduplication() {
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
 
+#[test]
+fn test_zip_olympiad_formats_and_large_packages() {
+    use algodeck::workspace::WorkspaceManager;
+    use std::io::Write;
+
+    let tmp_ws = std::env::temp_dir().join(format!("algodeck_test_zip_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_ws);
+    let _ = std::fs::create_dir_all(&tmp_ws);
+
+    // Stwórz zadanie testowe
+    let analysis = algodeck::pdf::ProblemAnalysis {
+        problem_id: "sum".to_string(),
+        title: "Suma Liczb".to_string(),
+        time_limit_sec: 1.0,
+        memory_limit_mb: 128,
+        tests: Vec::new(),
+        used_engine: "test".to_string(),
+    };
+    WorkspaceManager::create_problem(&tmp_ws, &analysis, None).expect("Stworzenie zadania");
+
+    // Stwórz archiwum ZIP z formatami olimpijskimi: .we / .wy, .in / .out, podfoldery in/ i out/
+    let mut zip_buf = Vec::new();
+    {
+        let mut zip_writer = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_buf));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        // Test 1: format .in / .out
+        zip_writer.start_file("1.in", options).unwrap();
+        zip_writer.write_all(b"2 3\n").unwrap();
+        zip_writer.start_file("1.out", options).unwrap();
+        zip_writer.write_all(b"5\n").unwrap();
+
+        // Test 2: format .we / .wy (standard Olimpiady Informatycznej)
+        zip_writer.start_file("2a.we", options).unwrap();
+        zip_writer.write_all(b"10 20\n").unwrap();
+        zip_writer.start_file("2a.wy", options).unwrap();
+        zip_writer.write_all(b"30\n").unwrap();
+
+        // Test 3: format .in / .ans
+        zip_writer.start_file("3.in", options).unwrap();
+        zip_writer.write_all(b"100 200\n").unwrap();
+        zip_writer.start_file("3.ans", options).unwrap();
+        zip_writer.write_all(b"300\n").unwrap();
+
+        // Test 4: podfoldery in/ oraz out/
+        zip_writer.start_file("in/4.in", options).unwrap();
+        zip_writer.write_all(b"7 8\n").unwrap();
+        zip_writer.start_file("out/4.out", options).unwrap();
+        zip_writer.write_all(b"15\n").unwrap();
+
+        zip_writer.finish().unwrap();
+    }
+
+    let added = WorkspaceManager::add_tests_from_zip(&tmp_ws, "sum", &zip_buf).expect("Import ZIP");
+    assert_eq!(added, 4, "Wszystkie 4 formaty testów olimpijskich (.in/.out, .we/.wy, .in/.ans, in/ / out/) muszą zostać poprawnie sparsowane!");
+
+    let manifest = WorkspaceManager::get_manifest(&tmp_ws, "sum").expect("Manifest");
+    assert_eq!(manifest.tests.len(), 4);
+
+    let _ = std::fs::remove_dir_all(&tmp_ws);
+}
+
+#[tokio::test]
+async fn test_large_file_upload_beyond_axum_default_limit() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    let settings = Arc::new(RwLock::new(AppSettings::load()));
+    let runner = Arc::new(TestExecutor::new(settings.clone()));
+    let streamdeck = Arc::new(StreamDeckEngine::new());
+    let (ws_sender, _) = broadcast::channel(10);
+    let shutdown_signal = Arc::new(AtomicBool::new(false));
+
+    let app_state = AppState {
+        settings,
+        runner,
+        streamdeck,
+        ws_sender,
+        shutdown_signal,
+    };
+    let router = create_router(app_state);
+
+    // Stwórz 5 MB payload (ponad domyślny 2 MB limit Axum)
+    let boundary = "---------------------------974767299852498929531610575";
+    let mut body_bytes = Vec::new();
+    body_bytes.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+    body_bytes.extend_from_slice(b"Content-Disposition: form-data; name=\"file\"; filename=\"large_test.zip\"\r\n");
+    body_bytes.extend_from_slice(b"Content-Type: application/zip\r\n\r\n");
+    body_bytes.resize(body_bytes.len() + 5 * 1024 * 1024, b'X');
+    body_bytes.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/stage-file")
+        .header("content-type", format!("multipart/form-data; boundary={}", boundary))
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = router.oneshot(req).await.unwrap();
+    assert_ne!(res.status(), StatusCode::PAYLOAD_TOO_LARGE, "Axum nie może odrzucać plików większych niż domyślne 2 MB!");
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
 
 
 
