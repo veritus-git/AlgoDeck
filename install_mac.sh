@@ -439,19 +439,57 @@ rm -rf "$SHARE_DIR/staging"/* 2>/dev/null || true
 mkdir -p "$SHARE_DIR/staging" 2>/dev/null || true
 SNAPSHOT_FILE="$CFG_DIR/initial_downloads.json"
 python3 -c "
-import os, json, time
+import os, json, time, hashlib
+
 dl = os.path.expanduser('~/Downloads')
-files = []
+now_ms = int(time.time() * 1000)
+entries = {}
+all_files = []
+
 if os.path.exists(dl):
-    for f in os.listdir(dl):
-        files.append(f)
-data = {
-    'installed_at': int(time.time() * 1000),
-    'ignored_files': files
+    try:
+        for f in os.listdir(dl):
+            all_files.append(f)
+            if f.lower().endswith('.pdf'):
+                full_path = os.path.join(dl, f)
+                if os.path.isfile(full_path):
+                    try:
+                        st = os.stat(full_path)
+                        h = hashlib.sha256()
+                        with open(full_path, 'rb') as fp:
+                            while chunk := fp.read(65536):
+                                h.update(chunk)
+                        entries[f.lower()] = {
+                            'filename': f,
+                            'path': full_path,
+                            'sha256': h.hexdigest(),
+                            'size': st.st_size,
+                            'modified_ms': int(st.st_mtime * 1000),
+                            'registered_at': now_ms,
+                            'is_initial': True
+                        }
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+cfg_dir = os.path.expanduser('~/.config/algodeck')
+os.makedirs(cfg_dir, exist_ok=True)
+
+reg_data = {
+    'version': 1,
+    'updated_at': now_ms,
+    'entries': entries
 }
-cfg = os.path.expanduser('~/.config/algodeck/initial_downloads.json')
-with open(cfg, 'w') as out:
-    json.dump(data, out, indent=2)
+with open(os.path.join(cfg_dir, 'downloaded_pdf_registry.json'), 'w') as out:
+    json.dump(reg_data, out, indent=2)
+
+init_data = {
+    'installed_at': now_ms,
+    'ignored_files': all_files
+}
+with open(os.path.join(cfg_dir, 'initial_downloads.json'), 'w') as out:
+    json.dump(init_data, out, indent=2)
 " 2>/dev/null || true
 
 # ------------------------------------------------------------------------------

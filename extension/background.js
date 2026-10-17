@@ -147,6 +147,19 @@ async function initDownloadIgnoreList() {
         stored.initial_ignored_files.forEach(f => initialIgnoredFiles.add(f.toLowerCase()));
       }
     }
+
+    // Załaduj także fizyczny rejestr z silnika Rust
+    try {
+      const res = await fetch(`${API_BASE}/api/registered-downloads`);
+      if (res.ok) {
+        const regData = await res.json();
+        if (regData && regData.entries) {
+          for (const key of Object.keys(regData.entries)) {
+            initialIgnoredFiles.add(key.toLowerCase());
+          }
+        }
+      }
+    } catch (_) {}
   } catch (e) {
     console.warn("[AlgoDeck] Błąd initDownloadIgnoreList:", e);
   }
@@ -160,7 +173,7 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onInstalle
 }
 
 // Obsługa zakończonego pobierania (wyłącznie świeże PDFy pobrane w tej sesji!)
-async function handleCompletedDownload(downloadId) {
+async function handleCompletedDownload(downloadId, isSilentStartup = false) {
   if (!downloadId) return;
 
   if (processedDownloads.has(downloadId) || initialIgnoredIds.has(downloadId)) {
@@ -168,7 +181,7 @@ async function handleCompletedDownload(downloadId) {
   }
 
   try {
-    // 1. Pobierz informacje o pliku z retry (Chrome na macOS potrzebuje chwili na sfinalizowanie pliku)
+    // 1. Pobierz informacje o pliku z retry (Chrome potrzebuje chwili na sfinalizowanie pliku)
     let item = null;
     for (let i = 0; i < 20; i++) {
       const items = await chrome.downloads.search({ id: downloadId });
@@ -183,20 +196,10 @@ async function handleCompletedDownload(downloadId) {
     }
 
     if (!item || item.state !== "complete") {
-      // Plik jeszcze się nie sfinalizował — nie oznaczaj jako przetworzonego, poczekaj na stan complete
       return;
     }
 
     if (!isOlympicTaskFile(item)) {
-      return;
-    }
-
-    // Sprawdź czy plik nie pochodzi sprzed instalacji AlgoDeck
-    const startTs = item.startTime ? new Date(item.startTime).getTime() : 0;
-    const finishTs = item.endTime ? new Date(item.endTime).getTime() : startTs;
-    if (algodeckInstalledAt && Math.max(startTs, finishTs) <= algodeckInstalledAt) {
-      console.log("[AlgoDeck] Pominięto plik sprzed instalacji AlgoDeck:", item.filename);
-      initialIgnoredIds.add(downloadId);
       return;
     }
 
@@ -209,11 +212,9 @@ async function handleCompletedDownload(downloadId) {
     const baseName = filename.replace(/^.*[\\\/]/, '');
     const lowerBase = baseName.toLowerCase();
     if (initialIgnoredFiles.has(lowerBase)) {
-      if (algodeckInstalledAt && Math.max(startTs, finishTs) <= algodeckInstalledAt + 3000) {
-        console.log("[AlgoDeck] Pominięto plik z początkowej listy pobranych:", baseName);
-        initialIgnoredIds.add(downloadId);
-        return;
-      }
+      console.log("[AlgoDeck] Pominięto plik z początkowej listy pobranych:", baseName);
+      initialIgnoredIds.add(downloadId);
+      return;
     }
 
     // Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
@@ -225,30 +226,55 @@ async function handleCompletedDownload(downloadId) {
       }
     } catch (_) {}
 
-    // Dopiero po pomyślnej weryfikacji oznacz jako przetworzony
+    // 2. Wyślij do rejestru fizycznego silnika Rust (SHA256, metadane, staging)
+    let regResult = null;
+    try {
+      const res = await fetch(`${API_BASE}/api/register-download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_path: filename })
+      });
+      if (res.ok) {
+        regResult = await res.json();
+      }
+    } catch (err) {
+      console.warn("[AlgoDeck] Błąd rejestracji w /api/register-download:", err);
+    }
+
+    // Jeśli plik nie jest nowy (już widnieje w rejestrze trwałym), pomiń bezwzględnie!
+    if (regResult && (!regResult.is_new || !regResult.staged)) {
+      console.log("[AlgoDeck] Plik pominięty przez rejestr fizyczny PDF (już zarejestrowany):", baseName);
+      initialIgnoredFiles.add(lowerBase);
+      initialIgnoredIds.add(downloadId);
+      processedDownloads.add(downloadId);
+      return;
+    }
+
+    // Oznacz jako przetworzony
     processedDownloads.add(downloadId);
     if (processedDownloads.size > 200) {
       const oldest = processedDownloads.values().next().value;
       processedDownloads.delete(oldest);
     }
 
-    console.log("[AlgoDeck] Wykryto kompletne pobranie zadania PDF:", filename);
+    console.log("[AlgoDeck] Wykryto kompletne nowe pobranie zadania PDF:", filename);
+    const problemId = regResult?.problem_id || baseName.replace(/\.pdf$/i, "").slice(0, 6).toLowerCase();
 
-    // 2. Natychmiast zapisz w chrome.storage.local (żeby plik był od razu widoczny w popupie po kliknięciu!)
+    // 3. Zapisz w chrome.storage.local (żeby plik był od razu widoczny w popupie po kliknięciu!)
     await chrome.storage.local.set({
       last_downloaded_pdf: filename,
       last_pdf_name: baseName,
       last_pdf_ts: Date.now(),
       detected_task: {
         filename: baseName,
-        code: baseName.replace(/\.pdf$/i, "").slice(0, 6).toLowerCase(),
+        code: problemId,
         ts: Date.now()
       },
       dismiss_oneclick: false
     });
     await chrome.storage.local.remove(["cleared_pdf_name"]);
 
-    // 3. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
+    // 4. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
     try {
       if (chrome.action && chrome.action.setBadgeText) {
         chrome.action.setBadgeText({ text: "1" });
@@ -256,48 +282,23 @@ async function handleCompletedDownload(downloadId) {
       }
     } catch (_) {}
 
-    // 4. Wyślij do Rust backendu (staging) lub Native Host
-    let problemId = "";
-    let stagedSuccessfully = false;
-    try {
-      const res = await fetch(`${API_BASE}/api/stage-by-path`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_path: filename })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        problemId = data.problem_id || "";
-        stagedSuccessfully = true;
-        console.log("[AlgoDeck] Plik pomyślnie zaciągnięty do poczekalni w Rust:", data);
+    // 5. Powiadomienie pulpitu (TYLKO jeśli to nie jest start przeglądarki i użytkownik włączył powiadomienia o nowych zadaniach)
+    if (!isSilentStartup) {
+      const allowNotify = regResult?.should_notify === true;
+      if (allowNotify && typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.create) {
+        chrome.notifications.create(`algodeck_${downloadId}_${Date.now()}`, {
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "AlgoDeck ⚡ Nowe zadanie PDF",
+          message: `Pobrano: ${baseName}\nKliknij ikonę ⚡, aby otworzyć zadanie w VS Code.`,
+          priority: 2,
+          requireInteraction: false
+        });
       }
-    } catch (err) {
-      console.warn("[AlgoDeck] Błąd przesyłania do /api/stage-by-path:", err);
-    }
 
-    if (!stagedSuccessfully) {
-      try {
-        if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-          chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filename }, (resp) => {
-            console.log("[AlgoDeck] Native Host staging fallback odpowiedź:", resp);
-          });
-        }
-      } catch (_) {}
+      // Otwórz popup rozszerzenia pod ikoną ⚡ jeśli przeglądarka na to zezwala
+      await triggerExtensionPopup(baseName, problemId);
     }
-
-    // 5. Zaktualizuj detected_task o kod zadania z analizy
-    if (problemId) {
-      await chrome.storage.local.set({
-        detected_task: {
-          filename: baseName,
-          code: problemId,
-          ts: Date.now()
-        }
-      });
-    }
-
-    // 6. Otwórz popup rozszerzenia pod ikoną ⚡ jeśli przeglądarka na to zezwala
-    await triggerExtensionPopup(baseName, problemId);
   } catch (e) {
     console.warn("[AlgoDeck] Błąd handleCompletedDownload:", e);
   }
@@ -329,7 +330,7 @@ if (typeof chrome !== "undefined" && chrome.downloads) {
   if (chrome.downloads.onCreated) {
     chrome.downloads.onCreated.addListener((item) => {
       if (item && item.state === "complete") {
-        handleCompletedDownload(item.id);
+        handleCompletedDownload(item.id, false);
       }
     });
   }
@@ -339,19 +340,18 @@ if (typeof chrome !== "undefined" && chrome.downloads) {
       if (!delta || !delta.id) return;
       const isComplete = delta.state && delta.state.current === "complete";
       if (isComplete) {
-        handleCompletedDownload(delta.id);
+        handleCompletedDownload(delta.id, false);
       } else if (delta.filename && delta.filename.current) {
         const fn = delta.filename.current.toLowerCase();
         if (fn.endsWith(".pdf") && !fn.endsWith(".crdownload")) {
-          // Na macOS zmiana nazwy z .crdownload na .pdf może nastąpić w osobnym zdarzeniu
-          setTimeout(() => handleCompletedDownload(delta.id), 250);
+          setTimeout(() => handleCompletedDownload(delta.id, false), 250);
         }
       }
     });
   }
 }
 
-// Sprawdź ostatnio pobrane pliki po starcie / obudzeniu service workera
+// Sprawdź ostatnio pobrane pliki po starcie / obudzeniu service workera (zawsze w trybie cichym!)
 async function checkRecentDownloadsOnWake() {
   try {
     if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
@@ -369,14 +369,14 @@ async function checkRecentDownloadsOnWake() {
         }
         const fn = item.filename || "";
         const baseName = fn.replace(/^.*[\\\/]/, '').toLowerCase();
-        if (initialIgnoredFiles.has(baseName) && algodeckInstalledAt && finishTime <= algodeckInstalledAt + 3000) {
+        if (initialIgnoredFiles.has(baseName)) {
           initialIgnoredIds.add(item.id);
           continue;
         }
         if (isOlympicTaskFile(item)) {
           const age = Date.now() - finishTime;
           if (age < 180000) { // młodszy niż 3 minuty
-            handleCompletedDownload(item.id);
+            handleCompletedDownload(item.id, true);
             break;
           }
         }

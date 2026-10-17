@@ -385,13 +385,59 @@
           <div class="setting-row switch-row">
             <div class="setting-info">
               <span class="setting-title">Powiadomienia systemowe pulpitu</span>
-              <p class="setting-desc">Wyświetla powiadomienia systemowe o uruchomieniu środowiska, zakończeniu testów i ewentualnych błędach kompilacji.</p>
+              <p class="setting-desc">Główny włącznik powiadomień systemowych AlgoDeck. Gdy wyłączone, żadne powiadomienia nie będą wysyłane.</p>
             </div>
             <div class="setting-control">
               <label class="doc-switch">
                 <input type="checkbox" id="cfg-notifications">
                 <span class="switch-slider"></span>
               </label>
+            </div>
+          </div>
+
+          <!-- Podmenu wyboru zdarzeń powiadomień -->
+          <div id="notifications-submenu" class="submenu-options-box">
+            <div class="submenu-header">
+              <span class="submenu-title">Wybierz zdarzenia wysyłające powiadomienia:</span>
+            </div>
+
+            <div class="sub-setting-row">
+              <div class="setting-info">
+                <span class="sub-setting-title">📊 Wyniki testów i błędy kompilacji</span>
+                <p class="sub-setting-desc">Powiadomienie po zakończeniu sprawdzania testów (100% OK, błąd, etc.) lub przy błędzie kompilatora C++.</p>
+              </div>
+              <div class="setting-control">
+                <label class="doc-switch sub-switch">
+                  <input type="checkbox" id="cfg-notify-test-results">
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="sub-setting-row">
+              <div class="setting-info">
+                <span class="sub-setting-title">⚡ Stan demona i połączenia</span>
+                <p class="sub-setting-desc">Powiadomienie systemowe o pomyślnym uruchomieniu usługi AlgoDeck i podłączeniu środowiska.</p>
+              </div>
+              <div class="setting-control">
+                <label class="doc-switch sub-switch">
+                  <input type="checkbox" id="cfg-notify-daemon-status">
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="sub-setting-row">
+              <div class="setting-info">
+                <span class="sub-setting-title">📥 Wykrycie pobrania nowego zadania PDF</span>
+                <p class="sub-setting-desc">Wysyła powiadomienie pulpitu po pobraniu nowego pliku zadania z platformy konkursowej (np. Szkopuł, OIJ).</p>
+              </div>
+              <div class="setting-control">
+                <label class="doc-switch sub-switch">
+                  <input type="checkbox" id="cfg-notify-new-task-download">
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
             </div>
           </div>
 

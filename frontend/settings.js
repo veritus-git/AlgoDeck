@@ -58,6 +58,10 @@ const elements = {
   // Browser Automation
   autoDetect: document.getElementById("cfg-auto-detect"),
   notifications: document.getElementById("cfg-notifications"),
+  notificationsSubmenu: document.getElementById("notifications-submenu"),
+  notifyTestResults: document.getElementById("cfg-notify-test-results"),
+  notifyDaemonStatus: document.getElementById("cfg-notify-daemon-status"),
+  notifyNewTaskDownload: document.getElementById("cfg-notify-new-task-download"),
   autostart: document.getElementById("cfg-autostart")
 };
 
@@ -77,6 +81,9 @@ let currentSettings = {
   editor_split_ratio: 60,
   auto_detect_downloads: true,
   notifications: true,
+  notify_test_results: true,
+  notify_daemon_status: true,
+  notify_new_task_download: false,
   autostart_on_boot: true,
   macos_window_mode: "default"
 };
@@ -185,8 +192,28 @@ function applySettingsToForm(s) {
   if (s.editor_split_ratio) elements.splitRatio.value = s.editor_split_ratio;
   if (s.auto_detect_downloads !== undefined) elements.autoDetect.checked = Boolean(s.auto_detect_downloads);
   if (s.notifications !== undefined) elements.notifications.checked = Boolean(s.notifications);
+  if (elements.notifyTestResults && s.notify_test_results !== undefined) {
+    elements.notifyTestResults.checked = Boolean(s.notify_test_results);
+  }
+  if (elements.notifyDaemonStatus && s.notify_daemon_status !== undefined) {
+    elements.notifyDaemonStatus.checked = Boolean(s.notify_daemon_status);
+  }
+  if (elements.notifyNewTaskDownload && s.notify_new_task_download !== undefined) {
+    elements.notifyNewTaskDownload.checked = Boolean(s.notify_new_task_download);
+  }
   if (s.autostart_on_boot !== undefined && elements.autostart) elements.autostart.checked = Boolean(s.autostart_on_boot);
   updateSplitRatioVisual();
+  updateNotificationsSubmenuVisual();
+}
+
+function updateNotificationsSubmenuVisual() {
+  if (elements.notificationsSubmenu) {
+    if (elements.notifications.checked) {
+      elements.notificationsSubmenu.classList.remove("hidden");
+    } else {
+      elements.notificationsSubmenu.classList.add("hidden");
+    }
+  }
 }
 
 function updateSplitRatioVisual() {
@@ -238,6 +265,9 @@ function collectSettingsFromForm() {
     streamdeck_brightness: parseInt(elements.sdBrightness.value, 10) || 85,
     auto_detect_downloads: elements.autoDetect.checked,
     notifications: elements.notifications.checked,
+    notify_test_results: elements.notifyTestResults ? elements.notifyTestResults.checked : true,
+    notify_daemon_status: elements.notifyDaemonStatus ? elements.notifyDaemonStatus.checked : true,
+    notify_new_task_download: elements.notifyNewTaskDownload ? elements.notifyNewTaskDownload.checked : false,
     autostart_on_boot: elements.autostart ? elements.autostart.checked : true
   };
 }
@@ -485,6 +515,11 @@ document.addEventListener("DOMContentLoaded", () => {
   elements.splitPdf.addEventListener("change", updateSplitRatioVisual);
   elements.pdfPosition.addEventListener("change", updateSplitRatioVisual);
   elements.splitRatio.addEventListener("input", updateSplitRatioVisual);
+
+  // Przełącznik główny powiadomień
+  if (elements.notifications) {
+    elements.notifications.addEventListener("change", updateNotificationsSubmenuVisual);
+  }
 
   // Jasność Stream Decka
   elements.sdBrightness.addEventListener("input", (e) => {

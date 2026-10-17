@@ -485,6 +485,9 @@ send_notify() {{
         if grep -q '"notifications"[[:space:]]*:[[:space:]]*false' "$cfg" 2>/dev/null; then
             return 0
         fi
+        if grep -q '"notify_test_results"[[:space:]]*:[[:space:]]*false' "$cfg" 2>/dev/null; then
+            return 0
+        fi
     fi
     notify-send "$@" 2>/dev/null || true
 }}

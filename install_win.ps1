@@ -464,22 +464,48 @@ if (Test-Path $StagingDir) {
     New-Item -Path $StagingDir -ItemType Directory -Force | Out-Null
 }
 $SnapshotFile = "$ConfigDir\initial_downloads.json"
+$RegistryFile = "$ConfigDir\downloaded_pdf_registry.json"
 try {
     $DownloadsPath = Join-Path $env:USERPROFILE "Downloads"
     $IgnoredFiles = @()
+    $NowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $PdfEntries = @{}
     if (Test-Path $DownloadsPath) {
         $Existing = Get-ChildItem -Path $DownloadsPath -File -ErrorAction SilentlyContinue
         foreach ($item in $Existing) {
             $IgnoredFiles += $item.Name
+            if ($item.Extension -ieq ".pdf") {
+                try {
+                    $hash = (Get-FileHash -Path $item.FullName -Algorithm SHA256).Hash.ToLower()
+                    $modMs = [DateTimeOffset]::new($item.LastWriteTimeUtc).ToUnixTimeMilliseconds()
+                    $PdfEntries[$item.Name.ToLower()] = @{
+                        filename = $item.Name
+                        path = $item.FullName
+                        sha256 = $hash
+                        size = $item.Length
+                        modified_ms = $modMs
+                        registered_at = $NowMs
+                        is_initial = $true
+                    }
+                } catch {}
+            }
         }
     }
     $SnapshotData = @{
-        installed_at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        installed_at = $NowMs
         ignored_files = $IgnoredFiles
     }
     $JsonStr = $SnapshotData | ConvertTo-Json -Compress
     [System.IO.File]::WriteAllText($SnapshotFile, $JsonStr, [System.Text.Encoding]::UTF8)
-    Write-Host "✓ Zapisano stan początkowy pobrań (stare pliki będą ignorowane)." -ForegroundColor Green
+
+    $RegistryData = @{
+        version = 1
+        updated_at = $NowMs
+        entries = $PdfEntries
+    }
+    $RegJsonStr = $RegistryData | ConvertTo-Json -Depth 4
+    [System.IO.File]::WriteAllText($RegistryFile, $RegJsonStr, [System.Text.Encoding]::UTF8)
+    Write-Host "✓ Zapisano stan początkowy pobrań i fizyczny rejestr SHA256 (stare pliki będą ignorowane)." -ForegroundColor Green
 } catch {}
 
 # ------------------------------------------------------------------------------

@@ -104,6 +104,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/stage-file", post(stage_file))
         .route("/stage-by-path", post(stage_by_path))
         .route("/stage-path", post(stage_by_path))
+        .route("/register-download", post(register_download))
+        .route("/registered-downloads", get(get_registered_downloads))
         .route("/stage-refresh", post(stage_refresh))
         .route("/upload-staging", post(stage_file))
         .route("/clear-staged", post(clear_staged))
@@ -455,28 +457,229 @@ fn which_bin_exists(bin: &str) -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
+fn ensure_kde_focus_stealing_disabled() {
+    static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if CHECKED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let kwinrc = home.join(".config").join("kwinrc");
+        if kwinrc.exists() {
+            if let Ok(content) = fs::read_to_string(&kwinrc) {
+                if !content.contains("FocusStealingPreventionSeverity=0") {
+                    let _ = std::process::Command::new("kwriteconfig6")
+                        .args(["--file", "kwinrc", "--group", "Windows", "--key", "FocusStealingPreventionSeverity", "0"])
+                        .output();
+                    let _ = std::process::Command::new("kwriteconfig5")
+                        .args(["--file", "kwinrc", "--group", "Windows", "--key", "FocusStealingPreventionSeverity", "0"])
+                        .output();
+                    let _ = std::process::Command::new("dbus-send")
+                        .args(["--session", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"])
+                        .output();
+                }
+            }
+        }
+    }
+}
+
+fn configure_cmd_env(cmd: &mut std::process::Command) {
+    if std::env::var("DISPLAY").is_err() {
+        cmd.env("DISPLAY", ":0");
+    }
+    if std::env::var("XAUTHORITY").is_err() {
+        if let Some(home) = dirs::home_dir() {
+            let xauth = home.join(".Xauthority");
+            if xauth.exists() {
+                cmd.env("XAUTHORITY", xauth);
+            }
+        }
+    }
+    if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+        let uid = std::env::var("UID").unwrap_or_else(|_| (unsafe { libc::getuid() }).to_string());
+        let bus = format!("unix:path=/run/user/{}/bus", uid);
+        cmd.env("DBUS_SESSION_BUS_ADDRESS", bus);
+    }
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+            if std::path::Path::new(&runtime).join("wayland-0").exists() {
+                cmd.env("WAYLAND_DISPLAY", "wayland-0");
+            }
+        }
+    }
+}
+
+fn find_linux_tool_bin(bin: &str) -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("PATH") {
+        for p in std::env::split_paths(&path) {
+            let cand = p.join(bin);
+            if cand.exists() {
+                return Some(cand);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let cand = home.join(".local/bin").join(bin);
+        if cand.exists() {
+            return Some(cand);
+        }
+    }
+    let usr = PathBuf::from("/usr/bin").join(bin);
+    if usr.exists() {
+        return Some(usr);
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+pub fn activate_linux_window(target_classes: &[&str]) {
+    ensure_kde_focus_stealing_disabled();
+
+    // 1. KWin Scripting via DBus (Wayland & X11 for KDE Plasma)
+    let mut js_conditions = Vec::new();
+    for cls in target_classes {
+        js_conditions.push(format!("cls.indexOf(\"{}\") !== -1", cls.to_lowercase()));
+    }
+    let condition_expr = js_conditions.join(" || ");
+
+    let kwin_script = format!(
+        r#"
+var list = workspace.windowList ? workspace.windowList() : (workspace.clientList ? workspace.clientList() : []);
+for (var i = 0; i < list.length; i++) {{
+    var c = list[i];
+    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.caption || "")).toLowerCase();
+    if ({condition}) {{
+        c.minimized = false;
+        c.demandsAttention = false;
+        workspace.activeWindow = c;
+        if (c.activateWindow) c.activateWindow();
+        break;
+    }}
+}}
+"#,
+        condition = condition_expr
+    );
+
+    let tmp_script = std::env::temp_dir().join(format!("kwin_focus_{}.js", std::process::id()));
+    if fs::write(&tmp_script, &kwin_script).is_ok() {
+        let script_path = tmp_script.to_string_lossy().to_string();
+        let mut dbus_cmd = std::process::Command::new("dbus-send");
+        configure_cmd_env(&mut dbus_cmd);
+        let load_res = dbus_cmd
+            .args([
+                "--session",
+                "--print-reply=literal",
+                "--dest=org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.loadScript",
+                &format!("string:{}", script_path),
+            ])
+            .output();
+
+        if let Ok(out) = load_res {
+            let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Some(script_id) = reply.split_whitespace().last() {
+                if let Ok(num) = script_id.parse::<i32>() {
+                    let obj_path = format!("/Scripting/Script{}", num);
+                    let mut run_cmd = std::process::Command::new("dbus-send");
+                    configure_cmd_env(&mut run_cmd);
+                    let _ = run_cmd
+                        .args([
+                            "--session",
+                            "--dest=org.kde.KWin",
+                            &obj_path,
+                            "org.kde.kwin.Script.run",
+                        ])
+                        .output();
+
+                    let mut stop_cmd = std::process::Command::new("dbus-send");
+                    configure_cmd_env(&mut stop_cmd);
+                    let _ = stop_cmd
+                        .args([
+                            "--session",
+                            "--dest=org.kde.KWin",
+                            &obj_path,
+                            "org.kde.kwin.Script.stop",
+                        ])
+                        .output();
+                }
+            }
+        }
+        let _ = fs::remove_file(tmp_script);
+    }
+
+    // 2. kdotool (KDE Plasma Wayland focus tool)
+    if let Some(kdo) = find_linux_tool_bin("kdotool") {
+        for cls in target_classes {
+            let mut cmd = std::process::Command::new(&kdo);
+            configure_cmd_env(&mut cmd);
+            let _ = cmd.args(["search", "--class", cls, "windowactivate"]).output();
+        }
+    }
+
+    // 3. wmctrl: identify matching window IDs, remove demands_attention, and activate
+    if let Some(wm) = find_linux_tool_bin("wmctrl") {
+        let mut list_cmd = std::process::Command::new(&wm);
+        configure_cmd_env(&mut list_cmd);
+        if let Ok(out) = list_cmd.args(["-l", "-x"]).output() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                let lower = line.to_lowercase();
+                for cls in target_classes {
+                    if lower.contains(&cls.to_lowercase()) {
+                        if let Some(wid) = line.split_whitespace().next() {
+                            let mut rem_cmd = std::process::Command::new(&wm);
+                            configure_cmd_env(&mut rem_cmd);
+                            let _ = rem_cmd.args(["-i", "-r", wid, "-b", "remove,demands_attention"]).output();
+
+                            let mut act_cmd = std::process::Command::new(&wm);
+                            configure_cmd_env(&mut act_cmd);
+                            let _ = act_cmd.args(["-i", "-a", wid]).output();
+                        }
+                    }
+                }
+            }
+        }
+        for cls in target_classes {
+            let mut act = std::process::Command::new(&wm);
+            configure_cmd_env(&mut act);
+            let _ = act.args(["-x", "-a", cls]).output();
+        }
+    }
+
+    // 4. xdotool: sync activate, raise and focus
+    if let Some(xd) = find_linux_tool_bin("xdotool") {
+        for cls in target_classes {
+            let mut cmd = std::process::Command::new(&xd);
+            configure_cmd_env(&mut cmd);
+            let _ = cmd.args(["search", "--class", cls, "windowactivate", "--sync", "windowraise"]).output();
+        }
+    }
+}
+
 pub fn open_browser_foreground(url: &str) {
     let url_str = url.to_string();
 
     #[cfg(target_os = "linux")]
     {
         let mut launched = false;
-        if let Ok(output) = std::process::Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
-            let def_desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !def_desktop.is_empty() && def_desktop.ends_with(".desktop") {
-                if std::process::Command::new("gtk-launch").arg(&def_desktop).arg(&url_str).spawn().is_ok() {
+        let browsers = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "opera", "vivaldi"];
+        for b in browsers {
+            if which_bin_exists(b) {
+                if std::process::Command::new(b).arg(&url_str).spawn().is_ok() {
                     launched = true;
+                    break;
                 }
             }
         }
 
         if !launched {
-            let browsers = ["brave-browser", "google-chrome", "chromium", "firefox", "microsoft-edge", "opera", "vivaldi"];
-            for b in browsers {
-                if which_bin_exists(b) {
-                    if std::process::Command::new(b).arg(&url_str).spawn().is_ok() {
+            if let Ok(output) = std::process::Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
+                let def_desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !def_desktop.is_empty() && def_desktop.ends_with(".desktop") {
+                    if std::process::Command::new("gtk-launch").arg(&def_desktop).arg(&url_str).spawn().is_ok() {
                         launched = true;
-                        break;
                     }
                 }
             }
@@ -487,12 +690,9 @@ pub fn open_browser_foreground(url: &str) {
         }
 
         std::thread::spawn(move || {
-            for delay in [100, 300, 600] {
+            for delay in [100, 300, 600, 1000] {
                 std::thread::sleep(std::time::Duration::from_millis(delay));
-                for class_name in ["brave-browser", "google-chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"] {
-                    let _ = std::process::Command::new("wmctrl").args(["-x", "-a", class_name]).output();
-                    let _ = std::process::Command::new("xdotool").args(["search", "--onlyvisible", "--class", class_name, "windowactivate"]).output();
-                }
+                activate_linux_window(&["brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
             }
         });
     }
@@ -1020,6 +1220,18 @@ async fn stage_by_path(
         }
     }
 
+    if is_pdf {
+        let mut reg = crate::config::DownloadedPdfRegistry::load_or_init();
+        if !reg.check_and_register_if_new(&path) {
+            println!("[AlgoDeck] Pominięto stage_by_path {:?} - plik już w rejestrze pobranych", path);
+            return Ok(Json(serde_json::json!({
+                "success": false,
+                "ignored": true,
+                "detail": "Plik zignorowany jako znany w rejestrze pobranych"
+            })));
+        }
+    }
+
     if !is_pdf && !is_zip {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1103,6 +1315,157 @@ async fn stage_by_path(
         "time_limit_sec": time_limit_sec,
         "memory_limit_mb": memory_limit_mb,
         "tests_count": tests_count,
+    })))
+}
+
+async fn get_registered_downloads() -> Json<serde_json::Value> {
+    let reg = crate::config::DownloadedPdfRegistry::load_or_init();
+    Json(serde_json::to_value(&reg).unwrap_or_else(|_| serde_json::json!({ "version": 1, "entries": {} })))
+}
+
+async fn register_download(
+    State(state): State<AppState>,
+    Json(req): Json<StagePathRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let raw = req.file_path.trim().trim_start_matches("file://");
+    let decoded = url_decode_path(raw);
+    let expand_tilde = |p: &str| -> PathBuf {
+        if p.starts_with("~/") || p == "~" {
+            dirs::home_dir().map(|h| h.join(p.trim_start_matches("~/"))).unwrap_or_else(|| PathBuf::from(p))
+        } else {
+            PathBuf::from(p)
+        }
+    };
+
+    let mut path = expand_tilde(raw);
+    if !path.exists() {
+        let dec_path = expand_tilde(&decoded);
+        if dec_path.exists() {
+            path = dec_path;
+        } else {
+            let fname_opt = path.file_name().or_else(|| Path::new(&decoded).file_name()).map(|f| f.to_os_string());
+            if let Some(fname) = fname_opt {
+                let dl = crate::config::get_downloads_dir();
+                let candidate = dl.join(&fname);
+                if candidate.exists() {
+                    path = candidate;
+                }
+                if !path.exists() {
+                    if let Some(home) = dirs::home_dir() {
+                        let candidate = home.join("Downloads").join(&fname);
+                        if candidate.exists() {
+                            path = candidate;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !path.exists() {
+        return Ok(Json(serde_json::json!({
+            "success": false,
+            "is_new": false,
+            "detail": "Plik nie istnieje na dysku"
+        })));
+    }
+
+    let mut is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
+    if !is_pdf && path.exists() {
+        if let Ok(file_bytes) = fs::read(&path) {
+            if file_bytes.starts_with(b"%PDF") {
+                is_pdf = true;
+            }
+        }
+    }
+
+    if !is_pdf {
+        return Ok(Json(serde_json::json!({
+            "success": false,
+            "is_new": false,
+            "detail": "Rejestr pobranych dotyczy wyłącznie plików PDF"
+        })));
+    }
+
+    let mut reg = crate::config::DownloadedPdfRegistry::load_or_init();
+    let is_new = reg.check_and_register_if_new(&path);
+    if !is_new {
+        return Ok(Json(serde_json::json!({
+            "success": true,
+            "is_new": false,
+            "staged": false,
+            "detail": "Plik już zarejestrowany w pamięci trwałej"
+        })));
+    }
+
+    let stage_dir = AppSettings::staging_dir();
+    let _ = fs::create_dir_all(&stage_dir);
+
+    if let Ok(entries) = fs::read_dir(&stage_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                if ext.eq_ignore_ascii_case("pdf") {
+                    let _ = fs::remove_file(p);
+                }
+            }
+        }
+    }
+
+    let mut filename = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "downloaded_file.pdf".to_string());
+    if !filename.to_lowercase().ends_with(".pdf") {
+        filename = format!("{}.pdf", filename);
+    }
+    let target_path = stage_dir.join(&filename);
+    let _ = fs::copy(&path, &target_path);
+
+    let mut problem_id = None;
+    let mut title = None;
+    let mut time_limit_sec = 1.0;
+    let mut memory_limit_mb = 128;
+    let mut tests_count = 0;
+
+    if let Ok(text) = PdfParser::extract_text_from_file(&target_path) {
+        let analysis = PdfParser::parse_heuristics(&text);
+        problem_id = Some(analysis.problem_id);
+        title = Some(analysis.title);
+        time_limit_sec = analysis.time_limit_sec;
+        memory_limit_mb = analysis.memory_limit_mb;
+        tests_count = analysis.tests.len();
+    }
+
+    let (notifications_enabled, notify_new_task) = {
+        let s = state.settings.read().unwrap();
+        (s.notifications, s.notify_new_task_download)
+    };
+
+    let should_notify = notifications_enabled && notify_new_task;
+
+    #[cfg(target_os = "linux")]
+    if should_notify {
+        let p_title = title.as_deref().unwrap_or("Nowe zadanie");
+        let p_id = problem_id.as_deref().unwrap_or(&filename);
+        let _ = std::process::Command::new("notify-send")
+            .args([
+                "AlgoDeck ⚡ Nowe zadanie PDF",
+                &format!("Pobrano: {}\nZadanie: {} ({})", filename, p_title, p_id),
+                "-i", "document-send",
+            ])
+            .output();
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "is_new": true,
+        "staged": true,
+        "filename": filename,
+        "path": target_path.to_string_lossy(),
+        "problem_id": problem_id,
+        "title": title,
+        "time_limit_sec": time_limit_sec,
+        "memory_limit_mb": memory_limit_mb,
+        "tests_count": tests_count,
+        "should_notify": should_notify
     })))
 }
 
@@ -1593,6 +1956,16 @@ pub fn open_in_vscode_internal(
         }
 
         let _ = cmd.spawn();
+
+        #[cfg(target_os = "linux")]
+        {
+            std::thread::spawn(move || {
+                for delay in [100, 350, 750] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    activate_linux_window(&["code", "visual studio code", "codium"]);
+                }
+            });
+        }
 
         #[cfg(target_os = "macos")]
         {

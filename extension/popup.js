@@ -298,7 +298,7 @@ function setupOfflineStarter() {
             let allowNotify = true;
             if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
               const stored = await chrome.storage.local.get(["algodeck_settings"]);
-              if (stored?.algodeck_settings?.notifications === false) {
+              if (stored?.algodeck_settings?.notifications === false || stored?.algodeck_settings?.notify_daemon_status === false) {
                 allowNotify = false;
               }
             }
@@ -307,7 +307,7 @@ function setupOfflineStarter() {
                 const sRes = await fetch(`${API_BASE}/api/settings`);
                 if (sRes.ok) {
                   const sData = await sRes.json();
-                  if (sData.notifications === false) allowNotify = false;
+                  if (sData.notifications === false || sData.notify_daemon_status === false) allowNotify = false;
                 }
               } catch (_) {}
             }

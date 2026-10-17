@@ -68,6 +68,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "streamdeck",
  "tokio",
  "tower",
