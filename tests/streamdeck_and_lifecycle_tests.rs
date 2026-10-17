@@ -470,6 +470,43 @@ async fn test_vscode_detection_and_multi_socket_bridge() {
     }
 }
 
+#[test]
+fn test_download_registry_deduplication() {
+    use algodeck::config::DownloadedPdfRegistry;
+
+    let tmp_dir = std::env::temp_dir().join("algodeck_test_registry_dedup");
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let _ = std::fs::create_dir_all(&tmp_dir);
+
+    let pdf_a = tmp_dir.join("task_a.pdf");
+    std::fs::write(&pdf_a, b"%PDF-1.4 test content for problem A").unwrap();
+
+    let mut reg = DownloadedPdfRegistry {
+        version: 1,
+        updated_at: 0,
+        entries: std::collections::HashMap::new(),
+    };
+
+    // 1. Pierwsza rejestracja pliku -> true (wykryto nowy plik)
+    assert!(reg.check_and_register_if_new(&pdf_a), "Pierwsze pobranie musi być traktowane jako nowe");
+
+    // 2. Kolejne sprawdzenie tego samego pliku -> false (nigdy więcej nie powiadamiamy)
+    assert!(!reg.check_and_register_if_new(&pdf_a), "Ponowne zapytanie o ten sam plik musi zwrócić false");
+
+    // 3. Sprawdzenie kopii pliku pod inną nazwą (identyczna zawartość / ten sam SHA256) -> false
+    let pdf_a_copy = tmp_dir.join("task_a (1).pdf");
+    std::fs::write(&pdf_a_copy, b"%PDF-1.4 test content for problem A").unwrap();
+    assert!(!reg.check_and_register_if_new(&pdf_a_copy), "Duplikat treści pod inną nazwą musi zwrócić false");
+
+    // 4. Prawdziwie nowy plik z inną zawartością -> true
+    let pdf_b = tmp_dir.join("task_b.pdf");
+    std::fs::write(&pdf_b, b"%PDF-1.4 DIFFERENT content for problem B").unwrap();
+    assert!(reg.check_and_register_if_new(&pdf_b), "Nowe zadanie z innym hashem musi zostać zarejestrowane");
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+
 
 
 

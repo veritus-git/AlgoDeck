@@ -685,17 +685,23 @@ impl DownloadedPdfRegistry {
             .unwrap_or_default()
             .as_millis() as u64;
 
+        // 1. Sprawdź czy plik o tej samej nazwie istnieje w rejestrze z identyczną zawartością
         if let Some(existing) = self.entries.get(&key) {
-            // Jeśli plik istniał przed instalacją i nie został pobrany/zmodyfikowany po instalacji:
-            if existing.is_initial && !is_after_install {
-                if existing.sha256 == hash && existing.size == size {
-                    return false;
-                }
-            }
-            // Zabezpieczenie przed podwójnym zarejestrowaniem tego samego zdarzenia (burst do 3 sekund)
-            if !existing.is_initial && existing.sha256 == hash && existing.size == size && now_ms.saturating_sub(existing.registered_at) < 3000 {
+            if existing.sha256 == hash && existing.size == size {
+                // Plik został już zarejestrowany — NIGDY nie traktujemy go ponownie jako nowego
                 return false;
             }
+            if existing.is_initial && !is_after_install {
+                return false;
+            }
+        }
+
+        // 2. Sprawdź czy identyczna treść (SHA256 + size) została już zarejestrowana (np. pod inną nazwą jak sil (1).pdf)
+        let already_registered_by_content = self.entries.values().any(|e| {
+            e.sha256 == hash && e.size == size
+        });
+        if already_registered_by_content {
+            return false;
         }
 
         let entry = PdfRegistryEntry {

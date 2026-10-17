@@ -191,6 +191,29 @@ function setupDetectedHandlers() {
       }
     });
   }
+  // Kliknięcie "Usuń z kolejki" w widoku 1-Klik:
+  // Całkowicie czyści plik z poczekalni (staging) i zamyka popup
+  const btnDetDiscard = document.getElementById("btn-det-discard");
+  if (btnDetDiscard) {
+    btnDetDiscard.addEventListener("click", async () => {
+      btnDetDiscard.disabled = true;
+      btnDetDiscard.textContent = "Usuwanie...";
+      try {
+        await fetch(`${API_BASE}/api/clear-staged`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_type: "pdf" })
+        });
+      } catch (_) {}
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.remove(["last_downloaded_pdf", "dismiss_oneclick", "detected_task", "cleared_pdf_name"]);
+      }
+      if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
+        chrome.action.setBadgeText({ text: "" });
+      }
+      window.close();
+    });
+  }
 }
 
 // Sprawdzenie czy pokazać widok 1-Klik, czy widok główny z zakolejkowanym plikiem

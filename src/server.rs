@@ -1466,18 +1466,6 @@ async fn register_download(
 
     let should_notify = notifications_enabled && notify_new_task;
 
-    #[cfg(target_os = "linux")]
-    if should_notify {
-        let p_title = title.as_deref().unwrap_or("Nowe zadanie");
-        let p_id = problem_id.as_deref().unwrap_or(&filename);
-        let _ = std::process::Command::new("notify-send")
-            .args([
-                "AlgoDeck ⚡ Nowe zadanie PDF",
-                &format!("Pobrano: {}\nZadanie: {} ({})", filename, p_title, p_id),
-                "-i", "document-send",
-            ])
-            .output();
-    }
 
     Ok(Json(serde_json::json!({
         "success": true,

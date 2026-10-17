@@ -222,6 +222,14 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
       return;
     }
 
+    if (item.endTime) {
+      const finishMs = new Date(item.endTime).getTime();
+      if (algodeckInstalledAt && finishMs <= algodeckInstalledAt) {
+        processedDownloads.add(downloadId);
+        return;
+      }
+    }
+
     if (!isOlympicTaskFile(item)) {
       return;
     }
@@ -342,64 +350,16 @@ async function triggerExtensionPopup(baseName, problemId) {
 
 // Nasłuchiwanie na żywo zdarzeń pobierania
 if (typeof chrome !== "undefined" && chrome.downloads) {
-  if (chrome.downloads.onCreated) {
-    chrome.downloads.onCreated.addListener((item) => {
-      if (item && item.state === "complete") {
-        handleCompletedDownload(item.id, false);
-      }
-    });
-  }
-
   if (chrome.downloads.onChanged) {
     chrome.downloads.onChanged.addListener((delta) => {
       if (!delta || !delta.id) return;
-      const isComplete = delta.state && delta.state.current === "complete";
-      if (isComplete) {
+      // Reagujemy wyłącznie na faktyczny moment zakończenia pobierania pliku
+      if (delta.state && delta.state.current === "complete") {
         handleCompletedDownload(delta.id, false);
-      } else if (delta.filename && delta.filename.current) {
-        const fn = delta.filename.current.toLowerCase();
-        if (fn.endsWith(".pdf") && !fn.endsWith(".crdownload")) {
-          setTimeout(() => handleCompletedDownload(delta.id, false), 250);
-        }
       }
     });
   }
 }
-
-// Sprawdź ostatnio pobrane pliki po starcie / obudzeniu service workera (zawsze w trybie cichym!)
-async function checkRecentDownloadsOnWake() {
-  try {
-    if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
-      const recent = await chrome.downloads.search({
-        limit: 5,
-        orderBy: ["-startTime"],
-        state: "complete"
-      });
-      for (const item of recent || []) {
-        if (initialIgnoredIds.has(item.id)) continue;
-        const finishTime = item.endTime ? new Date(item.endTime).getTime() : new Date(item.startTime).getTime();
-        if (algodeckInstalledAt && finishTime <= algodeckInstalledAt) {
-          initialIgnoredIds.add(item.id);
-          continue;
-        }
-        const fn = item.filename || "";
-        const baseName = fn.replace(/^.*[\\\/]/, '').toLowerCase();
-        if (initialIgnoredFiles.has(baseName)) {
-          initialIgnoredIds.add(item.id);
-          continue;
-        }
-        if (isOlympicTaskFile(item)) {
-          const age = Date.now() - finishTime;
-          if (age < 180000) { // młodszy niż 3 minuty
-            handleCompletedDownload(item.id, true);
-            break;
-          }
-        }
-      }
-    }
-  } catch (_) {}
-}
-checkRecentDownloadsOnWake();
 
 // Kliknięcie w powiadomienie systemowe
 if (typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.onClicked) {

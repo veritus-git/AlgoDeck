@@ -44,6 +44,8 @@ elif command -v sudo &> /dev/null; then
         if sudo -v </dev/tty 2>/dev/null; then
             HAS_SUDO=true
             while true; do sudo -n true; sleep 40; kill -0 "$$" || exit; done 2>/dev/null &
+            SUDO_KEEP_PID=$!
+            trap 'kill "$SUDO_KEEP_PID" 2>/dev/null || true' EXIT
         else
             echo -e "${YELLOW}Brak uprawnień sudo — instalacja będzie kontynuowana w przestrzeni użytkownika (~/.local).${NC}"
         fi
@@ -536,27 +538,27 @@ fi
 
 # 2. Automatyczne otwarcie strony rozszerzeń w domyślnej przeglądarce Chromium
 if command -v brave-browser &>/dev/null; then
-    brave-browser "brave://extensions" 2>/dev/null &
+    brave-browser "brave://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v brave &>/dev/null; then
-    brave "brave://extensions" 2>/dev/null &
+    brave "brave://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v google-chrome &>/dev/null; then
-    google-chrome "chrome://extensions" 2>/dev/null &
+    google-chrome "chrome://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v google-chrome-stable &>/dev/null; then
-    google-chrome-stable "chrome://extensions" 2>/dev/null &
+    google-chrome-stable "chrome://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v chromium &>/dev/null; then
-    chromium "chrome://extensions" 2>/dev/null &
+    chromium "chrome://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v chromium-browser &>/dev/null; then
-    chromium-browser "chrome://extensions" 2>/dev/null &
+    chromium-browser "chrome://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v microsoft-edge &>/dev/null || command -v microsoft-edge-stable &>/dev/null; then
-    (microsoft-edge "edge://extensions" 2>/dev/null || microsoft-edge-stable "edge://extensions" 2>/dev/null) &
+    (microsoft-edge "edge://extensions" </dev/null &>/dev/null || microsoft-edge-stable "edge://extensions" </dev/null &>/dev/null) & disown 2>/dev/null || true
 elif command -v flatpak &>/dev/null && flatpak info com.brave.Browser &>/dev/null; then
-    flatpak run com.brave.Browser "brave://extensions" 2>/dev/null &
+    flatpak run com.brave.Browser "brave://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 elif command -v flatpak &>/dev/null && flatpak info com.google.Chrome &>/dev/null; then
-    flatpak run com.google.Chrome "chrome://extensions" 2>/dev/null &
+    flatpak run com.google.Chrome "chrome://extensions" </dev/null &>/dev/null & disown 2>/dev/null || true
 fi
 
 # 3. Otwarcie folderu rozszerzenia w menedżerze plików dla łatwego Drag & Drop
-xdg-open "$EXT_DIR" 2>/dev/null &
+xdg-open "$EXT_DIR" </dev/null &>/dev/null & disown 2>/dev/null || true
 
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
 echo -e "${GREEN}${BOLD}       🎉 AlgoDeck v2.0.0 (100% Rust) pomyślnie zainstalowany!                ${NC}"
