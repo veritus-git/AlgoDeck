@@ -120,6 +120,7 @@ fn run_daemon(port: u16) {
 
     streamdeck::kill_streamdeck_conflicts();
     server::ensure_vscode_extension_installed();
+    let _ = config::InitialDownloads::load_or_init();
 
     let settings = Arc::new(RwLock::new(AppSettings::load()));
     let runner = Arc::new(TestExecutor::new(settings.clone()));
@@ -200,7 +201,7 @@ fn run_daemon(port: u16) {
                 }
             }
             "new_task" => {
-                server::open_browser_foreground("http://127.0.0.1:8080/#new");
+                server::open_browser_foreground("http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf");
             }
             "open_settings" => {
                 server::open_browser_foreground("http://127.0.0.1:8080/settings");

@@ -8,6 +8,20 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon16.png">
   <link rel="shortcut icon" href="/favicon.ico">
   <link rel="stylesheet" href="style.css">
+  <script>
+    const search = window.location.search;
+    const hash = window.location.hash;
+    let target = "/popup.html?mode=tab";
+    if (hash === "#new" || hash === "#import" || search.includes("trigger=pdf")) {
+      target += "&trigger=pdf";
+    } else if (search) {
+      const cleanSearch = search.startsWith("?") ? search.substring(1) : search;
+      if (!cleanSearch.includes("mode=tab")) {
+        target += "&" + cleanSearch;
+      }
+    }
+    window.location.replace(target);
+  </script>
 </head>
 <body>
   <div class="readme-container">

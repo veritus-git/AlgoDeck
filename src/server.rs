@@ -35,6 +35,8 @@ pub struct StatusResponse {
     pub active_problem: Option<String>,
     pub workspace_dir: String,
     pub streamdeck_connected: bool,
+    #[serde(default)]
+    pub installed_at: u64,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +91,7 @@ pub struct ClearStagedRequest {
 pub fn create_router(app_state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/status", get(get_status))
+        .route("/initial-downloads", get(get_initial_downloads))
         .route("/settings", get(get_settings).post(post_settings))
         .route("/settings/open-gui", post(open_gui))
         .route("/problems", get(get_problems))
@@ -285,13 +288,20 @@ async fn serve_favicon() -> impl IntoResponse {
 async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
     let settings = state.settings.read().unwrap().clone();
     let sd_state = state.streamdeck.get_state();
+    let initial = crate::config::InitialDownloads::load_or_init();
     Json(StatusResponse {
         status: "ok".to_string(),
         version: "2.0.0".to_string(),
         active_problem: sd_state.active_problem_id,
         workspace_dir: settings.workspace_dir,
         streamdeck_connected: sd_state.is_hardware_connected,
+        installed_at: initial.installed_at,
     })
+}
+
+async fn get_initial_downloads() -> Json<crate::config::InitialDownloads> {
+    let initial = crate::config::InitialDownloads::load_or_init();
+    Json(initial)
 }
 
 async fn get_settings(State(state): State<AppState>) -> Json<AppSettings> {
@@ -479,10 +489,7 @@ pub fn open_browser_foreground(url: &str) {
         std::thread::spawn(move || {
             for delay in [100, 300, 600] {
                 std::thread::sleep(std::time::Duration::from_millis(delay));
-                let _ = std::process::Command::new("wmctrl").args(["-a", "AlgoDeck"]).output();
-                let _ = std::process::Command::new("xdotool").args(["search", "--name", "AlgoDeck", "windowactivate"]).output();
-
-                for class_name in ["brave-browser", "google-chrome", "chromium", "firefox", "microsoft-edge", "vivaldi"] {
+                for class_name in ["brave-browser", "google-chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"] {
                     let _ = std::process::Command::new("wmctrl").args(["-x", "-a", class_name]).output();
                     let _ = std::process::Command::new("xdotool").args(["search", "--onlyvisible", "--class", class_name, "windowactivate"]).output();
                 }
@@ -515,7 +522,7 @@ pub fn open_browser_foreground(url: &str) {
         let _ = open::that(&url_str);
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(150));
-            let ps_cmd = r#"$w = New-Object -ComObject WScript.Shell; $p = Get-Process | Where-Object { $_.MainWindowTitle -like '*AlgoDeck*' -or $_.ProcessName -match 'chrome|brave|msedge|firefox' } | Sort-Object -Descending -Property StartTime | Select-Object -First 1; if ($p) { $w.AppActivate($p.MainWindowTitle) }"#;
+            let ps_cmd = r#"$w = New-Object -ComObject WScript.Shell; $p = Get-Process | Where-Object { $_.ProcessName -match 'chrome|brave|msedge|firefox|opera|vivaldi' } | Sort-Object -Descending -Property StartTime | Select-Object -First 1; if ($p) { $w.AppActivate($p.MainWindowTitle) }"#;
             let _ = std::process::Command::new("powershell").args(["-NoProfile", "-Command", ps_cmd]).spawn();
         });
     }
@@ -599,6 +606,16 @@ async fn auto_import_pdf(
 
     if !path.exists() {
         return Json(serde_json::json!({ "success": false, "detail": "Plik zadania nie istnieje na dysku" }));
+    }
+
+    let initial = crate::config::InitialDownloads::load_or_init();
+    if initial.is_ignored(&path) {
+        println!("[AlgoDeck] Pominięto auto_import_pdf {:?} - plik istniał przed instalacją AlgoDeck", path);
+        return Json(serde_json::json!({
+            "success": false,
+            "ignored": true,
+            "detail": "Plik zignorowany jako istniejący przed instalacją AlgoDeck"
+        }));
     }
 
     let is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
@@ -980,6 +997,16 @@ async fn stage_by_path(
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "success": false, "detail": "Plik nie istnieje na dysku" })),
         ));
+    }
+
+    let initial = crate::config::InitialDownloads::load_or_init();
+    if initial.is_ignored(&path) {
+        println!("[AlgoDeck] Pominięto stage_by_path {:?} - plik istniał przed instalacją AlgoDeck", path);
+        return Ok(Json(serde_json::json!({
+            "success": false,
+            "ignored": true,
+            "detail": "Plik zignorowany jako istniejący przed instalacją AlgoDeck"
+        })));
     }
 
     let mut is_pdf = path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("pdf")).unwrap_or(false);
@@ -2279,7 +2306,7 @@ async fn press_streamdeck_key(
                 }
             }
             "new_task" => {
-                open_browser_foreground("http://127.0.0.1:8080/#new");
+                open_browser_foreground("http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf");
             }
             "open_settings" => {
                 open_browser_foreground("http://127.0.0.1:8080/settings");

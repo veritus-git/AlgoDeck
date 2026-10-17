@@ -100,9 +100,13 @@ function createAlgoTask(name, scriptName, pdir) {
     }
     const scope = wsFolder || vscode.TaskScope.Workspace;
 
+    // Używamy bezpiecznej, zwięzłej komendy z precyzyjnie ustawionym cwd: pdir.
+    // Na Windows 'cmd.exe /c' działa w każdym shellu (PowerShell 5.1/7, CMD, Git Bash)
+    // eliminując błędy parsera tokenu '&&' i przełącznika 'cd /d'.
+    // Na macOS i Linux krótka komenda 'bash .algo/test.sh' zapobiega zaśmiecaniu terminala 10-linijkowym skryptem.
     const cmd = isWin
-        ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
-        : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
+        ? `cmd.exe /c "call .algo\\${actualScript}"`
+        : `bash .algo/${actualScript}`;
 
     const execution = new vscode.ShellExecution(cmd, { cwd: pdir || undefined });
     const task = new vscode.Task(
@@ -136,7 +140,16 @@ async function runAlgoTask(name, scriptName, pdir) {
     const actualScript = isWin ? scriptName.replace(/\.sh$/, '.cmd') : scriptName;
     const taskKeyword = name.includes('ODPAL') ? 'ODPAL' : 'TESTUJ';
 
-    // 1. Uruchom zadanie z tasks.json (dokładnie tak jak z menu VS Code: Terminal -> Run Task)
+    // 1. Utwórz dedykowany, czysty vscode.Task dla folderu zadania (krótka, estetyczna komenda w terminalu)
+    try {
+        const task = createAlgoTask(name, scriptName, pdir);
+        await vscode.tasks.executeTask(task);
+        return true;
+    } catch (taskErr) {
+        console.warn('[AlgoDeck Bridge] createAlgoTask warning:', taskErr);
+    }
+
+    // 2. Fallback: Jeśli dedykowany task nie wystartował, przeszukaj zadania z tasks.json
     try {
         const allTasks = await Promise.race([
             vscode.tasks.fetchTasks(),
@@ -158,15 +171,6 @@ async function runAlgoTask(name, scriptName, pdir) {
         console.warn('[AlgoDeck Bridge] fetchTasks warning:', e);
     }
 
-    // 2. Jeśli tasks.json nie został jeszcze sparsowany, utwórz dedykowany vscode.Task
-    try {
-        const task = createAlgoTask(name, scriptName, pdir);
-        await vscode.tasks.executeTask(task);
-        return true;
-    } catch (taskErr) {
-        console.error('[AlgoDeck Bridge] createAlgoTask error:', taskErr);
-    }
-
     // 3. Fallback do akcji wbudowanych workbench
     try {
         if (taskKeyword === 'ODPAL') {
@@ -182,8 +186,8 @@ async function runAlgoTask(name, scriptName, pdir) {
     // 4. Ostateczny fallback w razie specyficznych restrykcji
     try {
         const cmd = isWin
-            ? (pdir ? `cd /d "${pdir}" && .algo\\${actualScript}` : `.algo\\${actualScript}`)
-            : (pdir ? `cd "${pdir}" && bash .algo/${actualScript}` : `bash .algo/${actualScript}`);
+            ? `cmd.exe /c "call .algo\\${actualScript}"`
+            : `bash .algo/${actualScript}`;
         let term = vscode.window.terminals.find(t => t.name === name || t.name === 'AlgoDeck');
         if (!term) {
             term = vscode.window.createTerminal({ name: name, cwd: pdir || undefined });

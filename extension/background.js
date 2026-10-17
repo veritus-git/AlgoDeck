@@ -91,12 +91,79 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onStartup)
 }
 
 const processedDownloads = new Set();
+const initialIgnoredIds = new Set();
+const initialIgnoredFiles = new Set();
+let algodeckInstalledAt = null;
+
+async function initDownloadIgnoreList() {
+  try {
+    const stored = await chrome.storage.local.get([
+      "algodeck_installed_at",
+      "initial_ignored_ids",
+      "initial_ignored_files"
+    ]);
+
+    if (!stored.algodeck_installed_at) {
+      let installedAt = Date.now();
+      try {
+        const res = await fetch(`${API_BASE}/api/initial-downloads`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.installed_at) installedAt = data.installed_at;
+          if (Array.isArray(data.ignored_files)) {
+            data.ignored_files.forEach(f => initialIgnoredFiles.add(f.toLowerCase()));
+          }
+        }
+      } catch (_) {}
+
+      const ignoredIds = [];
+      if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
+        try {
+          const allDownloads = await chrome.downloads.search({});
+          for (const dl of allDownloads || []) {
+            ignoredIds.push(dl.id);
+            initialIgnoredIds.add(dl.id);
+            if (dl.filename) {
+              const baseName = dl.filename.replace(/^.*[\\\/]/, '').toLowerCase();
+              initialIgnoredFiles.add(baseName);
+            }
+          }
+        } catch (_) {}
+      }
+
+      algodeckInstalledAt = installedAt;
+      await chrome.storage.local.set({
+        algodeck_installed_at: installedAt,
+        initial_ignored_ids: ignoredIds,
+        initial_ignored_files: Array.from(initialIgnoredFiles)
+      });
+      console.log(`[AlgoDeck] Zainicjalizowano ignorowanie starych pobrań (${ignoredIds.length} plików).`);
+    } else {
+      algodeckInstalledAt = stored.algodeck_installed_at;
+      if (Array.isArray(stored.initial_ignored_ids)) {
+        stored.initial_ignored_ids.forEach(id => initialIgnoredIds.add(id));
+      }
+      if (Array.isArray(stored.initial_ignored_files)) {
+        stored.initial_ignored_files.forEach(f => initialIgnoredFiles.add(f.toLowerCase()));
+      }
+    }
+  } catch (e) {
+    console.warn("[AlgoDeck] Błąd initDownloadIgnoreList:", e);
+  }
+}
+initDownloadIgnoreList();
+
+if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onInstalled) {
+  chrome.runtime.onInstalled.addListener(() => {
+    initDownloadIgnoreList();
+  });
+}
 
 // Obsługa zakończonego pobierania (wyłącznie świeże PDFy pobrane w tej sesji!)
 async function handleCompletedDownload(downloadId) {
   if (!downloadId) return;
 
-  if (processedDownloads.has(downloadId)) {
+  if (processedDownloads.has(downloadId) || initialIgnoredIds.has(downloadId)) {
     return;
   }
 
@@ -124,6 +191,31 @@ async function handleCompletedDownload(downloadId) {
       return;
     }
 
+    // Sprawdź czy plik nie pochodzi sprzed instalacji AlgoDeck
+    const startTs = item.startTime ? new Date(item.startTime).getTime() : 0;
+    const finishTs = item.endTime ? new Date(item.endTime).getTime() : startTs;
+    if (algodeckInstalledAt && Math.max(startTs, finishTs) <= algodeckInstalledAt) {
+      console.log("[AlgoDeck] Pominięto plik sprzed instalacji AlgoDeck:", item.filename);
+      initialIgnoredIds.add(downloadId);
+      return;
+    }
+
+    let filename = item.filename || "";
+    if (filename.endsWith(".crdownload")) {
+      filename = filename.slice(0, -11);
+    }
+    if (!filename) return;
+
+    const baseName = filename.replace(/^.*[\\\/]/, '');
+    const lowerBase = baseName.toLowerCase();
+    if (initialIgnoredFiles.has(lowerBase)) {
+      if (algodeckInstalledAt && Math.max(startTs, finishTs) <= algodeckInstalledAt + 3000) {
+        console.log("[AlgoDeck] Pominięto plik z początkowej listy pobranych:", baseName);
+        initialIgnoredIds.add(downloadId);
+        return;
+      }
+    }
+
     // Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
     try {
       const stored = await chrome.storage.local.get(["auto_detect_downloads"]);
@@ -140,13 +232,6 @@ async function handleCompletedDownload(downloadId) {
       processedDownloads.delete(oldest);
     }
 
-    let filename = item.filename || "";
-    if (filename.endsWith(".crdownload")) {
-      filename = filename.slice(0, -11);
-    }
-    if (!filename) return;
-
-    const baseName = filename.replace(/^.*[\\\/]/, '');
     console.log("[AlgoDeck] Wykryto kompletne pobranie zadania PDF:", filename);
 
     // 2. Natychmiast zapisz w chrome.storage.local (żeby plik był od razu widoczny w popupie po kliknięciu!)
@@ -211,21 +296,7 @@ async function handleCompletedDownload(downloadId) {
       });
     }
 
-    // 6. Powiadomienie systemowe (jeśli użytkownik nie patrzy na przeglądarkę)
-    try {
-      if (chrome.notifications && chrome.notifications.create) {
-        chrome.notifications.create(`algodeck_${downloadId}_${Date.now()}`, {
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "AlgoDeck ⚡ Nowe zadanie PDF",
-          message: `Pobrano: ${baseName}\nKliknij ikonę ⚡, aby otworzyć zadanie w VS Code.`,
-          priority: 2,
-          requireInteraction: false
-        });
-      }
-    } catch (_) {}
-
-    // 7. Otwórz popup rozszerzenia pod ikoną ⚡ jeśli przeglądarka na to zezwala
+    // 6. Otwórz popup rozszerzenia pod ikoną ⚡ jeśli przeglądarka na to zezwala
     await triggerExtensionPopup(baseName, problemId);
   } catch (e) {
     console.warn("[AlgoDeck] Błąd handleCompletedDownload:", e);
@@ -290,8 +361,19 @@ async function checkRecentDownloadsOnWake() {
         state: "complete"
       });
       for (const item of recent || []) {
+        if (initialIgnoredIds.has(item.id)) continue;
+        const finishTime = item.endTime ? new Date(item.endTime).getTime() : new Date(item.startTime).getTime();
+        if (algodeckInstalledAt && finishTime <= algodeckInstalledAt) {
+          initialIgnoredIds.add(item.id);
+          continue;
+        }
+        const fn = item.filename || "";
+        const baseName = fn.replace(/^.*[\\\/]/, '').toLowerCase();
+        if (initialIgnoredFiles.has(baseName) && algodeckInstalledAt && finishTime <= algodeckInstalledAt + 3000) {
+          initialIgnoredIds.add(item.id);
+          continue;
+        }
         if (isOlympicTaskFile(item)) {
-          const finishTime = item.endTime ? new Date(item.endTime).getTime() : new Date(item.startTime).getTime();
           const age = Date.now() - finishTime;
           if (age < 180000) { // młodszy niż 3 minuty
             handleCompletedDownload(item.id);

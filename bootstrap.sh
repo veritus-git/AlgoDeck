@@ -388,6 +388,71 @@ else
     echo -e "${BLUE}ℹ Skrót autostartu dodany do ~/.config/autostart/algodeck.desktop.${NC}"
 fi
 
+# ------------------------------------------------------------------------------
+# ZAPIS STANU POCZĄTKOWEGO POBRANYCH PLIKÓW (IGNOROWANIE STARYCH ZADAŃ)
+# ------------------------------------------------------------------------------
+CFG_DIR="$HOME/.config/algodeck"
+mkdir -p "$CFG_DIR"
+rm -rf "$SHARE_DIR/staging"/* 2>/dev/null || true
+mkdir -p "$SHARE_DIR/staging" 2>/dev/null || true
+SNAPSHOT_FILE="$CFG_DIR/initial_downloads.json"
+python3 -c "
+import os, json, time
+dl = os.path.expanduser('~/Downloads')
+files = []
+if os.path.exists(dl):
+    for f in os.listdir(dl):
+        files.append(f)
+data = {
+    'installed_at': int(time.time() * 1000),
+    'ignored_files': files
+}
+cfg = os.path.expanduser('~/.config/algodeck/initial_downloads.json')
+with open(cfg, 'w') as out:
+    json.dump(data, out, indent=2)
+" 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# AUTOMATYZACJA ROZSZERZENIA: SCHOWEK, MENEDŻER PLIKÓW I PRZEGLĄDARKA
+# ------------------------------------------------------------------------------
+EXT_DIR="$HOME/.local/share/algodeck/extension"
+
+# 1. Automatyczne skopiowanie ścieżki do schowka Linux (Wayland wl-copy lub X11 xclip/xsel)
+if command -v wl-copy &>/dev/null; then
+    echo -n "$EXT_DIR" | wl-copy 2>/dev/null || true
+elif command -v xclip &>/dev/null; then
+    echo -n "$EXT_DIR" | xclip -selection clipboard 2>/dev/null || true
+elif command -v xsel &>/dev/null; then
+    echo -n "$EXT_DIR" | xsel --clipboard --input 2>/dev/null || true
+fi
+if command -v base64 &>/dev/null; then
+    printf "\033]52;c;%s\a" "$(echo -n "$EXT_DIR" | base64 | tr -d '\r\n')" 2>/dev/null || true
+fi
+
+# 2. Automatyczne otwarcie strony rozszerzeń w domyślnej przeglądarce Chromium
+if command -v brave-browser &>/dev/null; then
+    brave-browser "brave://extensions" 2>/dev/null &
+elif command -v brave &>/dev/null; then
+    brave "brave://extensions" 2>/dev/null &
+elif command -v google-chrome &>/dev/null; then
+    google-chrome "chrome://extensions" 2>/dev/null &
+elif command -v google-chrome-stable &>/dev/null; then
+    google-chrome-stable "chrome://extensions" 2>/dev/null &
+elif command -v chromium &>/dev/null; then
+    chromium "chrome://extensions" 2>/dev/null &
+elif command -v chromium-browser &>/dev/null; then
+    chromium-browser "chrome://extensions" 2>/dev/null &
+elif command -v microsoft-edge &>/dev/null || command -v microsoft-edge-stable &>/dev/null; then
+    (microsoft-edge "edge://extensions" 2>/dev/null || microsoft-edge-stable "edge://extensions" 2>/dev/null) &
+elif command -v flatpak &>/dev/null && flatpak info com.brave.Browser &>/dev/null; then
+    flatpak run com.brave.Browser "brave://extensions" 2>/dev/null &
+elif command -v flatpak &>/dev/null && flatpak info com.google.Chrome &>/dev/null; then
+    flatpak run com.google.Chrome "chrome://extensions" 2>/dev/null &
+fi
+
+# 3. Otwarcie folderu rozszerzenia w menedżerze plików dla łatwego Drag & Drop
+xdg-open "$EXT_DIR" 2>/dev/null &
+
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
 echo -e "${GREEN}${BOLD}       🎉 AlgoDeck v2.0.0 (100% Rust) pomyślnie zainstalowany!                ${NC}"
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
@@ -396,10 +461,12 @@ echo -e "• Stream Deck: Bezpośrednia obsługa USB HID bez jakichkolwiek zewn�
 echo -e "• Narzędzie CLI: ${BOLD}algodeck status${NC} | ${BOLD}algodeck test <kod_zadania>${NC} | ${BOLD}algodeck stop${NC}"
 echo -e "${GREEN}${BOLD}==============================================================================${NC}"
 
-echo -e "\n${CYAN}${BOLD}🧩 DODANIE ROZSZERZENIA DO PRZEGLĄDARKI (Chrome / Brave / Edge):${NC}"
-echo -e "1. Wejdź w przeglądarce pod adres: ${BOLD}chrome://extensions${NC} (lub brave://extensions)"
+echo -e "\n${CYAN}${BOLD}🧩 DODANIE ROZSZERZENIA DO PRZEGLĄDARKI (Automatyczne ułatwienie):${NC}"
+echo -e "${GREEN}✓ Ścieżka folderu rozszerzenia została AUTOMATYCZNIE SKOPIOWANA do Twojego schowka (Ctrl+V)!${NC}"
+echo -e "${GREEN}✓ Otwarto stronę rozszerzeń w przeglądarce oraz folder rozszerzenia.${NC}"
+echo -e "\n1. Wejdź w przeglądarce pod adres: ${BOLD}chrome://extensions${NC} (lub brave://extensions)"
 echo -e "2. Włącz w prawym górnym rogu przełącznik ${BOLD}Tryb programisty${NC} (Developer mode)"
 echo -e "3. Kliknij w lewym górnym rogu przycisk ${BOLD}Załaduj rozpakowane${NC} (Load unpacked)"
-echo -e "4. Wybierz ten folder:"
-echo -e "   ${GREEN}${BOLD}$HOME/.local/share/algodeck/extension${NC}"
+echo -e "4. W oknie wyboru wklej schowek (${BOLD}Ctrl+V${NC}) lub przeciągnij otwarty folder:"
+echo -e "   ${GREEN}${BOLD}$EXT_DIR${NC}"
 echo -e "5. Gotowe! Przypnij ikonę ⚡ AlgoDeck na pasku przeglądarki.\n"

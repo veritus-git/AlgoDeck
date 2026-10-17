@@ -72,6 +72,27 @@ if ($hasGpp) {
         } catch {}
     }
     if (-not $installedCompiler) {
+        Write-Host "Próba automatycznej instalacji GCC przez Scoop..." -ForegroundColor Cyan
+        try {
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+            if (!(Get-Command scoop -ErrorAction SilentlyContinue)) {
+                Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+            }
+            $scoopShim = "$env:USERPROFILE\scoop\shims"
+            if ($env:Path -notlike "*$scoopShim*") {
+                $env:Path = "$env:Path;$scoopShim"
+            }
+            scoop install gcc
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User") + ";$scoopShim"
+            if (Get-Command g++ -ErrorAction SilentlyContinue -or (Test-Path "$scoopShim\g++.exe")) {
+                Write-Host "✓ Pomyślnie zainstalowano GCC przez Scoop!" -ForegroundColor Green
+                $installedCompiler = $true
+            }
+        } catch {
+            Write-Host "Instalacja przez Scoop nie powiodła się: $_" -ForegroundColor DarkYellow
+        }
+    }
+    if (-not $installedCompiler) {
         Write-Host "Pobieranie przenośnego kompilatora C++20 (w64devkit / MinGW)..." -ForegroundColor Cyan
         $DevkitZip = "$env:TEMP\w64devkit.zip"
         $DevkitDir = "$InstallDir\compiler"
@@ -430,6 +451,98 @@ try {
 } catch {}
 
 # ------------------------------------------------------------------------------
+# ZAPIS STANU POCZĄTKOWEGO POBRANYCH PLIKÓW (IGNOROWANIE STARYCH ZADAŃ)
+# ------------------------------------------------------------------------------
+$ConfigDir = "$env:USERPROFILE\.config\algodeck"
+if (-not (Test-Path $ConfigDir)) {
+    New-Item -Path $ConfigDir -ItemType Directory -Force | Out-Null
+}
+$StagingDir = "$InstallDir\staging"
+if (Test-Path $StagingDir) {
+    Remove-Item "$StagingDir\*" -Force -Recurse -ErrorAction SilentlyContinue
+} else {
+    New-Item -Path $StagingDir -ItemType Directory -Force | Out-Null
+}
+$SnapshotFile = "$ConfigDir\initial_downloads.json"
+try {
+    $DownloadsPath = Join-Path $env:USERPROFILE "Downloads"
+    $IgnoredFiles = @()
+    if (Test-Path $DownloadsPath) {
+        $Existing = Get-ChildItem -Path $DownloadsPath -File -ErrorAction SilentlyContinue
+        foreach ($item in $Existing) {
+            $IgnoredFiles += $item.Name
+        }
+    }
+    $SnapshotData = @{
+        installed_at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        ignored_files = $IgnoredFiles
+    }
+    $JsonStr = $SnapshotData | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText($SnapshotFile, $JsonStr, [System.Text.Encoding]::UTF8)
+    Write-Host "✓ Zapisano stan początkowy pobrań (stare pliki będą ignorowane)." -ForegroundColor Green
+} catch {}
+
+# ------------------------------------------------------------------------------
+# AUTOMATYZACJA ROZSZERZENIA: SCHOWEK, EKSPLORATOR I PRZEGLĄDARKA
+# ------------------------------------------------------------------------------
+# 1. Automatyczne skopiowanie ścieżki do schowka Windows (Ctrl+V)
+try {
+    Set-Clipboard -Value $ExtensionDir -ErrorAction SilentlyContinue
+} catch {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.Clipboard]::SetText($ExtensionDir)
+    } catch {}
+}
+
+# 2. Automatyczne otwarcie strony rozszerzeń w przeglądarce Chromium
+$BrowserOpened = $false
+$BravePaths = @(
+    "$env:ProgramFiles\BraveSoftware\Brave-Browser\Application\brave.exe",
+    "${env:ProgramFiles(x86)}\BraveSoftware\Brave-Browser\Application\brave.exe",
+    "$env:LocalAppData\BraveSoftware\Brave-Browser\Application\brave.exe"
+)
+foreach ($bp in $BravePaths) {
+    if (Test-Path $bp) {
+        Start-Process $bp -ArgumentList "brave://extensions" -ErrorAction SilentlyContinue
+        $BrowserOpened = $true
+        break
+    }
+}
+
+if (-not $BrowserOpened) {
+    $ChromePaths = @(
+        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LocalAppData\Google\Chrome\Application\chrome.exe"
+    )
+    foreach ($cp in $ChromePaths) {
+        if (Test-Path $cp) {
+            Start-Process $cp -ArgumentList "chrome://extensions" -ErrorAction SilentlyContinue
+            $BrowserOpened = $true
+            break
+        }
+    }
+}
+
+if (-not $BrowserOpened) {
+    $EdgePaths = @(
+        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    )
+    foreach ($ep in $EdgePaths) {
+        if (Test-Path $ep) {
+            Start-Process $ep -ArgumentList "edge://extensions" -ErrorAction SilentlyContinue
+            $BrowserOpened = $true
+            break
+        }
+    }
+}
+
+# 3. Otwarcie folderu rozszerzenia w Eksploratorze Windows dla łatwego przeciągania (Drag & Drop)
+Start-Process "explorer.exe" -ArgumentList "`"$ExtensionDir`"" -ErrorAction SilentlyContinue
+
+# ------------------------------------------------------------------------------
 # PODSUMOWANIE INSTALACJI
 # ------------------------------------------------------------------------------
 Write-Host "`n==================================================================" -ForegroundColor Cyan
@@ -441,10 +554,11 @@ Write-Host "• Skróty CMD:      algodeck-start  |  algodeck-stop" -ForegroundC
 Write-Host "• Folder programu: $InstallDir" -ForegroundColor White
 Write-Host "==================================================================" -ForegroundColor Cyan
 
-Write-Host "`n🧩 JAK ZAŁADOWAĆ ROZSZERZENIE DO PRZEGLĄDARKI (Chrome / Brave / Edge):" -ForegroundColor Yellow
-Write-Host "1. Otwórz w przeglądarce: chrome://extensions  (lub brave://extensions / edge://extensions)" -ForegroundColor White
-Write-Host "2. Włącz w prawym górnym rogu 'Tryb programisty' (Developer mode)" -ForegroundColor White
-Write-Host "3. Kliknij w lewym górnym rogu przycisk 'Załaduj rozpakowane' (Load unpacked)" -ForegroundColor White
-Write-Host "4. W oknie wyboru wskaż DOKŁADNIE ten folder:" -ForegroundColor White
+Write-Host "`n🧩 DODANIE ROZSZERZENIA DO PRZEGLĄDARKI (Automatyczne ułatwienie):" -ForegroundColor Cyan
+Write-Host "✓ Ścieżka folderu rozszerzenia została AUTOMATYCZNIE SKOPIOWANA do Twojego schowka (Ctrl+V)!" -ForegroundColor Green
+Write-Host "✓ Otwarto stronę rozszerzeń w przeglądarce oraz folder rozszerzenia w Eksploratorze." -ForegroundColor Green
+Write-Host "`n1. W przeglądarce (na otwartej stronie rozszerzeń) włącz 'Tryb programisty' (Developer mode)" -ForegroundColor White
+Write-Host "2. Kliknij przycisk 'Załaduj rozpakowane' (Load unpacked)" -ForegroundColor White
+Write-Host "3. W oknie wyboru wklej schowek (Ctrl+V) lub przeciągnij otwarty folder:" -ForegroundColor White
 Write-Host "   $ExtensionDir" -ForegroundColor Green
-Write-Host "5. Gotowe! Przypnij ikonę ⚡ AlgoDeck na pasku narzędzi przeglądarki.`n" -ForegroundColor Cyan
+Write-Host "4. Gotowe! Przypnij ikonę ⚡ AlgoDeck na pasku narzędzi przeglądarki.`n" -ForegroundColor Cyan

@@ -431,6 +431,30 @@ if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
 fi
 
 # ------------------------------------------------------------------------------
+# ZAPIS STANU POCZĄTKOWEGO POBRANYCH PLIKÓW (IGNOROWANIE STARYCH ZADAŃ)
+# ------------------------------------------------------------------------------
+CFG_DIR="$HOME/.config/algodeck"
+mkdir -p "$CFG_DIR"
+rm -rf "$SHARE_DIR/staging"/* 2>/dev/null || true
+mkdir -p "$SHARE_DIR/staging" 2>/dev/null || true
+SNAPSHOT_FILE="$CFG_DIR/initial_downloads.json"
+python3 -c "
+import os, json, time
+dl = os.path.expanduser('~/Downloads')
+files = []
+if os.path.exists(dl):
+    for f in os.listdir(dl):
+        files.append(f)
+data = {
+    'installed_at': int(time.time() * 1000),
+    'ignored_files': files
+}
+cfg = os.path.expanduser('~/.config/algodeck/initial_downloads.json')
+with open(cfg, 'w') as out:
+    json.dump(data, out, indent=2)
+" 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
 # AUTOMATYZACJA ROZSZERZENIA: SCHOWEK, FINDER I PRZEGLĄDARKA
 # ------------------------------------------------------------------------------
 # 1. Automatyczne skopiowanie ścieżki do schowka macOS

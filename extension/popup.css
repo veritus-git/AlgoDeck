@@ -815,7 +815,29 @@ body.mode-tab .linux-tip-box {
   gap: 6px;
   max-height: 280px;
   overflow-y: auto;
-  padding-right: 2px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 rgba(15, 23, 42, 0.4);
+}
+
+.tasks-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tasks-list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 9999px;
+  margin: 3px 0;
+}
+
+.tasks-list::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+}
+
+.tasks-list::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 .task-card {

@@ -99,6 +99,16 @@ fn handle_native_message(msg: &Value) -> Value {
                 }
 
                 if src.exists() {
+                    let initial = crate::config::InitialDownloads::load_or_init();
+                    if initial.is_ignored(&src) {
+                        return serde_json::json!({
+                            "success": false,
+                            "ignored": true,
+                            "status": "ignored",
+                            "detail": "Plik zignorowany jako istniejący przed instalacją AlgoDeck"
+                        });
+                    }
+
                     let stage_dir = crate::config::AppSettings::staging_dir();
                     let _ = std::fs::create_dir_all(&stage_dir);
 

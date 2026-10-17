@@ -55,7 +55,7 @@ Działa bezpośrednio z magistralą USB urządzenia — bez oficjalnej aplikacji
 | Klawisz | Działanie |
 |:---:|:---|
 | **`KOD` (0..4)** | 5-klawiszowy identyfikator aktywnego zadania (np. `[ = ] [ K ] [ O ] [ L ] [ = ]`), kliknięcie skupia plik w VS Code |
-| **`+` (5)** | Otwórz stronę dodawania nowego zadania (`#new`) w przeglądarce |
+| **`+` (5)** | Otwórz stronę importu nowego zadania (PDF / ZIP) w pełnej karcie przeglądarki |
 | **`✓` (6)** | Skompiluj kod (C++20) i uruchom testy w VS Code z dynamicznym statusem (OK, WA, TLE, czas w ms) |
 | **`▶` (7)** | Skompiluj i uruchom rozwiązanie w interaktywnym oknie terminala VS Code (cin/cout) |
 | **`⏹` (8)** | Natychmiast zatrzymaj działający program lub testy (mostek VS Code + SIGKILL / taskkill) |

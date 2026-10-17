@@ -428,22 +428,23 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo ✓ Skompilowano pomyślnie!
-echo ▶ Program uruchomiony (wprowadź dane cin):
+echo ▶ Program uruchomiony [wprowadź dane cin]:
 echo ---------------------------------------------------------
 .algo\{p_id}.exe
 set RET=%ERRORLEVEL%
 echo.
 echo ---------------------------------------------------------
-if %RET% EQU 0 (
-    echo ✓ Program zakończony pomyślnie (kod: 0).
+if "%RET%"=="0" (
+    echo ✓ Program zakończony pomyślnie [kod: 0].
 ) else (
-    echo ❌ Program zakończony błędem (kod: %RET%).
+    echo ❌ Program zakończony błędem [kod: %RET%].
 )
 "#,
             p_dir_disp = p_dir.display(),
             p_id = p_id
         );
-        let _ = fs::write(&run_cmd_path, run_cmd_content);
+        let run_cmd_crlf = run_cmd_content.replace("\r\n", "\n").replace('\n', "\r\n");
+        let _ = fs::write(&run_cmd_path, run_cmd_crlf);
 
         // 2. test.sh
         let test_sh_path = algo_dir.join("test.sh");
@@ -477,6 +478,16 @@ C_CYAN="\033[1;36m"
 C_MAGENTA="\033[1;35m"
 C_WHITE="\033[1;37m"
 C_GRAY="\033[0;90m"
+
+send_notify() {{
+    local cfg="$HOME/.config/algodeck/settings.json"
+    if [ -f "$cfg" ]; then
+        if grep -q '"notifications"[[:space:]]*:[[:space:]]*false' "$cfg" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    notify-send "$@" 2>/dev/null || true
+}}
 
 pad_left() {{
     local text="$1"
@@ -533,7 +544,7 @@ if ! g++ -O3 -std=c++20 "${{PROB}}.cpp" -o ".algo/${{PROB}}" 2>.algo/compile.log
     echo -e "${{C_RED}}"
     cat .algo/compile.log
     echo -e "${{C_RESET}}"
-    notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ Błąd kompilacji!" 2>/dev/null || true
+    send_notify -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ Błąd kompilacji!"
     [ "$WAIT_AT_END" = true ] && read -p "Naciśnij Enter, aby zamknąć..."
     exit 1
 fi
@@ -653,19 +664,19 @@ if [ "$PASSED" -eq "$TOTAL" ]; then
     echo -ne "${{C_GREEN}}${{C_BOLD}}"
     box_line "  ✨ 100% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WSZYSTKO POPRAWNIE!"
     echo -e "${{C_GREEN}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
-    notify-send "AlgoDeck (${{PROB_UPPER}})" "✨ 100% ZALICZONE ($PASSED/$TOTAL)" 2>/dev/null || true
+    send_notify "AlgoDeck (${{PROB_UPPER}})" "✨ 100% ZALICZONE ($PASSED/$TOTAL)"
 elif [ "$PASSED" -eq 0 ]; then
     echo -e "${{C_RED}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
     echo -ne "${{C_RED}}${{C_BOLD}}"
     box_line "  ❌ 0% TESTÓW ZALICZONYCH (0/$TOTAL) — WSZYSTKIE TESTY OBLANE!"
     echo -e "${{C_RED}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
-    notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ 0% ZALICZONE (0/$TOTAL)" 2>/dev/null || true
+    send_notify -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ 0% ZALICZONE (0/$TOTAL)"
 else
     echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
     echo -ne "${{C_YELLOW}}${{C_BOLD}}"
     box_line "  ⚠️  $PCT% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WYKRYTO BŁĘDY ($FAILED OBLANE)"
     echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
-    notify-send -u critical "AlgoDeck (${{PROB_UPPER}})" "⚠️  $PCT% ZALICZONE ($PASSED/$TOTAL)" 2>/dev/null || true
+    send_notify -u critical "AlgoDeck (${{PROB_UPPER}})" "⚠️  $PCT% ZALICZONE ($PASSED/$TOTAL)"
 fi
 
 if [ "${{#ERRORS[@]}}" -gt 0 ] && [ "$VERBOSE" = false ]; then
@@ -718,7 +729,7 @@ chcp 65001 >nul
 cd /d "{p_dir_disp}"
 
 echo ================================================================================
-echo        ⚡ AlgoDeck Test Runner — {p_upper} ({title})
+echo        ⚡ AlgoDeck Test Runner — {p_upper} [{title}]
 echo ================================================================================
 
 echo ⚡ Kompilacja {p_id}.cpp (g++ -O3 -std=c++20)...
@@ -741,29 +752,29 @@ for %%F in (.algo\tests\*.in) do (
     set "base=%%~nF"
     .algo\{p_id}.exe < "%%F" > ".algo\tests\%%~nF.my" 2>nul
     if errorlevel 1 (
-        echo [%%~nF] 💥 RTE (Błąd wykonania)
+        echo [%%~nF] 💥 RTE [Błąd wykonania]
         set /a FAILED+=1
     ) else if exist ".algo\tests\%%~nF.out" (
         fc /w ".algo\tests\%%~nF.out" ".algo\tests\%%~nF.my" >nul 2>&1
         if errorlevel 1 (
-            echo [%%~nF] ❌ WA (Zły wynik)
+            echo [%%~nF] ❌ WA [Zły wynik]
             set /a FAILED+=1
         ) else (
             echo [%%~nF] ✓ OK
             set /a PASSED+=1
         )
     ) else (
-        echo [%%~nF] ✓ OK (brak wzorca .out)
+        echo [%%~nF] ✓ OK [brak wzorca .out]
         set /a PASSED+=1
     )
 )
 
 echo.
 echo ================================================================================
-if %PASSED% EQU %TOTAL% (
-    echo ✨ 100%% TESTÓW ZALICZONYCH (%PASSED%/%TOTAL%) - WSZYSTKO POPRAWNIE!
+if "%PASSED%"=="%TOTAL%" (
+    echo ✨ 100%% TESTÓW ZALICZONYCH [%PASSED%/%TOTAL%] - WSZYSTKO POPRAWNIE!
 ) else (
-    echo ⚠️ WYNIK: %PASSED%/%TOTAL% zaliczonych (%FAILED% oblanych).
+    echo ⚠️ WYNIK: %PASSED%/%TOTAL% zaliczonych [%FAILED% oblanych].
 )
 echo ================================================================================
 "#,
@@ -772,7 +783,8 @@ echo ===========================================================================
             p_upper = p_id.to_uppercase(),
             title = title
         );
-        let _ = fs::write(&test_cmd_path, test_cmd_content);
+        let test_cmd_crlf = test_cmd_content.replace("\r\n", "\n").replace('\n', "\r\n");
+        let _ = fs::write(&test_cmd_path, test_cmd_crlf);
 
         // 3. kill.sh
         let kill_sh_path = algo_dir.join("kill.sh");
@@ -792,8 +804,6 @@ done
 pgrep -f "${{PROB}}/\.algo/test\.sh" 2>/dev/null | while read -r p; do
     [ "$p" != "$$" ] && kill -9 "$p" 2>/dev/null || true
 done
-
-notify-send "AlgoDeck (${{PROB_UPPER}})" "🛑 Zatrzymano działający program / testy" 2>/dev/null || true
 "#,
             p_id = p_id,
             p_upper = p_id.to_uppercase()
@@ -814,7 +824,8 @@ echo 🛑 Zatrzymano działający program {p_id}
 "#,
             p_id = p_id
         );
-        let _ = fs::write(&kill_cmd_path, kill_cmd_content);
+        let kill_cmd_crlf = kill_cmd_content.replace("\r\n", "\n").replace('\n', "\r\n");
+        let _ = fs::write(&kill_cmd_path, kill_cmd_crlf);
 
         // 4. accept.sh
         let accept_sh_path = algo_dir.join("accept.sh");

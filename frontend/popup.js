@@ -83,10 +83,36 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const autoTrigger = urlParams.get("trigger");
   if (autoTrigger === "pdf" || autoTrigger === "zip") {
-    setTimeout(() => {
-      const el = autoTrigger === "pdf" ? fileInputPdf : fileInputZip;
-      if (el) el.click();
-    }, 250);
+    const el = autoTrigger === "pdf" ? fileInputPdf : fileInputZip;
+    const card = autoTrigger === "pdf" ? dropPdf : dropZip;
+    if (card) {
+      card.classList.add("drop-active");
+      setTimeout(() => card.classList.remove("drop-active"), 2500);
+    }
+    if (el) {
+      let triggered = false;
+      const firePicker = () => {
+        if (triggered) return;
+        triggered = true;
+        try { el.click(); } catch (_) {}
+        window.removeEventListener("pointerdown", firePicker, true);
+        window.removeEventListener("click", firePicker, true);
+        window.removeEventListener("keydown", firePicker, true);
+        window.removeEventListener("focus", firePicker, true);
+      };
+
+      // 1. Natychmiastowe próby wywołania dialogu wyboru pliku
+      firePicker();
+      requestAnimationFrame(firePicker);
+      setTimeout(firePicker, 50);
+
+      // 2. Jeśli przeglądarka wymaga aktywacji użytkownika w nowej karcie:
+      // Pierwszy klik w dowolnym miejscu okna lub fokus natychmiast wyzwala okno wyboru
+      window.addEventListener("pointerdown", firePicker, true);
+      window.addEventListener("click", firePicker, true);
+      window.addEventListener("keydown", firePicker, true);
+      window.addEventListener("focus", firePicker, true);
+    }
   }
 
   const isOnline = await checkDaemonHealth();
@@ -267,9 +293,25 @@ function setupOfflineStarter() {
           clearInterval(checkTimer);
           isStartingDaemon = false;
 
-          // Wyświetl powiadomienie systemowe
+          // Wyświetl powiadomienie systemowe (jeśli włączone w ustawieniach)
           try {
-            if (chrome.notifications && chrome.notifications.create) {
+            let allowNotify = true;
+            if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+              const stored = await chrome.storage.local.get(["algodeck_settings"]);
+              if (stored?.algodeck_settings?.notifications === false) {
+                allowNotify = false;
+              }
+            }
+            if (allowNotify) {
+              try {
+                const sRes = await fetch(`${API_BASE}/api/settings`);
+                if (sRes.ok) {
+                  const sData = await sRes.json();
+                  if (sData.notifications === false) allowNotify = false;
+                }
+              } catch (_) {}
+            }
+            if (allowNotify && typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.create) {
               chrome.notifications.create(`online_${Date.now()}`, {
                 type: "basic",
                 iconUrl: "icons/icon128.png",
@@ -346,14 +388,59 @@ async function syncRecentDownloads() {
   try {
     let filePath = null;
 
+    // Pobierz konfigurację ignorowania starych plików
+    let installedAt = null;
+    const ignoredIds = new Set();
+    const ignoredFiles = new Set();
+
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      const stored = await chrome.storage.local.get(["last_downloaded_pdf", "cleared_pdf_name"]);
+      const stored = await chrome.storage.local.get([
+        "last_downloaded_pdf",
+        "cleared_pdf_name",
+        "algodeck_installed_at",
+        "initial_ignored_ids",
+        "initial_ignored_files"
+      ]);
+
+      if (stored.algodeck_installed_at) {
+        installedAt = stored.algodeck_installed_at;
+      }
+      if (Array.isArray(stored.initial_ignored_ids)) {
+        stored.initial_ignored_ids.forEach(id => ignoredIds.add(id));
+      }
+      if (Array.isArray(stored.initial_ignored_files)) {
+        stored.initial_ignored_files.forEach(f => ignoredFiles.add(f.toLowerCase()));
+      }
+
       if (stored.last_downloaded_pdf) {
-        filePath = stored.last_downloaded_pdf;
+        const base = stored.last_downloaded_pdf.replace(/^.*[\\\/]/, '').toLowerCase();
+        if (ignoredFiles.has(base)) {
+          await chrome.storage.local.remove(["last_downloaded_pdf"]);
+        } else {
+          filePath = stored.last_downloaded_pdf;
+        }
       }
     }
 
-    // Fallback dla macOS i Chrome: przeszukaj ostatnio pobrane pliki PDF (w ciągu ostatnich 2 godzin)
+    if (!installedAt) {
+      try {
+        const res = await fetch(`${API_BASE}/api/initial-downloads`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.installed_at) {
+            installedAt = data.installed_at;
+            if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.set({ algodeck_installed_at: installedAt });
+            }
+          }
+          if (Array.isArray(data.ignored_files)) {
+            data.ignored_files.forEach(f => ignoredFiles.add(f.toLowerCase()));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Fallback: przeszukaj ostatnio pobrane pliki PDF (wyłącznie pobrane PO instalacji AlgoDeck)
     if (!filePath && typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
       try {
         const recent = await chrome.downloads.search({
@@ -365,12 +452,22 @@ async function syncRecentDownloads() {
         const clearedName = stored.cleared_pdf_name || "";
 
         for (const item of recent || []) {
+          if (ignoredIds.has(item.id)) continue;
           const fn = item.filename || "";
           const baseName = fn.replace(/^.*[\\\/]/, '');
+          const lowerBase = baseName.toLowerCase();
+          if (ignoredFiles.has(lowerBase)) continue;
+
           const isPdf = fn.toLowerCase().endsWith(".pdf") || (item.mime && item.mime.toLowerCase().includes("pdf"));
           if (isPdf && fn && !fn.endsWith(".crdownload") && !fn.endsWith(".tmp")) {
             if (baseName && baseName !== clearedName) {
               const startTs = item.endTime ? new Date(item.endTime).getTime() : new Date(item.startTime).getTime();
+              
+              // Całkowite pomijanie plików pobranych przed instalacją AlgoDeck
+              if (installedAt && startTs <= installedAt) {
+                continue;
+              }
+
               const ageMs = Date.now() - startTs;
               if (ageMs < 7200000) { // 2 godziny
                 filePath = fn;
@@ -386,6 +483,7 @@ async function syncRecentDownloads() {
 
     if (filePath) {
       let success = false;
+      let wasIgnored = false;
 
       try {
         const res = await fetch(`${API_BASE}/api/stage-by-path`, {
@@ -393,13 +491,31 @@ async function syncRecentDownloads() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ file_path: filePath })
         });
-        if (res.ok) success = true;
+        if (res.ok) {
+          const respData = await res.json().catch(() => ({}));
+          if (respData && respData.ignored) {
+            wasIgnored = true;
+          } else {
+            success = true;
+          }
+        }
       } catch (_) {}
+
+      if (wasIgnored) {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          await chrome.storage.local.remove(["last_downloaded_pdf"]);
+        }
+        return false;
+      }
 
       if (!success) {
         try {
           if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendNativeMessage) {
-            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filePath }, () => {});
+            chrome.runtime.sendNativeMessage("com.algodeck.launcher", { action: "stage_file", file_path: filePath }, (resp) => {
+              if (resp && resp.status === "ignored") {
+                console.log("[AlgoDeck] Plik zignorowany przez native host.");
+              }
+            });
             success = true;
           }
         } catch (_) {}

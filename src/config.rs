@@ -199,3 +199,110 @@ impl AppSettings {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitialDownloads {
+    pub installed_at: u64,
+    #[serde(default)]
+    pub ignored_files: Vec<String>,
+}
+
+impl InitialDownloads {
+    pub fn snapshot_path() -> PathBuf {
+        if let Some(home) = dirs::home_dir() {
+            home.join(".config").join("algodeck").join("initial_downloads.json")
+        } else {
+            PathBuf::from("./initial_downloads.json")
+        }
+    }
+
+    pub fn load_or_init() -> Self {
+        let path = Self::snapshot_path();
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(data) = serde_json::from_str::<InitialDownloads>(&content) {
+                    return data;
+                }
+            }
+        }
+
+        let mut ignored = Vec::new();
+        let dl_dir = dirs::download_dir().or_else(|| dirs::home_dir().map(|h| h.join("Downloads")));
+        if let Some(dl) = dl_dir {
+            if let Ok(entries) = fs::read_dir(dl) {
+                for e in entries.flatten() {
+                    if let Ok(file_type) = e.file_type() {
+                        if file_type.is_file() {
+                            let name = e.file_name().to_string_lossy().to_string();
+                            ignored.push(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        let installed_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        let snapshot = InitialDownloads {
+            installed_at,
+            ignored_files: ignored,
+        };
+
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(content) = serde_json::to_string_pretty(&snapshot) {
+            let _ = fs::write(path, content);
+        }
+
+        snapshot
+    }
+
+    pub fn is_ignored(&self, file_path: &std::path::Path) -> bool {
+        let filename = file_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if filename.is_empty() {
+            return false;
+        }
+
+        let lower = filename.to_lowercase();
+        let in_ignored_list = self
+            .ignored_files
+            .iter()
+            .any(|ign| ign.eq_ignore_ascii_case(&filename) || ign.to_lowercase() == lower);
+
+        if in_ignored_list {
+            return true;
+        }
+
+        // Sprawdź czas modyfikacji pliku jeśli plik znajduje się w katalogu Downloads
+        if let Ok(metadata) = file_path.metadata() {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    let mod_millis = dur.as_millis() as u64;
+                    if mod_millis <= self.installed_at + 3000 {
+                        if let Some(dl) = dirs::download_dir().or_else(|| dirs::home_dir().map(|h| h.join("Downloads"))) {
+                            if let Ok(can_dl) = dl.canonicalize() {
+                                if let Ok(can_file) = file_path.canonicalize() {
+                                    if can_file.starts_with(&can_dl) {
+                                        return true;
+                                    }
+                                }
+                            }
+                            if file_path.starts_with(&dl) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+}
