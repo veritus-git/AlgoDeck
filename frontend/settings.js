@@ -654,10 +654,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const wsHost = window.location.host || "127.0.0.1:8080";
     const ws = new WebSocket(`${wsProto}//${wsHost}/ws`);
     ws.onmessage = (e) => {
-      if (e.data === "navigate:settings") {
-        window.focus();
-        document.body.classList.add("focus-glow");
-        setTimeout(() => document.body.classList.remove("focus-glow"), 1000);
+      if (typeof e.data === "string") {
+        if (e.data === "navigate:settings") {
+          window.focus();
+          document.body.classList.add("focus-glow");
+          setTimeout(() => document.body.classList.remove("focus-glow"), 1000);
+        } else if (e.data === "navigate:new_task") {
+          window.location.href = "/popup.html?mode=tab&trigger=pdf";
+        } else if (e.data === "navigate:web_hub") {
+          window.location.href = "/";
+        }
       }
     };
   } catch (_) {}

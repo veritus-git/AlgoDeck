@@ -987,8 +987,6 @@ function renderTasks(problems) {
       </div>
       <div class="task-actions">
         <button type="button" class="btn-task-action btn-task-activate" title="Przełącz Stream Deck i otwórz w VS Code">Aktywuj</button>
-        <button type="button" class="btn-task-action btn-task-run" title="Skompiluj i odpal program w terminalu VS Code">Odpal</button>
-        <button type="button" class="btn-task-action btn-task-test" title="Kompiluj i przetestuj w VS Code">Testuj</button>
         <button type="button" class="btn-task-action btn-task-add-tests" title="Wgraj paczkę testów .zip">+ Testy (ZIP)</button>
         <button type="button" class="btn-task-action btn-task-manual-toggle" title="Wpisz wejście i wyjście nowego testu">+ Testy</button>
         <button type="button" class="btn-task-action btn-task-delete" title="Usuń zadanie">Usuń</button>
@@ -1037,33 +1035,6 @@ function renderTasks(problems) {
         loadTasks();
       } catch (e) {
         showToast("Błąd aktywacji zadania", true);
-      }
-    });
-
-    // Odpal interaktywnie w terminalu VS Code
-    card.querySelector(".btn-task-run").addEventListener("click", async () => {
-      try {
-        showToast(`Odpalanie '${pid.toUpperCase()}' w konsoli VS Code...`, false);
-        await fetch(`${API_BASE}/api/run-interactive/${pid}`, { method: "POST" });
-        showToast(`✓ Uruchomiono '${pid.toUpperCase()}' w terminalu VS Code!`, false);
-      } catch (e) {
-        showToast("Błąd uruchamiania w konsoli VS Code", true);
-      }
-    });
-
-    // Testuj w VS Code
-    card.querySelector(".btn-task-test").addEventListener("click", async () => {
-      try {
-        showToast(`Testowanie '${pid.toUpperCase()}' w VS Code...`, false);
-        const res = await fetch(`${API_BASE}/api/run-all/${pid}`, { method: "POST" });
-        const data = await res.json();
-        if (data && data.all_passed) {
-          showToast(`✓ Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, false);
-        } else {
-          showToast(`Wykryto błędy w testach (${data?.summary || "WA"})`, true);
-        }
-      } catch (e) {
-        showToast("Błąd uruchamiania testów", true);
       }
     });
 
@@ -1270,10 +1241,27 @@ function setupShutdown() {
     });
   }
 
-  // Wyczyść odznakę powiadomień po otwarciu popupa
+  // Live WebSocket dla popupa / pełnej karty — nawigacja i synchronizacja
   try {
-    if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
-      chrome.action.setBadgeText({ text: "" });
-    }
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsHost = window.location.host || "127.0.0.1:8080";
+    const ws = new WebSocket(`${wsProto}//${wsHost}/ws`);
+    ws.onmessage = (e) => {
+      if (typeof e.data === "string") {
+        if (e.data === "navigate:settings") {
+          window.location.href = "/settings";
+        } else if (e.data === "navigate:web_hub") {
+          window.location.href = "/";
+        } else if (e.data === "navigate:new_task") {
+          switchTab("tab-files");
+          window.focus();
+        } else if (e.data.startsWith("active:")) {
+          const pid = e.data.substring(7);
+          activeProblemId = pid || null;
+          loadTasks();
+        }
+      }
+    };
   } catch (_) {}
 }
+

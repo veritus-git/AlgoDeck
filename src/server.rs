@@ -597,7 +597,7 @@ pub fn activate_linux_window(target_classes: &[&str]) {
 var list = workspace.windowList ? workspace.windowList() : (workspace.clientList ? workspace.clientList() : []);
 for (var i = 0; i < list.length; i++) {{
     var c = list[i];
-    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.desktopFileName || "") + " " + (c.caption || "")).toLowerCase();
+    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.desktopFileName || "")).toLowerCase();
     if ({condition}) {{
         c.minimized = false;
         c.demandsAttention = false;
@@ -757,7 +757,7 @@ for (var i = 0; i < list.length; i++) {{
     // 2. kdotool (Natywne narzędzie Wayland dla KDE Plasma)
     if let Some(kdo) = find_linux_tool_bin("kdotool") {
         for cls in target_classes {
-            for flag in ["--class", "--name"] {
+            for flag in ["--class"] {
                 let mut search_cmd = std::process::Command::new(&kdo);
                 configure_cmd_env(&mut search_cmd);
                 if let Ok(out) = search_cmd.args(["search", flag, cls]).output() {
@@ -863,9 +863,10 @@ for (var i = 0; i < list.length; i++) {{
                     continue;
                 }
                 let wid = parts[0];
-                let line_lower = line.to_lowercase();
+                // parts[2] zawiera dokładną klasę okna (WM_CLASS, np. "brave-browser.Brave-browser", "code.Code")
+                let wm_class = parts[2].to_lowercase();
                 for cls in target_classes {
-                    if line_lower.contains(&cls.to_lowercase()) {
+                    if wm_class.contains(&cls.to_lowercase()) {
                         let mut rem_cmd = std::process::Command::new(&wm);
                         configure_cmd_env(&mut rem_cmd);
                         let _ = rem_cmd.args(["-i", "-r", wid, "-b", "remove,demands_attention"]).output();
@@ -894,10 +895,10 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 
-    // 6. xdotool fallback search & activate
+    // 6. xdotool fallback search & activate (wyłącznie po klasie, nigdy po tytule/nazwie okna)
     if let Some(ref xd) = xd_opt {
         for cls in target_classes {
-            for flag in ["--class", "--name"] {
+            for flag in ["--class"] {
                 let mut search_cmd = std::process::Command::new(xd);
                 configure_cmd_env(&mut search_cmd);
                 if let Ok(out) = search_cmd.args(["search", flag, cls]).output() {
@@ -921,9 +922,58 @@ for (var i = 0; i < list.length; i++) {{
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn linux_window_exists(target_classes: &[&str]) -> bool {
+    if let Some(wm) = find_linux_tool_bin("wmctrl") {
+        let mut list_cmd = std::process::Command::new(&wm);
+        configure_cmd_env(&mut list_cmd);
+        if let Ok(out) = list_cmd.args(["-l", "-x"]).output() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let wm_class = parts[2].to_lowercase();
+                    for cls in target_classes {
+                        if wm_class.contains(&cls.to_lowercase()) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(kdo) = find_linux_tool_bin("kdotool") {
+        for cls in target_classes {
+            let mut search_cmd = std::process::Command::new(&kdo);
+            configure_cmd_env(&mut search_cmd);
+            if let Ok(out) = search_cmd.args(["search", "--class", cls]).output() {
+                if !String::from_utf8_lossy(&out.stdout).trim().is_empty() {
+                    return true;
+                }
+            }
+        }
+    }
+    if let Some(xd) = find_linux_tool_bin("xdotool") {
+        for cls in target_classes {
+            let mut search_cmd = std::process::Command::new(&xd);
+            configure_cmd_env(&mut search_cmd);
+            if let Ok(out) = search_cmd.args(["search", "--class", cls]).output() {
+                if !String::from_utf8_lossy(&out.stdout).trim().is_empty() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(not(target_os = "linux"))]
 #[allow(dead_code)]
 pub fn activate_linux_window(_target_classes: &[&str]) {}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+pub fn linux_window_exists(_target_classes: &[&str]) -> bool { false }
 
 pub fn open_browser_foreground(url: &str) {
     let url_str = url.to_string();
@@ -968,14 +1018,12 @@ pub fn open_browser_foreground(url: &str) {
             let _ = open::that(&url_str);
         }
 
-        let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"];
+        let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "msedge", "vivaldi", "opera"];
         activate_linux_window(&targets);
 
         std::thread::spawn(move || {
-            for delay in [80, 200, 450, 800, 1200] {
-                std::thread::sleep(std::time::Duration::from_millis(delay));
-                activate_linux_window(&["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"]);
-            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            activate_linux_window(&["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "msedge", "vivaldi", "opera"]);
         });
     }
 
@@ -1014,21 +1062,21 @@ pub fn open_browser_tab_or_focus(url: &str, nav_target: &str, ws_sender: &tokio:
     // Wyślij sygnał nawigacji przez WebSocket do otwartych kart i rozszerzenia
     let _ = ws_sender.send(format!("navigate:{}", nav_target));
 
-    if ws_sender.receiver_count() > 0 {
-        // Podłączone rozszerzenie lub karta natychmiast przełącza i aktywuje kartę w przeglądarce
-        #[cfg(target_os = "linux")]
-        {
-            let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"];
+    #[cfg(target_os = "linux")]
+    {
+        let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "msedge", "vivaldi", "opera"];
+        let has_window = linux_window_exists(&targets);
+        if has_window && ws_sender.receiver_count() > 0 {
             activate_linux_window(&targets);
-            std::thread::spawn(move || {
-                for delay in [80, 200, 450, 800] {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
-                    activate_linux_window(&["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"]);
-                }
-            });
+        } else {
+            open_browser_foreground(url);
         }
-        #[cfg(target_os = "macos")]
-        {
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if ws_sender.receiver_count() == 0 {
+            open_browser_foreground(url);
+        } else {
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let script = r#"
@@ -1045,16 +1093,19 @@ pub fn open_browser_tab_or_focus(url: &str, nav_target: &str, ws_sender: &tokio:
                 let _ = std::process::Command::new("osascript").args(["-e", script]).output();
             });
         }
-        #[cfg(target_os = "windows")]
-        {
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if ws_sender.receiver_count() == 0 {
+            open_browser_foreground(url);
+        } else {
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let ps_cmd = r#"$w = New-Object -ComObject WScript.Shell; $p = Get-Process | Where-Object { $_.ProcessName -match 'chrome|brave|msedge|firefox|opera|vivaldi' } | Sort-Object -Descending -Property StartTime | Select-Object -First 1; if ($p) { $w.AppActivate($p.MainWindowTitle) }"#;
                 let _ = std::process::Command::new("powershell").args(["-NoProfile", "-Command", ps_cmd]).spawn();
             });
         }
-    } else {
-        open_browser_foreground(url);
     }
 }
 
@@ -2219,6 +2270,12 @@ pub fn open_in_vscode_internal(
     };
 
     let temp_task_file = std::env::temp_dir().join("algodeck_active_task.txt");
+    if let Ok(old_task) = std::fs::read_to_string(&temp_task_file) {
+        let old_pid = old_task.trim().to_lowercase();
+        if !old_pid.is_empty() && old_pid != problem_id.to_lowercase() {
+            safe_kill_problem_process(&old_pid, workspace_dir);
+        }
+    }
     let _ = std::fs::write(&temp_task_file, problem_id.to_uppercase());
 
     // Upewnij się, że zadanie posiada skrypty i .vscode/tasks.json (tylko jeśli jeszcze nie istnieją)
@@ -2235,11 +2292,10 @@ pub fn open_in_vscode_internal(
     if send_bridge_open(problem_id, &p_dir_str, &sol_str, vscode_mode) {
         #[cfg(target_os = "linux")]
         {
+            activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
             std::thread::spawn(move || {
-                for delay in [50, 150, 350, 750] {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
-                    activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
-                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
             });
         }
         return;
@@ -2380,11 +2436,10 @@ pub fn open_in_vscode_internal(
 
         #[cfg(target_os = "linux")]
         {
+            activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
             std::thread::spawn(move || {
-                for delay in [100, 350, 750] {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
-                    activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
-                }
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
             });
         }
 
@@ -2776,11 +2831,10 @@ where
 
     #[cfg(target_os = "linux")]
     {
+        activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
         std::thread::spawn(move || {
-            for delay in [50, 150, 350, 750] {
-                std::thread::sleep(std::time::Duration::from_millis(delay));
-                activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
-            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
         });
     }
 
@@ -2874,11 +2928,10 @@ pub fn ensure_vscode_open_for_problem(problem_id: &str, state: &AppState) {
     }
     #[cfg(target_os = "linux")]
     {
+        activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
         std::thread::spawn(move || {
-            for delay in [50, 150, 350, 750] {
-                std::thread::sleep(std::time::Duration::from_millis(delay));
-                activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
-            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "antigravity ide"]);
         });
     }
     if !is_vscode_open_for_problem(problem_id) {

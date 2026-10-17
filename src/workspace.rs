@@ -382,20 +382,36 @@ impl WorkspaceManager {
         // Update manifest with new test list
         if let Some(mut m) = Self::get_manifest(workspace_dir, problem_id) {
             let mut manifest_tests = Vec::new();
+            let mut existing_map: std::collections::HashMap<String, ManifestTest> = std::collections::HashMap::new();
+            for t in m.tests {
+                existing_map.insert(t.id.clone(), t);
+            }
+
             if let Ok(td_entries) = fs::read_dir(&tests_dir) {
                 for te in td_entries.flatten() {
                     let path = te.path();
                     if path.extension().and_then(|e| e.to_str()) == Some("in") {
                         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
                         let out_f = tests_dir.join(format!("{}.out", stem));
-                        manifest_tests.push(ManifestTest {
-                            id: stem.clone(),
-                            name: format!("Test {}", stem),
-                            in_file: format!("{}.in", stem),
-                            out_file: if out_f.exists() { format!("{}.out", stem) } else { String::new() },
-                            tag: "[PAKIET TESTÓW]".to_string(),
-                            is_edge_case: false,
-                        });
+                        if let Some(prev) = existing_map.remove(&stem) {
+                            manifest_tests.push(ManifestTest {
+                                id: stem.clone(),
+                                name: prev.name,
+                                in_file: format!("{}.in", stem),
+                                out_file: if out_f.exists() { format!("{}.out", stem) } else { prev.out_file },
+                                tag: prev.tag,
+                                is_edge_case: prev.is_edge_case,
+                            });
+                        } else {
+                            manifest_tests.push(ManifestTest {
+                                id: stem.clone(),
+                                name: format!("Test {}", stem),
+                                in_file: format!("{}.in", stem),
+                                out_file: if out_f.exists() { format!("{}.out", stem) } else { String::new() },
+                                tag: "[PAKIET TESTÓW]".to_string(),
+                                is_edge_case: false,
+                            });
+                        }
                     }
                 }
             }

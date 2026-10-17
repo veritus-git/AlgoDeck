@@ -29,26 +29,46 @@ pub struct PdfParser;
 impl PdfParser {
     pub fn clean_text(text: &str) -> String {
         let mut s = text.to_string();
-        // Standaryzacja znaków diakrytycznych i TeX ligatur
-        let r_in = Regex::new(r"(?i)Wej[´\'\` ]*scie").unwrap();
+
+        // 1. Unicode Combining Diacritical Marks (NFD -> NFC)
+        s = s.replace("s\u{0301}", "ś").replace("S\u{0301}", "Ś");
+        s = s.replace("c\u{0301}", "ć").replace("C\u{0301}", "Ć");
+        s = s.replace("z\u{0301}", "ź").replace("Z\u{0301}", "Ź");
+        s = s.replace("z\u{0307}", "ż").replace("Z\u{0307}", "Ż");
+        s = s.replace("n\u{0301}", "ń").replace("N\u{0301}", "Ń");
+        s = s.replace("o\u{0301}", "ó").replace("O\u{0301}", "Ó");
+        s = s.replace("a\u{0328}", "ą").replace("A\u{0328}", "Ą");
+        s = s.replace("e\u{0328}", "ę").replace("E\u{0328}", "Ę");
+        s = s.replace("l\u{0335}", "ł").replace("L\u{0335}", "Ł");
+
+        // 2. TeX / LaTeX decomposed accents and common OCR / PDF artifacts
+        s = s.replace("s´", "ś").replace("s'", "ś").replace("s`", "ś").replace("´s", "ś").replace("´ s", "ś");
+        s = s.replace("c´", "ć").replace("c'", "ć").replace("c`", "ć").replace("´c", "ć").replace("´ c", "ć");
+        s = s.replace("z´", "ź").replace("z'", "ź").replace("z`", "ź").replace("´z", "ź").replace("´ z", "ź");
+        s = s.replace("z˙", "ż").replace("z.", "ż").replace("˙z", "ż").replace("˙ z", "ż");
+        s = s.replace("n´", "ń").replace("n'", "ń").replace("´n", "ń").replace("´ n", "ń");
+        s = s.replace("o´", "ó").replace("o'", "ó").replace("´o", "ó").replace("´ o", "ó");
+
+        // 3. Spaced TeX accents & plain ASCII variations (e.g. 'Wej ´ scie', 'Wejscie', 'Przyk lad', 'Przyklad')
+        let r_in = Regex::new(r"(?i)\bWej[śs´\'\`\^ ]*cie\b").unwrap();
         s = r_in.replace_all(&s, "Wejście").to_string();
 
-        let r_in2 = Regex::new(r"(?i)wej[´\'\` ]*scio").unwrap();
+        let r_in2 = Regex::new(r"(?i)\bwej[śs´\'\`\^ ]*scio\b").unwrap();
         s = r_in2.replace_all(&s, "wejścio").to_string();
 
-        let r_out = Regex::new(r"(?i)Wyj[´\'\` ]*scie").unwrap();
+        let r_out = Regex::new(r"(?i)\bWyj[śs´\'\`\^ ]*cie\b").unwrap();
         s = r_out.replace_all(&s, "Wyjście").to_string();
 
-        let r_out2 = Regex::new(r"(?i)wyj[´\'\` ]*scio").unwrap();
+        let r_out2 = Regex::new(r"(?i)\bwyj[śs´\'\`\^ ]*scio\b").unwrap();
         s = r_out2.replace_all(&s, "wyjścio").to_string();
 
-        let r_pam = Regex::new(r"(?i)pami[´\'\` ]*ec").unwrap();
+        let r_pam = Regex::new(r"(?i)pami[eę´\'\` ]*ec").unwrap();
         s = r_pam.replace_all(&s, "pamięć").to_string();
 
-        let r_dost = Regex::new(r"(?i)dost[´\'\` ]*epn").unwrap();
+        let r_dost = Regex::new(r"(?i)dost[eę´\'\` ]*epn").unwrap();
         s = r_dost.replace_all(&s, "dostępn").to_string();
 
-        let r_ex = Regex::new(r"(?i)Przyk[´\'\` ]*lad(?:y)?").unwrap();
+        let r_ex = Regex::new(r"(?i)\bPrzyk[lł´\'\`\^ ]*ad(?:y)?\b").unwrap();
         s = r_ex.replace_all(&s, "Przykład").to_string();
 
         let r_expl = Regex::new(r"(?i)W[ ]*yjaśnienie").unwrap();
@@ -57,7 +77,7 @@ impl PdfParser {
         let r_t = Regex::new(r"(?i)T[ ]*esty").unwrap();
         s = r_t.replace_all(&s, "Testy").to_string();
 
-        let r_tw = Regex::new(r"(?i)Tw[´\'\` ]*oj").unwrap();
+        let r_tw = Regex::new(r"(?i)Tw[oó´\'\` ]*oj").unwrap();
         s = r_tw.replace_all(&s, "Twój").to_string();
 
         let r_bajt = Regex::new(r"(?i)B[ ]*ajtazar").unwrap();
@@ -208,9 +228,9 @@ impl PdfParser {
         };
 
         // Wzorzec A: Format OIJ 'Wejście dla testu chw0a:' lub 'Wejście:\n...\nWyjście:\n...'
-        let re_in_header = Regex::new(r"(?im)^\s*Wejście\s*(?:dla\s*testu\s*|\s*dla\s*testu)?([a-zA-Z0-9_]*):?\s*$").unwrap();
-        let re_out_header = Regex::new(r"(?im)^\s*Wyjście\s*(?:dla\s*testu\s*|\s*dla\s*testu)?[a-zA-Z0-9_]*:?\s*$").unwrap();
-        let re_cut = Regex::new(r"(?im)^\s*(?:Wyjaśnienie|Testy|Ocenianie|©|Chwasty)").unwrap();
+        let re_in_header = Regex::new(r"(?im)^[ \t]*Wejście(?:[ \t]+(?:dla[ \t]+testu|dla|testu))?[ \t]*([a-zA-Z0-9_]*):?[ \t]*$").unwrap();
+        let re_out_header = Regex::new(r"(?im)^[ \t]*Wyjście(?:[ \t]+(?:dla[ \t]+testu|dla|testu))?[ \t]*([a-zA-Z0-9_]*):?[ \t]*$").unwrap();
+        let re_cut = Regex::new(r"(?im)^[ \t]*(?:Wyjaśnienie|Testy|Ocenianie|©|Chwasty)").unwrap();
 
         let in_matches: Vec<(usize, usize, String)> = re_in_header
             .captures_iter(examples_text)
@@ -362,16 +382,16 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_koleje_statement() {
-        let path = Path::new("frontend/koleje.pdf");
+    fn test_parse_akcje_statement() {
+        let path = Path::new("/home/linux/AlgoDeckWorkspace/akc/.algo/statement.pdf");
         if path.exists() {
-            let text = PdfParser::extract_text_from_file(path).expect("Failed to read koleje.pdf");
+            let text = PdfParser::extract_text_from_file(path).expect("Failed to read statement.pdf");
             let analysis = PdfParser::parse_heuristics(&text);
-            assert_eq!(analysis.problem_id, "kol");
-            assert_eq!(analysis.title, "Koleje");
-            assert_eq!(analysis.time_limit_sec, 1.0);
-            assert_eq!(analysis.memory_limit_mb, 128);
-            assert!(!analysis.tests.is_empty(), "Musi wykryć testy z koleje.pdf");
+            assert_eq!(analysis.problem_id, "akc");
+            assert_eq!(analysis.title, "Akcje");
+            assert!(!analysis.tests.is_empty(), "Musi wykryć przykłady z akcje.pdf");
+            assert_eq!(analysis.tests[0].input.trim(), "6\n9 11 8 5 7 10");
+            assert_eq!(analysis.tests[0].expected_output.trim(), "5");
         }
     }
 }

@@ -107,6 +107,15 @@ function connectWebSocket() {
         if (document.getElementById("tab-gallery")?.classList.contains("active")) {
           loadProblems();
         }
+      } else if (typeof event.data === "string" && event.data.startsWith("navigate:")) {
+        const target = event.data.substring(9).trim();
+        if (target === "settings") {
+          window.location.href = "/settings";
+        } else if (target === "new_task") {
+          window.location.href = "/popup.html?mode=tab&trigger=pdf";
+        } else if (target === "web_hub") {
+          window.focus();
+        }
       }
     }
   };
@@ -629,8 +638,6 @@ function renderGallery(problems) {
       <div class="problem-actions">
         <button class="btn-secondary btn-act-activate" title="Aktywuj i przełącz Stream Deck">Aktywuj</button>
         <button class="btn-secondary btn-act-code" title="Otwórz w edytorze">VS Code</button>
-        <button class="btn-secondary btn-act-run" title="Skompiluj i odpal w konsoli VS Code">Odpal</button>
-        <button class="btn-secondary btn-act-test" title="Uruchom testy w VS Code">Testy</button>
         <button class="btn-secondary btn-act-add-tests" title="Dodaj paczkę testów (.zip)">+ Testy (ZIP)</button>
         <button class="btn-secondary btn-act-manual-toggle" title="Wpisz wejście i wyjście nowego testu">+ Testy</button>
         <button class="btn-act-delete" title="Usuń to zadanie">Usuń</button>
@@ -680,23 +687,6 @@ function renderGallery(problems) {
     card.querySelector(".btn-act-code").addEventListener("click", async () => {
       await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
       showToast(`Otwarto '${pid}' w VS Code`, "info");
-    });
-
-    card.querySelector(".btn-act-run").addEventListener("click", async () => {
-      showToast(`Odpalanie '${pid.toUpperCase()}' w konsoli VS Code...`, "info");
-      await fetch(`${API_BASE}/api/run-interactive/${pid}`, { method: "POST" });
-      showToast(`✓ Uruchomiono '${pid.toUpperCase()}' w terminalu VS Code!`, "success");
-    });
-
-    card.querySelector(".btn-act-test").addEventListener("click", async () => {
-      showToast(`Uruchamianie testów dla '${pid}'...`, "info");
-      const res = await fetch(`${API_BASE}/api/run-all/${pid}`, { method: "POST" });
-      const data = await res.json();
-      if (data.all_passed) {
-        showToast(`Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, "success");
-      } else {
-        showToast(`Wykryto błędy w testach (${data.summary || "WA"})`, "error");
-      }
     });
 
     // Szuflada ręcznego dodawania testu

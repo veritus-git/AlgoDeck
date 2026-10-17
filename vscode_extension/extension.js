@@ -63,16 +63,19 @@ async function openProblemFile(filePath, pdir) {
     return false;
 }
 
-function handleKill() {
+function handleKill(disposeTerminals = false) {
     try {
         for (const execution of vscode.tasks.taskExecutions) {
             if (execution.task && execution.task.name && execution.task.name.includes('AlgoDeck')) {
-                execution.terminate();
+                try { execution.terminate(); } catch (_) {}
             }
         }
         for (const term of vscode.window.terminals) {
             if (term.name.includes('AlgoDeck') || term.name.includes('ODPAL') || term.name.includes('TESTUJ')) {
-                term.sendText('\x03', false);
+                try { term.sendText('\x03', false); } catch (_) {}
+                if (disposeTerminals) {
+                    try { term.dispose(); } catch (_) {}
+                }
             }
         }
         return true;
@@ -299,7 +302,7 @@ function getRequestHandler() {
             }
 
             if (parsed.pathname === '/kill') {
-                handleKill();
+                handleKill(true);
                 res.writeHead(200);
                 res.end(JSON.stringify({ status: 'ok', action: 'kill' }));
                 return;
@@ -309,6 +312,9 @@ function getRequestHandler() {
             const file = parsed.searchParams.get('file');
 
             if (parsed.pathname === '/open') {
+                // Wyczyść/zamknij terminale z poprzedniego zadania przy przełączaniu
+                handleKill(true);
+
                 const mode = parsed.searchParams.get('mode') || '';
                 const isSeparate = mode === 'separate_windows';
                 const targetPdir = pdir ? path.resolve(pdir) : null;
