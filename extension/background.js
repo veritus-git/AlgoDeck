@@ -308,8 +308,8 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
     // 5. Powiadomienie pulpitu (TYLKO jeśli to nie jest start przeglądarki i użytkownik włączył powiadomienia o nowych zadaniach)
     if (!isSilentStartup) {
       const allowNotify = regResult?.should_notify === true;
-      if (allowNotify && typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.create) {
-        chrome.notifications.create(`algodeck_${downloadId}_${Date.now()}`, {
+        const notifId = `algodeck_${downloadId}_${Date.now()}`;
+        chrome.notifications.create(notifId, {
           type: "basic",
           iconUrl: "icons/icon128.png",
           title: "AlgoDeck ⚡ Nowe zadanie PDF",
@@ -317,6 +317,11 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
           priority: 2,
           requireInteraction: false
         });
+        setTimeout(() => {
+          try {
+            chrome.notifications.clear(notifId);
+          } catch (_) {}
+        }, 4500);
       }
 
       // Otwórz popup rozszerzenia pod ikoną ⚡ jeśli przeglądarka na to zezwala

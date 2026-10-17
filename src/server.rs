@@ -613,7 +613,59 @@ for (var i = 0; i < list.length; i++) {{
         let _ = fs::remove_file(tmp_script);
     }
 
-    // 2. kdotool (KDE Plasma Wayland focus tool)
+    // 2. Cinnamon Desktop (Muffin) Window Manager via DBus Eval
+    let cin_conditions: Vec<String> = target_classes
+        .iter()
+        .map(|c| format!("\"{}\"", c.to_lowercase()))
+        .collect();
+    let cin_targets_json = cin_conditions.join(", ");
+    let cinnamon_eval_script = format!(
+        r#"try {{
+            let wins = global.display.get_tab_list(0, null);
+            let targets = [{targets}];
+            for (let w of wins) {{
+                let cls = ((w.get_wm_class() || '') + ' ' + (w.get_title() || '')).toLowerCase();
+                for (let t of targets) {{
+                    if (cls.indexOf(t) !== -1) {{
+                        w.unminimize();
+                        w.activate(global.get_current_time());
+                        w.raise();
+                        break;
+                    }}
+                }}
+            }}
+        }} catch (_) {{}}"#,
+        targets = cin_targets_json
+    );
+
+    let mut cin_cmd = std::process::Command::new("dbus-send");
+    configure_cmd_env(&mut cin_cmd);
+    let _ = cin_cmd
+        .args([
+            "--session",
+            "--dest=org.Cinnamon",
+            "--type=method_call",
+            "/org/Cinnamon",
+            "org.Cinnamon.Eval",
+            &format!("string:{}", cinnamon_eval_script),
+        ])
+        .output();
+
+    // 3. GNOME Shell Window Manager via DBus Eval
+    let mut gnome_cmd = std::process::Command::new("dbus-send");
+    configure_cmd_env(&mut gnome_cmd);
+    let _ = gnome_cmd
+        .args([
+            "--session",
+            "--dest=org.gnome.Shell",
+            "--type=method_call",
+            "/org/gnome/Shell",
+            "org.gnome.Shell.Eval",
+            &format!("string:{}", cinnamon_eval_script),
+        ])
+        .output();
+
+    // 4. kdotool (KDE Plasma Wayland focus tool)
     if let Some(kdo) = find_linux_tool_bin("kdotool") {
         for cls in target_classes {
             let mut cmd = std::process::Command::new(&kdo);
@@ -622,7 +674,8 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 
-    // 3. wmctrl: identify matching window IDs, remove demands_attention, and activate
+    // 5. wmctrl & xdotool: identify matching window IDs, remove demands_attention, and activate/raise
+    let xd_opt = find_linux_tool_bin("xdotool");
     if let Some(wm) = find_linux_tool_bin("wmctrl") {
         let mut list_cmd = std::process::Command::new(&wm);
         configure_cmd_env(&mut list_cmd);
@@ -640,6 +693,12 @@ for (var i = 0; i < list.length; i++) {{
                             let mut act_cmd = std::process::Command::new(&wm);
                             configure_cmd_env(&mut act_cmd);
                             let _ = act_cmd.args(["-i", "-a", wid]).output();
+
+                            if let Some(ref xd) = xd_opt {
+                                let mut xd_cmd = std::process::Command::new(xd);
+                                configure_cmd_env(&mut xd_cmd);
+                                let _ = xd_cmd.args(["windowactivate", "--sync", wid, "windowraise", wid, "windowfocus", "--sync", wid]).output();
+                            }
                         }
                     }
                 }
@@ -652,12 +711,12 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 
-    // 4. xdotool: sync activate, raise and focus
-    if let Some(xd) = find_linux_tool_bin("xdotool") {
+    // 6. xdotool fallback search & activate
+    if let Some(xd) = xd_opt {
         for cls in target_classes {
             let mut cmd = std::process::Command::new(&xd);
             configure_cmd_env(&mut cmd);
-            let _ = cmd.args(["search", "--class", cls, "windowactivate", "--sync", "windowraise"]).output();
+            let _ = cmd.args(["search", "--onlyvisible", "--class", cls, "windowactivate", "%@", "windowraise", "%@", "windowfocus", "%@"]).output();
         }
     }
 }
@@ -674,7 +733,9 @@ pub fn open_browser_foreground(url: &str) {
         let browsers = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "opera", "vivaldi"];
         for b in browsers {
             if which_bin_exists(b) {
-                if std::process::Command::new(b).arg(&url_str).spawn().is_ok() {
+                let mut cmd = std::process::Command::new(b);
+                configure_cmd_env(&mut cmd);
+                if cmd.arg(&url_str).spawn().is_ok() {
                     launched = true;
                     break;
                 }
@@ -685,7 +746,9 @@ pub fn open_browser_foreground(url: &str) {
             if let Ok(output) = std::process::Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
                 let def_desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !def_desktop.is_empty() && def_desktop.ends_with(".desktop") {
-                    if std::process::Command::new("gtk-launch").arg(&def_desktop).arg(&url_str).spawn().is_ok() {
+                    let mut cmd = std::process::Command::new("gtk-launch");
+                    configure_cmd_env(&mut cmd);
+                    if cmd.arg(&def_desktop).arg(&url_str).spawn().is_ok() {
                         launched = true;
                     }
                 }
@@ -696,8 +759,10 @@ pub fn open_browser_foreground(url: &str) {
             let _ = open::that(&url_str);
         }
 
+        activate_linux_window(&["brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
+
         std::thread::spawn(move || {
-            for delay in [100, 300, 600, 1000] {
+            for delay in [50, 150, 300, 600, 1000] {
                 std::thread::sleep(std::time::Duration::from_millis(delay));
                 activate_linux_window(&["brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
             }

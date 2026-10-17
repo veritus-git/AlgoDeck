@@ -489,7 +489,7 @@ send_notify() {{
             return 0
         fi
     fi
-    notify-send "$@" 2>/dev/null || true
+    notify-send -a "AlgoDeck" -t 4000 "$@" 2>/dev/null || true
 }}
 
 pad_left() {{

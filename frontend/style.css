@@ -26,7 +26,7 @@
   --accent-amber: #f59e0b;
   --accent-red: #ef4444;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Ubuntu", "Cantarell", "DejaVu Sans", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
   --radius-sm: 6px;
@@ -34,12 +34,25 @@
   --radius-lg: 14px;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
   outline: none;
   -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
+}
+
+button,
+input,
+select,
+textarea,
+optgroup {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
 }
 
 button, input, select, textarea, a, .tab-btn {
