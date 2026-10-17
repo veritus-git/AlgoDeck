@@ -1,13 +1,27 @@
 # AlgoDeck ⚡ (Koło MAP)
 
-> **Błyskawiczne środowisko do zadań olimpijskich C++ dla Koła MAP, Szkopuła, OIJ i OI.**  
-> Pobierasz zadanie z przeglądarki &rarr; **1 kliknięcie** &rarr; kodujesz w Visual Studio Code z testami i bezpośrednią obsługą Stream Decka.
+<p align="center">
+  <img src="icons/icon128.png" alt="AlgoDeck Logo" width="96" />
+</p>
+
+<p align="center">
+  <strong>Błyskawiczne środowisko olimpijskie C++20 dla zawodników Koła MAP, Szkopuła, OIJ i Olimpiady Informatycznej.</strong><br>
+  <em>Pobierasz zadanie z przeglądarki &rarr; <strong>1 kliknięcie</strong> &rarr; kodujesz w Visual Studio Code z automatycznymi testami i bezpośrednim sterowaniem fizycznym Stream Deckiem.</em>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust-1.75%2B-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=c%2B%2B&logoColor=white" alt="C++20" />
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square" alt="Platforms" />
+  <img src="https://img.shields.io/badge/Hardware-Elgato%20Stream%20Deck%20(HID)-10b981?style=flat-square" alt="Stream Deck" />
+  <img src="https://img.shields.io/badge/License-MIT-gray?style=flat-square" alt="License" />
+</p>
 
 ---
 
-## ⚡ Instalacja One-Liner (Główna metoda)
+## ⚡ Błyskawiczna Instalacja (One-Liner)
 
-Wklej jedno polecenie w terminalu swojego systemu, aby zainstalować całe środowisko (silnik Rust, kompilator C++20, mostek przeglądarki, demona w tle i rozszerzenie):
+Wklej jedno polecenie w terminalu swojego systemu, aby zainstalować całe środowisko. Instalator automatycznie skonfiguruje kompilator C++20, zbuduje i zarejestruje demona systemowego w tle, skopiuje ścieżkę rozszerzenia do schowka i otworzy stronę przeglądarki:
 
 ### 🐧 Linux (Ubuntu, Debian, Fedora, Arch)
 ```bash
@@ -23,76 +37,155 @@ curl -fsSL https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_m
 ```powershell
 irm https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_win.ps1 | iex
 ```
-> *Alternatywnie w CMD / oknie Uruchom (Win+R):*  
+> *Alternatywnie w oknie Uruchom (Win+R):*  
 > `powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/veritus-git/AlgoDeck/main/install_win.ps1 | iex"`
 
 ---
 
-## 📸 Jak to wygląda w akcji
+## 📸 Jak to działa w praktyce? (Workflow Olimpijczyka)
 
-### 1. Błyskawiczne wykrycie i 1-Kliknięcie (Pobranie ➔ Gotowy Workspace)
-Pobierasz treść zadania (`.pdf`) ze Szkopuła, OIJ czy SIO2 — AlgoDeck natychmiast wyświetla kompaktowe okienko powiadomienia. Jedno kliknięcie zakłada workspace, parsuje limity pamięci/czasu i otwiera VS Code z podziałem ekranu (treść + kod C++). W razie zamknięcia okienka zadanie automatycznie czeka w kolejce na pasku rozszerzenia.
-
-<p align="center">
-  <img src="docs/screenshots/extension_detected.png" alt="Wykrycie zadania PDF w przeglądarce" width="420" />
-</p>
-
-
-### 2. Panel AlgoDeck Workspace Hub (`http://127.0.0.1:8080/`)
-Zarządzaj swoimi zadaniami, dodawaj pliki metodą przeciągnij-i-upuść lub twórz własne szablony z niestandardowymi danymi wejściowymi.
+### 1. Pobierasz zadanie z platformy konkursowej ➔ 1-Kliknięcie
+Gdy na Szkopule, OIJ, SIO2 czy Olimpiadzie Informatycznej klikniesz **Pobierz treść zadania (.pdf)**, AlgoDeck natychmiast przechwytuje plik i wyświetla ultra-kompaktowe okienko:
 
 <p align="center">
-  <img src="docs/screenshots/web_hub.png" alt="Panel AlgoDeck Workspace Hub" width="750" />
+  <img src="docs/screenshots/extension_detected.png" alt="Wykrycie zadania PDF w przeglądarce" width="460" />
 </p>
 
-### 3. Bezpośrednie sterowanie Stream Deckiem (Hardware USB)
-Działa bezpośrednio z magistralą USB urządzenia — bez oficjalnej aplikacji Elgato czy StreamControllera.
+- **Automatyczne parsowanie:** Silnik w Rust odczytuje kod zadania, tytuł, limity czasu wykonania (np. `1.0s`) i pamięci (np. `128 MB`), a także przykładowe testy z treści zadania.
+- **Jedno kliknięcie:** Klikasz **`⚡ Utwórz Workspace i Otwórz VS Code`** i od razu możesz pisać rozwiązanie.
+- **Kolejkowanie w tle:** Jeśli zamkniesz okienko `✕`, zadanie nie przepada – czeka bezpiecznie na pasku rozszerzenia z zieloną odznaką `1`.
+
+---
+
+### 2. Gotowy Workspace z Dzielonym Widokiem w Visual Studio Code
+AlgoDeck błyskawicznie przygotowuje ustrukturyzowany folder zadania i wyciąga okno VS Code na pierwszy plan:
+
+```
+AlgoDeckWorkspace/
+└── koleje/
+    ├── code.cpp           # Gotowy kod C++20 z szablonem olimpijskim (fast I/O)
+    ├── zadanie.pdf        # Oficjalna treść zadania otwarta obok kodu
+    ├── testy/             # Pobrane lub wyodrębnione testy wzorcowe (.in / .out)
+    │   ├── kol1.in
+    │   ├── kol1.out
+    │   ├── kol2.in
+    │   └── kol2.out
+    ├── run.sh             # Skrypt błyskawicznego kompilowania i testowania
+    └── run_interactive.sh # Skrypt uruchamiania z ręcznym wprowadzaniem cin/cout
+```
+
+- **Podzielony ekran (Split View):** Treść zadania `.pdf` wyświetla się w dedykowanej kolumnie tuż obok Twojego kodu `code.cpp`.
+- **Pełna konfiguracja VS Code:** Wygenerowane `tasks.json` i `launch.json` pozwalają na uruchamianie testów również skrótem `Ctrl+Shift+B` lub `F5`.
+
+---
+
+### 3. Bezpośrednie Sterowanie Stream Deckiem (Hardware USB)
+AlgoDeck posiada wbudowany sterownik USB HID w Rust – łączy się bezpośrednio z kablem Stream Decka (15 klawiszy), bez konieczności instalowania oprogramowania Elgato ani zewnętrznych aplikacji:
 
 <p align="center">
-  <img src="docs/screenshots/streamdeck_keys.png" alt="Układ klawiszy Stream Decka" width="420" />
+  <img src="docs/screenshots/streamdeck_task_grid.png" alt="Układ klawiszy aktywnego zadania na Stream Decku" width="440" />
 </p>
 
-| Klawisz | Działanie |
-|:---:|:---|
-| **`KOD` (0..4)** | 5-klawiszowy identyfikator aktywnego zadania (np. `[ = ] [ K ] [ O ] [ L ] [ = ]`), kliknięcie skupia plik w VS Code |
-| **`+` (5)** | Otwórz stronę importu nowego zadania (PDF / ZIP) w pełnej karcie przeglądarki |
-| **`✓` (6)** | Skompiluj kod (C++20) i uruchom testy w VS Code z dynamicznym statusem (OK, WA, TLE, czas w ms) |
-| **`▶` (7)** | Skompiluj i uruchom rozwiązanie w interaktywnym oknie terminala VS Code (cin/cout) |
-| **`⏹` (8)** | Natychmiast zatrzymaj działający program lub testy (mostek VS Code + SIGKILL / taskkill) |
-| **`⊞` (9)** | Otwórz Galerię Zadań na Stream Decku (klawisze 0..9) do bezpośredniego skoku do dowolnego zadania |
-| **`⚙` (10)** | Otwórz Centrum Konfiguracji i Architektury pod `http://127.0.0.1:8080/settings` |
-| **Pusty (11)** | Czysta czerń OLED (#000000) |
-| **`‹` (12)** | Przełącz aktywne zadanie na poprzednie w workspace i skup je w VS Code |
-| **`1 / X` (13)** | Wskaźnik numeru zadania i łącznej liczby zadań |
-| **`›` (14)** | Przełącz aktywne zadanie na kolejne w workspace i skup je w VS Code |
+| Klawisz | Ikona / Opis | Działanie w AlgoDeck |
+|:---:|:---:|:---|
+| **0..4** | **`[ = ] [ S ] [ I ] [ L ] [ = ]`** | 5-klawiszowy identyfikator zadania. Kliknięcie natychmiast skupia plik w VS Code |
+| **5** | **`+`** | Otwiera stronę importu nowego zadania (PDF / ZIP) w przeglądarce |
+| **6** | **`✓`** | **Kompiluj i przetestuj:** Uruchamia wszystkie testy, kafelki dynamicznie raportują wynik (zielony checkmark, czerwony krzyżyk z czasem w ms, ostrzeżenie TLE) |
+| **7** | **`▶`** | **Uruchom interaktywnie:** Kompiluje i odpala program w terminalu VS Code z obsługą klawiatury |
+| **8** | **`⏹`** | **Zatrzymaj:** Natychmiast zabija działające procesy w nieskończonej pętli (SIGKILL / taskkill) |
+| **9** | **`⊞`** | **Galeria zadań:** Przełącza Stream Deck w widok kafelków wszystkich zadań w workspace |
+| **10** | **`⚙`** | **Ustawienia:** Błyskawicznie otwiera Centrum Konfiguracji pod `http://127.0.0.1:8080/settings` |
+| **11** | *(Pusty)* | Wygaszony klawisz (czysta czerń OLED) |
+| **12** | **`‹`** | Przejdź do poprzedniego zadania w workspace |
+| **13** | **`2 / 4`** | Wskaźnik numeru aktualnego zadania i łącznej liczby zadań |
+| **14** | **`›`** | Przejdź do kolejnego zadania w workspace |
 
-### 4. Centrum Konfiguracji i Ustawień
-Pełna kontrola nad stroną podziału okien (VS Code po lewej lub prawej), proporcjami ekranu, katalogiem roboczym oraz kompilatorem C++20.
+#### Ekran czuwania (Idle Screen):
+Gdy nie pracujesz nad żadnym zadaniem, Stream Deck wita Cię minimalistycznym, ciemnym ekranem:
 
 <p align="center">
-  <img src="docs/screenshots/settings.png" alt="Centrum Ustawień AlgoDeck" width="700" />
+  <img src="docs/screenshots/streamdeck_idle_grid.png" alt="Ekran czuwania Stream Decka" width="380" />
 </p>
+
+---
+
+### 4. Panel AlgoDeck Workspace Hub (`http://127.0.0.1:8080/`)
+Jeśli wolisz korzystać z przeglądarki, pełny panel pozwala na zarządzanie zadaniami metodą przeciągnij-i-upuść lub ręczne tworzenie zadań:
+
+<p align="center">
+  <img src="docs/screenshots/web_hub.png" alt="Panel AlgoDeck Workspace Hub" width="580" />
+</p>
+
+- **Strefa PDF / ZIP:** Upuść treść zadania oraz opcjonalne archiwum `.zip` z testami ze Szkopuła.
+- **Ręczny kreator zadań:** Przydatny na zajęciach Koła MAP, gdy treść zadania lub przykłady wejścia/wyjścia są dyktowane na tablicy.
+- **Lista i szybkie przełączanie:** Podgląd wszystkich zadań w Twoim workspace wraz z możliwością ich natychmiastowej aktywacji.
+
+---
+
+### 5. Centrum Konfiguracji i Architektury (`/settings`)
+Dostosuj zachowanie środowiska do własnych preferencji:
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="Centrum Ustawień AlgoDeck" width="760" />
+</p>
+
+- **Ścieżka Workspace:** Domyślnie `~/AlgoDeckWorkspace` (lub `C:\AlgoDeckWorkspace` na Windowsie).
+- **Pozycja i proporcje podziału:** Wybierz, czy treść PDF ma być po lewej, czy prawej stronie kodu oraz ustaw dokładny suwak proporcji (np. 60% kod / 40% treść).
+- **Kompilator i flagi C++:** Wybór pomiędzy `g++`, `clang++` a `cl.exe`, włączanie sanitizerów (`AddressSanitizer`, `UndefinedBehaviorSanitizer`) oraz regulacja limitów czasu.
+- **Jasność Stream Decka:** Płynna regulacja podświetlenia sprzętu z podglądem na żywo.
+- **Pamięć pobrań (Fresh Session Guard):** Dedykowany przycisk resetu bazy zarejestrowanych plików z licznikiem na żywo, zapobiegający ponownemu spamowaniu pobraniami z historii.
 
 ---
 
 ## 🧩 Aktywacja Rozszerzenia w Przeglądarce
 
-1. Wejdź pod adres `chrome://extensions` (lub `brave://extensions` / `edge://extensions`).
-2. Włącz w prawym górnym rogu przełącznik **Tryb programisty** (Developer mode).
-3. Kliknij **Załaduj rozpakowane** (Load unpacked) i wybierz folder `extension`:
-   - **Linux / macOS:** `~/.local/share/algodeck/extension`
+1. Otwórz w przeglądarce stronę rozszerzeń:
+   - **Google Chrome:** `chrome://extensions`
+   - **Brave Browser:** `brave://extensions`
+   - **Microsoft Edge:** `edge://extensions`
+2. Włącz przełącznik **Tryb programisty** (Developer mode) w prawym górnym rogu.
+3. Kliknij **Załaduj rozpakowane** (Load unpacked) i wybierz katalog `extension`:
+   - **Linux / macOS:** `~/.local/share/algodeck/extension` *(ścieżka znajduje się w Twoim schowku po instalacji!)*
    - **Windows:** `%LOCALAPPDATA%\AlgoDeck\extension`
-4. Przypnij ikonę ⚡ **AlgoDeck** do paska narzędzi. Gotowe!
+4. Przypnij ikonę ⚡ **AlgoDeck** do paska narzędzi przeglądarki.
 
 ---
 
-## 💻 Przydatne polecenia CLI
+## 💻 Przydatne Polecenia CLI
 
-Silnik AlgoDeck działa w tle jako cichy demon. Możesz nim również sterować z terminala:
+Silnik AlgoDeck działa w tle jako usługa systemowa (`systemd` na Linuksie, `launchd` na macOS, usługa tła na Windowsie). Możesz nim wygodnie zarządzać z dowolnego terminala:
 
 ```bash
-algodeck status          # Sprawdź stan serwera i połączenie ze Stream Deckiem
-algodeck test <kod>      # Odpal testy danego zadania w konsoli
-algodeck run <kod>       # Uruchom interaktywnie rozwiązanie
-algodeck stop            # Bezpiecznie zatrzymaj daemona
+# Sprawdź stan serwera, liczbę zadań i status USB Stream Decka
+algodeck status
+
+# Skompiluj i odpal testy konkretnego zadania w konsoli
+algodeck test sil
+
+# Uruchom rozwiązanie w interaktywnym trybie konsolowym
+algodeck run sil
+
+# Otwórz Centrum Ustawień w domyślnej przeglądarce
+algodeck settings
+
+# Bezpiecznie zatrzymaj demona AlgoDeck
+algodeck stop
+
+# Uruchom demona ręcznie
+algodeck start
 ```
+
+---
+
+## 🛡️ Architektura Techniczna
+
+- **Silnik (Engine):** 100% Rust – zero narzutu pamięciowego, asynchroniczny serwer Axum, natywny sterownik USB HID przez `hidapi`.
+- **Mostek Edytora (Bridge):** Komunikacja z VS Code przez lokalne gniazda UNIX / Named Pipes – natychmiastowe otwieranie plików i podziału okien bez opóźnień.
+- **Interfejs (Frontend):** Czysty Vanilla JS & CSS – zero ciężkich bibliotek, glassmorficzny dark mode, zoptymalizowany pod kątem responsywności.
+- **Zarządzanie Oknami:** Natywna obsługa wyciągania okien na pierwszy plan pod GNOME, Cinnamon, KDE Plasma, X11, macOS i Windows.
+
+---
+
+<p align="center">
+  Tworzone z pasją dla uczestników <strong>Koła MAP</strong> oraz pasjonatów algorytmiki olimpijskiej ⚡
+</p>
