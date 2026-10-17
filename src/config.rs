@@ -430,26 +430,26 @@ pub fn get_all_download_dirs() -> Vec<PathBuf> {
     }
 
     // 4. Zaawansowane wykrywanie per-przeglądarka z plików konfiguracyjnych (Brave, Chrome, Edge, Vivaldi, Opera)
-    if let Some(h) = dirs::home_dir() {
+    if let Some(_h) = dirs::home_dir() {
         #[cfg(target_os = "linux")]
         let browser_config_roots = [
-            h.join(".config/BraveSoftware/Brave-Browser"),
-            h.join(".config/google-chrome"),
-            h.join(".config/google-chrome-stable"),
-            h.join(".config/chromium"),
-            h.join(".config/microsoft-edge"),
-            h.join(".config/microsoft-edge-stable"),
-            h.join(".config/vivaldi"),
-            h.join(".config/opera"),
+            _h.join(".config/BraveSoftware/Brave-Browser"),
+            _h.join(".config/google-chrome"),
+            _h.join(".config/google-chrome-stable"),
+            _h.join(".config/chromium"),
+            _h.join(".config/microsoft-edge"),
+            _h.join(".config/microsoft-edge-stable"),
+            _h.join(".config/vivaldi"),
+            _h.join(".config/opera"),
         ];
 
         #[cfg(target_os = "macos")]
         let browser_config_roots = [
-            h.join("Library/Application Support/BraveSoftware/Brave-Browser"),
-            h.join("Library/Application Support/Google/Chrome"),
-            h.join("Library/Application Support/Chromium"),
-            h.join("Library/Application Support/Microsoft Edge"),
-            h.join("Library/Application Support/Vivaldi"),
+            _h.join("Library/Application Support/BraveSoftware/Brave-Browser"),
+            _h.join("Library/Application Support/Google/Chrome"),
+            _h.join("Library/Application Support/Chromium"),
+            _h.join("Library/Application Support/Microsoft Edge"),
+            _h.join("Library/Application Support/Vivaldi"),
         ];
 
         #[cfg(target_os = "windows")]
@@ -495,9 +495,9 @@ pub fn get_all_download_dirs() -> Vec<PathBuf> {
 
         // Profile Mozilla Firefox
         #[cfg(target_os = "linux")]
-        let ff_root = h.join(".mozilla/firefox");
+        let ff_root = _h.join(".mozilla/firefox");
         #[cfg(target_os = "macos")]
-        let ff_root = h.join("Library/Application Support/Firefox/Profiles");
+        let ff_root = _h.join("Library/Application Support/Firefox/Profiles");
         #[cfg(target_os = "windows")]
         let ff_root = if let Ok(appdata) = std::env::var("APPDATA") {
             PathBuf::from(appdata).join("Mozilla/Firefox/Profiles")

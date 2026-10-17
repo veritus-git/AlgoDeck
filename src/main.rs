@@ -269,6 +269,7 @@ fn run_daemon(port: u16) {
     if !problems.is_empty() {
         let mut target_idx = 0;
         let active_file = std::env::temp_dir().join("algodeck_active_task.txt");
+        #[allow(unused_mut)]
         let mut saved_str = std::fs::read_to_string(&active_file).ok();
         #[cfg(unix)]
         if saved_str.is_none() {

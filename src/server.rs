@@ -452,6 +452,7 @@ fn apply_autostart_setting(enable: bool) {
     }
 }
 
+#[allow(dead_code)]
 fn which_bin_exists(bin: &str) -> bool {
     if let Ok(path) = std::env::var("PATH") {
         for p in std::env::split_paths(&path) {
@@ -550,6 +551,10 @@ fn configure_cmd_env(cmd: &mut std::process::Command) {
         }
     }
 }
+
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+fn configure_cmd_env(_cmd: &mut std::process::Command) {}
 
 #[cfg(target_os = "linux")]
 fn find_linux_tool_bin(bin: &str) -> Option<PathBuf> {
@@ -915,6 +920,7 @@ for (var i = 0; i < list.length; i++) {{
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 pub fn activate_linux_window(_target_classes: &[&str]) {}
 
 pub fn open_browser_foreground(url: &str) {
@@ -2196,6 +2202,7 @@ pub fn open_in_vscode_internal(
         return;
     }
 
+    #[allow(unused_variables)]
     let pdf_on_left = pdf_position == "left";
     let is_separate = vscode_mode == "separate_windows";
     let target_dir = if is_separate { &p_dir } else { workspace_dir };
@@ -2403,6 +2410,7 @@ pub fn open_in_vscode_internal(
     }
 }
 
+#[allow(dead_code)]
 fn get_candidate_bridge_sockets(problem_id: &str) -> Vec<std::path::PathBuf> {
     let mut list = Vec::new();
     let p_lower = problem_id.to_lowercase();
