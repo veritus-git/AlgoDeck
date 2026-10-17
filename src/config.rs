@@ -296,40 +296,28 @@ impl InitialDownloads {
             return false;
         }
 
+        // Sprawdź czas modyfikacji pliku:
+        // Jeśli plik został pobrany / zmodyfikowany PO instalacji AlgoDeck (poza marginesem 2s instalacji),
+        // to jest to ŚWIEŻY PLIK, który trafił do folderu PO instalacji!
+        // Użytkownik wprost wymaga: "dopiero swieze pliki ktore trafią do folderu pobranych PO instalacji mają byc brane pod uwage"
+        if let Ok(metadata) = file_path.metadata() {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    let mod_millis = dur.as_millis() as u64;
+                    if mod_millis > self.installed_at + 2000 {
+                        return false;
+                    }
+                }
+            }
+        }
+
         let lower = filename.to_lowercase();
         let in_ignored_list = self
             .ignored_files
             .iter()
             .any(|ign| ign.eq_ignore_ascii_case(&filename) || ign.to_lowercase() == lower);
 
-        if in_ignored_list {
-            return true;
-        }
-
-        // Sprawdź czas modyfikacji pliku jeśli plik znajduje się w katalogu Downloads
-        if let Ok(metadata) = file_path.metadata() {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    let mod_millis = dur.as_millis() as u64;
-                    if mod_millis <= self.installed_at + 3000 {
-                        if let Some(dl) = dirs::download_dir().or_else(|| dirs::home_dir().map(|h| h.join("Downloads"))) {
-                            if let Ok(can_dl) = dl.canonicalize() {
-                                if let Ok(can_file) = file_path.canonicalize() {
-                                    if can_file.starts_with(&can_dl) {
-                                        return true;
-                                    }
-                                }
-                            }
-                            if file_path.starts_with(&dl) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        false
+        in_ignored_list
     }
 }
 
@@ -622,27 +610,24 @@ impl DownloadedPdfRegistry {
 
     pub fn load_or_init() -> Self {
         let path = Self::registry_path();
-        let mut reg = if path.exists() {
+        if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
-                serde_json::from_str::<DownloadedPdfRegistry>(&content).ok()
-            } else {
-                None
+                if let Ok(reg) = serde_json::from_str::<DownloadedPdfRegistry>(&content) {
+                    return reg;
+                }
             }
-        } else {
-            None
-        }.unwrap_or_else(|| {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            DownloadedPdfRegistry {
-                version: 1,
-                updated_at: now_ms,
-                entries: HashMap::new(),
-            }
-        });
+        }
 
-        // Zawsze upewnij się, że wszystkie obecne katalogi pobrań per-browser są w rejestrze
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let mut reg = DownloadedPdfRegistry {
+            version: 1,
+            updated_at: now_ms,
+            entries: HashMap::new(),
+        };
+
         reg.scan_and_register_initial_files();
         let _ = reg.save();
         reg
@@ -692,16 +677,26 @@ impl DownloadedPdfRegistry {
             .to_string();
         let key = filename.to_lowercase();
 
-        if let Some(existing) = self.entries.get(&key) {
-            if existing.sha256 == hash && existing.size == size {
-                return false;
-            }
-        }
+        let initial = InitialDownloads::load_or_init();
+        let is_after_install = modified_ms > initial.installed_at + 2000;
 
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+
+        if let Some(existing) = self.entries.get(&key) {
+            // Jeśli plik istniał przed instalacją i nie został pobrany/zmodyfikowany po instalacji:
+            if existing.is_initial && !is_after_install {
+                if existing.sha256 == hash && existing.size == size {
+                    return false;
+                }
+            }
+            // Zabezpieczenie przed podwójnym zarejestrowaniem tego samego zdarzenia (burst do 3 sekund)
+            if !existing.is_initial && existing.sha256 == hash && existing.size == size && now_ms.saturating_sub(existing.registered_at) < 3000 {
+                return false;
+            }
+        }
 
         let entry = PdfRegistryEntry {
             filename: filename.clone(),

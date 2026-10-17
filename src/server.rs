@@ -1342,9 +1342,6 @@ async fn register_download_dirs(
             crate::config::register_known_download_dir(&p);
         }
     }
-    let mut reg = crate::config::DownloadedPdfRegistry::load_or_init();
-    reg.scan_and_register_initial_files();
-    let _ = reg.save();
 
     let all = crate::config::get_all_download_dirs();
     let paths: Vec<String> = all.into_iter().map(|p| p.to_string_lossy().to_string()).collect();

@@ -233,12 +233,6 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
     if (!filename) return;
 
     const baseName = filename.replace(/^.*[\\\/]/, '');
-    const lowerBase = baseName.toLowerCase();
-    if (initialIgnoredFiles.has(lowerBase)) {
-      console.log("[AlgoDeck] Pominięto plik z początkowej listy pobranych:", baseName);
-      initialIgnoredIds.add(downloadId);
-      return;
-    }
 
     // Sprawdź czy automatyczne wykrywanie nie zostało wyłączone w opcjach
     try {
@@ -264,11 +258,9 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
       console.warn("[AlgoDeck] Błąd rejestracji w /api/register-download:", err);
     }
 
-    // Jeśli plik nie jest nowy (już widnieje w rejestrze trwałym), pomiń bezwzględnie!
-    if (regResult && (!regResult.is_new || !regResult.staged)) {
-      console.log("[AlgoDeck] Plik pominięty przez rejestr fizyczny PDF (już zarejestrowany):", baseName);
-      initialIgnoredFiles.add(lowerBase);
-      initialIgnoredIds.add(downloadId);
+    // Jeśli plik nie został zakolejkowany (np. pre-instalacyjny plik bez zmian), pomiń
+    if (!regResult || !regResult.staged) {
+      console.log("[AlgoDeck] Plik pominięty przez silnik AlgoDeck:", baseName, regResult?.detail);
       processedDownloads.add(downloadId);
       return;
     }
