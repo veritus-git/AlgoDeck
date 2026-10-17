@@ -477,33 +477,17 @@ async function handleTabNavigation(target) {
           await chrome.windows.update(match.windowId, { focused: true });
         }
       } else {
-        const anyAlgoTab = tabs.find(t => t.url && (t.url.includes("127.0.0.1:8080") || t.url.includes("localhost:8080")));
-        if (anyAlgoTab) {
-          await chrome.tabs.update(anyAlgoTab.id, { active: true, url: "http://127.0.0.1:8080/settings" });
-          if (chrome.windows && anyAlgoTab.windowId) {
-            await chrome.windows.update(anyAlgoTab.windowId, { focused: true });
-          }
-        } else {
-          await chrome.tabs.create({ url: "http://127.0.0.1:8080/settings" });
-        }
+        await chrome.tabs.create({ url: "http://127.0.0.1:8080/settings" });
       }
     } else if (target === "new_task") {
       const match = tabs.find(t => t.url && (t.url.includes("popup.html") || t.url.includes("trigger=pdf")));
       if (match) {
-        await chrome.tabs.update(match.id, { active: true, url: "http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf" });
+        await chrome.tabs.update(match.id, { active: true });
         if (chrome.windows && match.windowId) {
           await chrome.windows.update(match.windowId, { focused: true });
         }
       } else {
-        const anyAlgoTab = tabs.find(t => t.url && (t.url.includes("127.0.0.1:8080") || t.url.includes("localhost:8080")));
-        if (anyAlgoTab) {
-          await chrome.tabs.update(anyAlgoTab.id, { active: true, url: "http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf" });
-          if (chrome.windows && anyAlgoTab.windowId) {
-            await chrome.windows.update(anyAlgoTab.windowId, { focused: true });
-          }
-        } else {
-          await chrome.tabs.create({ url: "http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf" });
-        }
+        await chrome.tabs.create({ url: "http://127.0.0.1:8080/popup.html?mode=tab&trigger=pdf" });
       }
     } else if (target === "web_hub") {
       const match = tabs.find(t => t.url && (t.url === "http://127.0.0.1:8080/" || t.url.startsWith("http://127.0.0.1:8080/#") || t.url === "http://localhost:8080/"));
@@ -513,15 +497,7 @@ async function handleTabNavigation(target) {
           await chrome.windows.update(match.windowId, { focused: true });
         }
       } else {
-        const anyAlgoTab = tabs.find(t => t.url && (t.url.includes("127.0.0.1:8080") || t.url.includes("localhost:8080")));
-        if (anyAlgoTab) {
-          await chrome.tabs.update(anyAlgoTab.id, { active: true, url: "http://127.0.0.1:8080/" });
-          if (chrome.windows && anyAlgoTab.windowId) {
-            await chrome.windows.update(anyAlgoTab.windowId, { focused: true });
-          }
-        } else {
-          await chrome.tabs.create({ url: "http://127.0.0.1:8080/" });
-        }
+        await chrome.tabs.create({ url: "http://127.0.0.1:8080/" });
       }
     }
   } catch (err) {

@@ -1248,11 +1248,7 @@ function setupShutdown() {
     const ws = new WebSocket(`${wsProto}//${wsHost}/ws`);
     ws.onmessage = (e) => {
       if (typeof e.data === "string") {
-        if (e.data === "navigate:settings") {
-          window.location.href = "/settings";
-        } else if (e.data === "navigate:web_hub") {
-          window.location.href = "/";
-        } else if (e.data === "navigate:new_task") {
+        if (e.data === "navigate:new_task") {
           switchTab("tab-files");
           window.focus();
         } else if (e.data.startsWith("active:")) {

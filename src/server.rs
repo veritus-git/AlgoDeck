@@ -923,6 +923,7 @@ for (var i = 0; i < list.length; i++) {{
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub fn linux_window_exists(target_classes: &[&str]) -> bool {
     if let Some(wm) = find_linux_tool_bin("wmctrl") {
         let mut list_cmd = std::process::Command::new(&wm);
@@ -1064,12 +1065,11 @@ pub fn open_browser_tab_or_focus(url: &str, nav_target: &str, ws_sender: &tokio:
 
     #[cfg(target_os = "linux")]
     {
-        let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "msedge", "vivaldi", "opera"];
-        let has_window = linux_window_exists(&targets);
-        if has_window && ws_sender.receiver_count() > 0 {
-            activate_linux_window(&targets);
-        } else {
+        if ws_sender.receiver_count() == 0 {
             open_browser_foreground(url);
+        } else {
+            let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "msedge", "vivaldi", "opera"];
+            activate_linux_window(&targets);
         }
     }
     #[cfg(target_os = "macos")]

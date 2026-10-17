@@ -109,11 +109,7 @@ function connectWebSocket() {
         }
       } else if (typeof event.data === "string" && event.data.startsWith("navigate:")) {
         const target = event.data.substring(9).trim();
-        if (target === "settings") {
-          window.location.href = "/settings";
-        } else if (target === "new_task") {
-          window.location.href = "/popup.html?mode=tab&trigger=pdf";
-        } else if (target === "web_hub") {
+        if (target === "web_hub") {
           window.focus();
         }
       }
