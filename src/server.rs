@@ -585,7 +585,7 @@ pub fn activate_linux_window(target_classes: &[&str]) {
 var list = workspace.windowList ? workspace.windowList() : (workspace.clientList ? workspace.clientList() : []);
 for (var i = 0; i < list.length; i++) {{
     var c = list[i];
-    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.caption || "") + " " + (c.desktopFileName || "")).toLowerCase();
+    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.desktopFileName || "")).toLowerCase();
     if ({condition}) {{
         c.minimized = false;
         c.demandsAttention = false;
@@ -763,29 +763,7 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 
-    // 3. Aktywacja okna oczekującego uwagi w KDE (Global Accel: "Activate Window Demanding Attention")
-    // Gdyby KWin przeniósł okno w stan demands_attention, ten wbudowany skrót KWin natychmiast
-    // wynosi je na sam wierzch!
-    for q in ["qdbus6", "qdbus-qt6", "qdbus", "qdbus-qt5"] {
-        if let Some(q_bin) = find_linux_tool_bin(q) {
-            let mut q_cmd = std::process::Command::new(&q_bin);
-            configure_cmd_env(&mut q_cmd);
-            let _ = q_cmd.args(["org.kde.kglobalaccel", "/component/kwin", "invokeShortcut", "Activate Window Demanding Attention"]).output();
-            break;
-        }
-    }
-    let mut dbus_accel = std::process::Command::new("dbus-send");
-    configure_cmd_env(&mut dbus_accel);
-    let _ = dbus_accel.args([
-        "--session",
-        "--dest=org.kde.kglobalaccel",
-        "--type=method_call",
-        "/component/kwin",
-        "org.kde.kglobalaccel.Component.invokeShortcut",
-        "string:Activate Window Demanding Attention",
-    ]).output();
-
-    // 2. Cinnamon Desktop (Muffin) Window Manager via DBus Eval
+    // 3. Cinnamon Desktop (Muffin) Window Manager via DBus Eval
     let cin_conditions: Vec<String> = target_classes
         .iter()
         .map(|c| format!("\"{}\"", c.to_lowercase()))
@@ -798,7 +776,7 @@ for (var i = 0; i < list.length; i++) {{
             let targets = [{targets}];
             let found = false;
             for (let w of wins) {{
-                let cls = ((w.get_wm_class() || '') + ' ' + (w.get_title() || '')).toLowerCase();
+                let cls = (w.get_wm_class() || '').toLowerCase();
                 for (let target of targets) {{
                     if (cls.indexOf(target) !== -1) {{
                         w.unminimize();
@@ -855,15 +833,6 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 
-    // 4. kdotool (KDE Plasma Wayland focus tool)
-    if let Some(kdo) = find_linux_tool_bin("kdotool") {
-        for cls in target_classes {
-            let mut cmd = std::process::Command::new(&kdo);
-            configure_cmd_env(&mut cmd);
-            let _ = cmd.args(["search", "--class", cls, "windowactivate"]).output();
-        }
-    }
-
     // 5. xdotool & wmctrl: remove demands_attention and activate window cleanly
     let xd_opt = find_linux_tool_bin("xdotool");
     if let Some(wm) = find_linux_tool_bin("wmctrl") {
@@ -873,30 +842,33 @@ for (var i = 0; i < list.length; i++) {{
             let text = String::from_utf8_lossy(&out.stdout);
             let mut activated = false;
             for line in text.lines() {
-                let lower = line.to_lowercase();
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() < 3 {
+                    continue;
+                }
+                let wid = parts[0];
+                let wm_class = parts[2].to_lowercase();
                 for cls in target_classes {
-                    if lower.contains(&cls.to_lowercase()) {
-                        if let Some(wid) = line.split_whitespace().next() {
-                            let mut rem_cmd = std::process::Command::new(&wm);
-                            configure_cmd_env(&mut rem_cmd);
-                            let _ = rem_cmd.args(["-i", "-r", wid, "-b", "remove,demands_attention"]).output();
+                    if wm_class.contains(&cls.to_lowercase()) {
+                        let mut rem_cmd = std::process::Command::new(&wm);
+                        configure_cmd_env(&mut rem_cmd);
+                        let _ = rem_cmd.args(["-i", "-r", wid, "-b", "remove,demands_attention"]).output();
 
-                            if let Some(ref xd) = xd_opt {
-                                let mut xd_act = std::process::Command::new(xd);
-                                configure_cmd_env(&mut xd_act);
-                                let _ = xd_act.args(["windowactivate", "--sync", wid]).output();
+                        if let Some(ref xd) = xd_opt {
+                            let mut xd_act = std::process::Command::new(xd);
+                            configure_cmd_env(&mut xd_act);
+                            let _ = xd_act.args(["windowactivate", "--sync", wid]).output();
 
-                                let mut xd_raise = std::process::Command::new(xd);
-                                configure_cmd_env(&mut xd_raise);
-                                let _ = xd_raise.args(["windowraise", wid]).output();
-                            } else {
-                                let mut act_cmd = std::process::Command::new(&wm);
-                                configure_cmd_env(&mut act_cmd);
-                                let _ = act_cmd.args(["-i", "-a", wid]).output();
-                            }
-                            activated = true;
-                            break;
+                            let mut xd_raise = std::process::Command::new(xd);
+                            configure_cmd_env(&mut xd_raise);
+                            let _ = xd_raise.args(["windowraise", wid]).output();
+                        } else {
+                            let mut act_cmd = std::process::Command::new(&wm);
+                            configure_cmd_env(&mut act_cmd);
+                            let _ = act_cmd.args(["-i", "-a", wid]).output();
                         }
+                        activated = true;
+                        break;
                     }
                 }
                 if activated {
@@ -974,13 +946,13 @@ pub fn open_browser_foreground(url: &str) {
             let _ = open::that(&url_str);
         }
 
-        let targets = ["algodeck", "brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"];
+        let targets = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"];
         activate_linux_window(&targets);
 
         std::thread::spawn(move || {
             for delay in [80, 200, 450, 800, 1200] {
                 std::thread::sleep(std::time::Duration::from_millis(delay));
-                activate_linux_window(&["algodeck", "brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
+                activate_linux_window(&["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chrome", "chromium", "firefox", "microsoft-edge", "edge", "vivaldi", "opera"]);
             }
         });
     }
