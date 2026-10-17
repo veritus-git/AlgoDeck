@@ -78,7 +78,8 @@ body {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  min-height: 155px;
+  min-height: 0 !important;
+  height: auto !important;
   background-color: var(--bg-main);
   color: var(--text-main);
   font-family: var(--font-family);
@@ -92,8 +93,13 @@ body {
   width: 380px !important;
   min-width: 380px !important;
   max-width: 380px !important;
-  min-height: 155px;
+  min-height: 0 !important;
+  height: auto !important;
   box-sizing: border-box;
+}
+
+.view-main:not(.hidden) {
+  min-height: 180px;
 }
 
 .hidden {

@@ -5,6 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AlgoDeck</title>
   <link rel="stylesheet" href="popup.css">
+  <script>
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(["detected_task", "dismissed_pdf"], (st) => {
+          if (st && st.detected_task && st.detected_task.filename) {
+            const isDismissed = st.dismissed_pdf && st.dismissed_pdf.toLowerCase() === st.detected_task.filename.toLowerCase();
+            if (!isDismissed) {
+              document.documentElement.classList.add("detected-mode");
+              if (document.body) document.body.classList.add("detected-mode");
+            }
+          }
+        });
+      }
+    } catch (_) {}
+  </script>
 </head>
 <body>
   <div class="app-container">

@@ -333,8 +333,9 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
   }
 }
 
-// Otwieranie natywnego popupu rozszerzenia pod ikoną ⚡ (wewnątrz przeglądarki)
+// Otwieranie natywnego popupu rozszerzenia pod ikoną ⚡ (wewnątrz przeglądarki) lub okna podręcznego
 async function triggerExtensionPopup(baseName, problemId) {
+  let opened = false;
   try {
     if (typeof chrome !== "undefined" && chrome.action && chrome.action.openPopup) {
       try {
@@ -344,13 +345,31 @@ async function triggerExtensionPopup(baseName, problemId) {
         } else {
           await chrome.action.openPopup();
         }
+        opened = true;
         console.log("[AlgoDeck] Pomyślnie otworzono popup rozszerzenia pod ikoną ⚡.");
       } catch (openErr) {
-        console.log("[AlgoDeck] chrome.action.openPopup oczekuje kliknięcia w ikonę ⚡ (zadanie czeka z odznaką 1):", openErr);
+        console.log("[AlgoDeck] chrome.action.openPopup wymagał gestu, otwieram dedykowane okno:", openErr);
       }
     }
   } catch (err) {
     console.warn("[AlgoDeck] triggerExtensionPopup błąd:", err);
+  }
+
+  // Jeśli polityka przeglądarki nie pozwoliła otworzyć popupu pod paskiem, natychmiast otwórz poręczne okienko
+  if (!opened && typeof chrome !== "undefined" && chrome.windows && chrome.windows.create) {
+    try {
+      const targetUrl = chrome.runtime.getURL("popup.html");
+      await chrome.windows.create({
+        url: targetUrl,
+        type: "popup",
+        width: 380,
+        height: 165,
+        focused: true
+      });
+      console.log("[AlgoDeck] Pomyślnie otworzono okno 1-Klik.");
+    } catch (winErr) {
+      console.warn("[AlgoDeck] Błąd chrome.windows.create:", winErr);
+    }
   }
 }
 

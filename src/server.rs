@@ -621,27 +621,34 @@ for (var i = 0; i < list.length; i++) {{
     let cin_targets_json = cin_conditions.join(", ");
     let cinnamon_eval_script = format!(
         r#"try {{
+            let t = (global.display && global.display.get_current_time_roundtrip) ? global.display.get_current_time_roundtrip() : (global.get_current_time() || 0);
             let wins = global.display.get_tab_list(0, null);
             let targets = [{targets}];
+            let found = false;
             for (let w of wins) {{
                 let cls = ((w.get_wm_class() || '') + ' ' + (w.get_title() || '')).toLowerCase();
-                for (let t of targets) {{
-                    if (cls.indexOf(t) !== -1) {{
+                for (let target of targets) {{
+                    if (cls.indexOf(target) !== -1) {{
                         w.unminimize();
-                        w.activate(global.get_current_time());
+                        w.activate(t);
+                        if (w.focus) w.focus(t);
                         w.raise();
+                        found = true;
                         break;
                     }}
                 }}
+                if (found) break;
             }}
-        }} catch (_) {{}}"#,
+            found;
+        }} catch (_) {{ false; }}"#,
         targets = cin_targets_json
     );
 
     let mut cin_cmd = std::process::Command::new("dbus-send");
     configure_cmd_env(&mut cin_cmd);
-    let _ = cin_cmd
+    if let Ok(out) = cin_cmd
         .args([
+            "--print-reply",
             "--session",
             "--dest=org.Cinnamon",
             "--type=method_call",
@@ -649,13 +656,19 @@ for (var i = 0; i < list.length; i++) {{
             "org.Cinnamon.Eval",
             &format!("string:{}", cinnamon_eval_script),
         ])
-        .output();
+        .output()
+    {
+        if out.status.success() && String::from_utf8_lossy(&out.stdout).contains("true") {
+            return;
+        }
+    }
 
     // 3. GNOME Shell Window Manager via DBus Eval
     let mut gnome_cmd = std::process::Command::new("dbus-send");
     configure_cmd_env(&mut gnome_cmd);
-    let _ = gnome_cmd
+    if let Ok(out) = gnome_cmd
         .args([
+            "--print-reply",
             "--session",
             "--dest=org.gnome.Shell",
             "--type=method_call",
@@ -663,7 +676,12 @@ for (var i = 0; i < list.length; i++) {{
             "org.gnome.Shell.Eval",
             &format!("string:{}", cinnamon_eval_script),
         ])
-        .output();
+        .output()
+    {
+        if out.status.success() && String::from_utf8_lossy(&out.stdout).contains("true") {
+            return;
+        }
+    }
 
     // 4. kdotool (KDE Plasma Wayland focus tool)
     if let Some(kdo) = find_linux_tool_bin("kdotool") {
@@ -674,13 +692,14 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 
-    // 5. wmctrl & xdotool: identify matching window IDs, remove demands_attention, and activate/raise
+    // 5. xdotool & wmctrl: remove demands_attention and activate window cleanly
     let xd_opt = find_linux_tool_bin("xdotool");
     if let Some(wm) = find_linux_tool_bin("wmctrl") {
         let mut list_cmd = std::process::Command::new(&wm);
         configure_cmd_env(&mut list_cmd);
         if let Ok(out) = list_cmd.args(["-l", "-x"]).output() {
             let text = String::from_utf8_lossy(&out.stdout);
+            let mut activated = false;
             for line in text.lines() {
                 let lower = line.to_lowercase();
                 for cls in target_classes {
@@ -690,33 +709,49 @@ for (var i = 0; i < list.length; i++) {{
                             configure_cmd_env(&mut rem_cmd);
                             let _ = rem_cmd.args(["-i", "-r", wid, "-b", "remove,demands_attention"]).output();
 
-                            let mut act_cmd = std::process::Command::new(&wm);
-                            configure_cmd_env(&mut act_cmd);
-                            let _ = act_cmd.args(["-i", "-a", wid]).output();
-
                             if let Some(ref xd) = xd_opt {
-                                let mut xd_cmd = std::process::Command::new(xd);
-                                configure_cmd_env(&mut xd_cmd);
-                                let _ = xd_cmd.args(["windowactivate", "--sync", wid, "windowraise", wid, "windowfocus", "--sync", wid]).output();
+                                let mut xd_act = std::process::Command::new(xd);
+                                configure_cmd_env(&mut xd_act);
+                                let _ = xd_act.args(["windowactivate", "--sync", wid]).output();
+
+                                let mut xd_raise = std::process::Command::new(xd);
+                                configure_cmd_env(&mut xd_raise);
+                                let _ = xd_raise.args(["windowraise", wid]).output();
+                            } else {
+                                let mut act_cmd = std::process::Command::new(&wm);
+                                configure_cmd_env(&mut act_cmd);
+                                let _ = act_cmd.args(["-i", "-a", wid]).output();
                             }
+                            activated = true;
+                            break;
                         }
                     }
                 }
+                if activated {
+                    return;
+                }
             }
-        }
-        for cls in target_classes {
-            let mut act = std::process::Command::new(&wm);
-            configure_cmd_env(&mut act);
-            let _ = act.args(["-x", "-a", cls]).output();
         }
     }
 
     // 6. xdotool fallback search & activate
-    if let Some(xd) = xd_opt {
+    if let Some(ref xd) = xd_opt {
         for cls in target_classes {
-            let mut cmd = std::process::Command::new(&xd);
-            configure_cmd_env(&mut cmd);
-            let _ = cmd.args(["search", "--onlyvisible", "--class", cls, "windowactivate", "%@", "windowraise", "%@", "windowfocus", "%@"]).output();
+            let mut search_cmd = std::process::Command::new(xd);
+            configure_cmd_env(&mut search_cmd);
+            if let Ok(out) = search_cmd.args(["search", "--onlyvisible", "--class", cls]).output() {
+                let wids = String::from_utf8_lossy(&out.stdout);
+                if let Some(wid) = wids.lines().next() {
+                    let mut act_cmd = std::process::Command::new(xd);
+                    configure_cmd_env(&mut act_cmd);
+                    let _ = act_cmd.args(["windowactivate", "--sync", wid]).output();
+
+                    let mut raise_cmd = std::process::Command::new(xd);
+                    configure_cmd_env(&mut raise_cmd);
+                    let _ = raise_cmd.args(["windowraise", wid]).output();
+                    return;
+                }
+            }
         }
     }
 }
@@ -730,26 +765,34 @@ pub fn open_browser_foreground(url: &str) {
     #[cfg(target_os = "linux")]
     {
         let mut launched = false;
-        let browsers = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "opera", "vivaldi"];
-        for b in browsers {
-            if which_bin_exists(b) {
-                let mut cmd = std::process::Command::new(b);
+        if let Ok(output) = std::process::Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
+            let def_desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !def_desktop.is_empty() && def_desktop.ends_with(".desktop") {
+                let mut cmd = std::process::Command::new("gtk-launch");
                 configure_cmd_env(&mut cmd);
-                if cmd.arg(&url_str).spawn().is_ok() {
+                if cmd.arg(&def_desktop).arg(&url_str).spawn().is_ok() {
                     launched = true;
-                    break;
                 }
             }
         }
 
         if !launched {
-            if let Ok(output) = std::process::Command::new("xdg-settings").args(["get", "default-web-browser"]).output() {
-                let def_desktop = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !def_desktop.is_empty() && def_desktop.ends_with(".desktop") {
-                    let mut cmd = std::process::Command::new("gtk-launch");
+            let mut cmd = std::process::Command::new("xdg-open");
+            configure_cmd_env(&mut cmd);
+            if cmd.arg(&url_str).spawn().is_ok() {
+                launched = true;
+            }
+        }
+
+        if !launched {
+            let browsers = ["brave-browser", "brave", "google-chrome", "google-chrome-stable", "chromium", "firefox", "microsoft-edge", "opera", "vivaldi"];
+            for b in browsers {
+                if which_bin_exists(b) {
+                    let mut cmd = std::process::Command::new(b);
                     configure_cmd_env(&mut cmd);
-                    if cmd.arg(&def_desktop).arg(&url_str).spawn().is_ok() {
+                    if cmd.arg(&url_str).spawn().is_ok() {
                         launched = true;
+                        break;
                     }
                 }
             }
@@ -759,12 +802,13 @@ pub fn open_browser_foreground(url: &str) {
             let _ = open::that(&url_str);
         }
 
-        activate_linux_window(&["brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
+        let targets = ["algodeck", "brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"];
+        activate_linux_window(&targets);
 
         std::thread::spawn(move || {
-            for delay in [50, 150, 300, 600, 1000] {
+            for delay in [80, 200, 450, 800, 1200] {
                 std::thread::sleep(std::time::Duration::from_millis(delay));
-                activate_linux_window(&["brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
+                activate_linux_window(&["algodeck", "brave-browser", "brave", "google-chrome", "chrome", "chromium", "firefox", "microsoft-edge", "vivaldi", "opera"]);
             }
         });
     }

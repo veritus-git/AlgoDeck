@@ -115,10 +115,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // 1. Natychmiastowe ustawienie widoku (bez opóźnienia i skoków okna)
+  await updatePopupViewState();
+
+  // 2. Weryfikacja stanu daemona AlgoDeck
   const isOnline = await checkDaemonHealth();
   if (isOnline) {
-    await syncRecentDownloads();
-    await updatePopupViewState();
+    const stagedMore = await syncRecentDownloads();
+    if (stagedMore) {
+      await updatePopupViewState();
+    }
     loadTasks();
   }
 

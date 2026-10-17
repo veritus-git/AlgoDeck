@@ -1,7 +1,7 @@
 # AlgoDeck ⚡ (Koło MAP)
 
 <p align="center">
-  <img src="icons/icon128.png" alt="AlgoDeck Logo" width="96" />
+  <img src="frontend/icons/icon128.png" alt="AlgoDeck Logo" width="96" />
 </p>
 
 <p align="center">
