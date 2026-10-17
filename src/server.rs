@@ -98,6 +98,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/problems/:id", delete(delete_problem))
         .route("/problem/:id", get(get_problem).delete(delete_problem))
         .route("/problems/:id/add-tests", post(add_tests))
+        .route("/problems/:id/add-manual-test", post(add_manual_test))
+        .route("/problem/:id/add-manual-test", post(add_manual_test))
         .route("/auto-import-pdf", post(auto_import_pdf))
         .route("/create-manual", post(create_manual))
         .route("/staged-state", get(get_staged_state))
@@ -118,6 +120,9 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/switch-task/:direction", post(switch_task))
         .route("/compile/:id", post(compile_task))
         .route("/run-all/:id", post(run_all_task))
+        .route("/run-interactive/:id", post(run_interactive_task))
+        .route("/run/:id", post(run_interactive_task))
+        .route("/test/:id", post(run_all_task))
         .route("/run-test/:id/:test_id", post(run_single_test_task))
         .route("/kill/:id", post(kill_task))
         .route("/launch", post(launch_screen))
@@ -585,7 +590,7 @@ pub fn activate_linux_window(target_classes: &[&str]) {
 var list = workspace.windowList ? workspace.windowList() : (workspace.clientList ? workspace.clientList() : []);
 for (var i = 0; i < list.length; i++) {{
     var c = list[i];
-    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.desktopFileName || "")).toLowerCase();
+    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.desktopFileName || "") + " " + (c.caption || "")).toLowerCase();
     if ({condition}) {{
         c.minimized = false;
         c.demandsAttention = false;
@@ -601,6 +606,8 @@ for (var i = 0; i < list.length; i++) {{
         }} else if ("activeClient" in workspace) {{
             workspace.activeClient = c;
         }}
+        if (workspace.raiseWindow) workspace.raiseWindow(c);
+        if (c.raise) c.raise();
         if (c.activateWindow) c.activateWindow();
         break;
     }}
@@ -743,20 +750,22 @@ for (var i = 0; i < list.length; i++) {{
     // 2. kdotool (Natywne narzędzie Wayland dla KDE Plasma)
     if let Some(kdo) = find_linux_tool_bin("kdotool") {
         for cls in target_classes {
-            let mut search_cmd = std::process::Command::new(&kdo);
-            configure_cmd_env(&mut search_cmd);
-            if let Ok(out) = search_cmd.args(["search", "--class", cls]).output() {
-                let out_str = String::from_utf8_lossy(&out.stdout);
-                for line in out_str.lines() {
-                    let wid = line.trim();
-                    if !wid.is_empty() {
-                        let mut act_cmd = std::process::Command::new(&kdo);
-                        configure_cmd_env(&mut act_cmd);
-                        let _ = act_cmd.args(["windowactivate", wid]).output();
+            for flag in ["--class", "--name"] {
+                let mut search_cmd = std::process::Command::new(&kdo);
+                configure_cmd_env(&mut search_cmd);
+                if let Ok(out) = search_cmd.args(["search", flag, cls]).output() {
+                    let out_str = String::from_utf8_lossy(&out.stdout);
+                    for line in out_str.lines() {
+                        let wid = line.trim();
+                        if !wid.is_empty() {
+                            let mut act_cmd = std::process::Command::new(&kdo);
+                            configure_cmd_env(&mut act_cmd);
+                            let _ = act_cmd.args(["windowactivate", wid]).output();
 
-                        let mut raise_cmd = std::process::Command::new(&kdo);
-                        configure_cmd_env(&mut raise_cmd);
-                        let _ = raise_cmd.args(["windowraise", wid]).output();
+                            let mut raise_cmd = std::process::Command::new(&kdo);
+                            configure_cmd_env(&mut raise_cmd);
+                            let _ = raise_cmd.args(["windowraise", wid]).output();
+                        }
                     }
                 }
             }
@@ -847,9 +856,9 @@ for (var i = 0; i < list.length; i++) {{
                     continue;
                 }
                 let wid = parts[0];
-                let wm_class = parts[2].to_lowercase();
+                let line_lower = line.to_lowercase();
                 for cls in target_classes {
-                    if wm_class.contains(&cls.to_lowercase()) {
+                    if line_lower.contains(&cls.to_lowercase()) {
                         let mut rem_cmd = std::process::Command::new(&wm);
                         configure_cmd_env(&mut rem_cmd);
                         let _ = rem_cmd.args(["-i", "-r", wid, "-b", "remove,demands_attention"]).output();
@@ -881,19 +890,24 @@ for (var i = 0; i < list.length; i++) {{
     // 6. xdotool fallback search & activate
     if let Some(ref xd) = xd_opt {
         for cls in target_classes {
-            let mut search_cmd = std::process::Command::new(xd);
-            configure_cmd_env(&mut search_cmd);
-            if let Ok(out) = search_cmd.args(["search", "--onlyvisible", "--class", cls]).output() {
-                let wids = String::from_utf8_lossy(&out.stdout);
-                if let Some(wid) = wids.lines().next() {
-                    let mut act_cmd = std::process::Command::new(xd);
-                    configure_cmd_env(&mut act_cmd);
-                    let _ = act_cmd.args(["windowactivate", "--sync", wid]).output();
+            for flag in ["--class", "--name"] {
+                let mut search_cmd = std::process::Command::new(xd);
+                configure_cmd_env(&mut search_cmd);
+                if let Ok(out) = search_cmd.args(["search", flag, cls]).output() {
+                    let wids = String::from_utf8_lossy(&out.stdout);
+                    for wid in wids.lines() {
+                        let wid = wid.trim();
+                        if !wid.is_empty() {
+                            let mut act_cmd = std::process::Command::new(xd);
+                            configure_cmd_env(&mut act_cmd);
+                            let _ = act_cmd.args(["windowactivate", "--sync", wid]).output();
 
-                    let mut raise_cmd = std::process::Command::new(xd);
-                    configure_cmd_env(&mut raise_cmd);
-                    let _ = raise_cmd.args(["windowraise", wid]).output();
-                    return;
+                            let mut raise_cmd = std::process::Command::new(xd);
+                            configure_cmd_env(&mut raise_cmd);
+                            let _ = raise_cmd.args(["windowraise", wid]).output();
+                            return;
+                        }
+                    }
                 }
             }
         }
@@ -1020,7 +1034,49 @@ async fn delete_problem(
 ) -> Json<serde_json::Value> {
     let ws_dir = state.settings.read().unwrap().get_workspace_path();
     let res = WorkspaceManager::delete_problem(&ws_dir, &id);
+    if res.is_ok() {
+        let remaining = WorkspaceManager::list_problems(&ws_dir);
+        if remaining.is_empty() {
+            state.streamdeck.set_idle_screen();
+            let _ = state.ws_sender.send("active:".to_string());
+        } else {
+            let active = state.streamdeck.get_state().active_problem_id;
+            if active.as_deref().map(|a| a.eq_ignore_ascii_case(&id)).unwrap_or(false) {
+                if let Some(first) = remaining.first() {
+                    state.streamdeck.set_active_problem_with_meta(&first.problem_id, 1, remaining.len());
+                    let _ = state.ws_sender.send(format!("active:{}", first.problem_id));
+                } else {
+                    state.streamdeck.set_idle_screen();
+                    let _ = state.ws_sender.send("active:".to_string());
+                }
+            } else if let Some(ref act) = active {
+                let cur_idx = remaining.iter().position(|p| p.problem_id.eq_ignore_ascii_case(act)).map(|i| i + 1).unwrap_or(1);
+                state.streamdeck.set_active_problem_with_meta(act, cur_idx, remaining.len());
+            }
+        }
+    }
     Json(serde_json::json!({ "success": res.is_ok() }))
+}
+
+#[derive(Deserialize)]
+pub struct ManualTestRequest {
+    pub input: String,
+    pub output: String,
+}
+
+async fn add_manual_test(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+    Json(req): Json<ManualTestRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let ws_dir = state.settings.read().unwrap().get_workspace_path();
+    match WorkspaceManager::add_manual_test(&ws_dir, &id, &req.input, &req.output) {
+        Ok(count) => Ok(Json(serde_json::json!({ "success": true, "total_tests": count }))),
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "success": false, "error": e })),
+        )),
+    }
 }
 
 async fn add_tests(
@@ -1926,6 +1982,13 @@ async fn set_active(
     let cur_idx = problems.iter().position(|p| p.problem_id.eq_ignore_ascii_case(&id)).map(|i| i + 1).unwrap_or(total);
     state.streamdeck.set_active_problem_with_meta(&id, cur_idx, total);
     let _ = state.ws_sender.send(format!("active:{}", id));
+
+    let (split_pdf, pdf_pos, split_ratio, vscode_mode, macos_mode) = {
+        let s = state.settings.read().unwrap();
+        (s.open_pdf_in_vscode, s.pdf_position.clone(), s.editor_split_ratio, s.vscode_mode.clone(), s.macos_window_mode.clone())
+    };
+    open_in_vscode_internal(&id, &ws_dir, split_pdf, &pdf_pos, split_ratio, &vscode_mode, &macos_mode);
+
     Json(serde_json::json!({ "success": true, "problem_id": id, "current_idx": cur_idx, "total": total }))
 }
 
@@ -2111,6 +2174,15 @@ pub fn open_in_vscode_internal(
     let sol_str = sol_file.to_string_lossy().to_string();
     let p_dir_str = p_dir.to_string_lossy().to_string();
     if send_bridge_open(problem_id, &p_dir_str, &sol_str, vscode_mode) {
+        #[cfg(target_os = "linux")]
+        {
+            std::thread::spawn(move || {
+                for delay in [50, 150, 350, 750] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
+                }
+            });
+        }
         return;
     }
 
@@ -2251,7 +2323,7 @@ pub fn open_in_vscode_internal(
             std::thread::spawn(move || {
                 for delay in [100, 350, 750] {
                     std::thread::sleep(std::time::Duration::from_millis(delay));
-                    activate_linux_window(&["code", "visual studio code", "codium"]);
+                    activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
                 }
             });
         }
@@ -2641,6 +2713,16 @@ where
     #[cfg(unix)]
     let _ = std::fs::write("/tmp/algodeck_active_task.txt", &upper_pid);
 
+    #[cfg(target_os = "linux")]
+    {
+        std::thread::spawn(move || {
+            for delay in [50, 150, 350, 750] {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
+            }
+        });
+    }
+
     // 1. ZAPISZ TRIGGER FILE (File IPC) - natychmiastowe, odporne na SELinux, sandbox, flatpak, sieć
     let algo_dir = p_dir.join(".algo");
     let _ = std::fs::create_dir_all(&algo_dir);
@@ -2728,6 +2810,15 @@ where
 pub fn ensure_vscode_open_for_problem(problem_id: &str, state: &AppState) {
     if problem_id.is_empty() {
         return;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::thread::spawn(move || {
+            for delay in [50, 150, 350, 750] {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                activate_linux_window(&["code", "code-oss", "codium", "vscodium", "com.visualstudio.code", "visual studio code", "antigravity ide"]);
+            }
+        });
     }
     if !is_vscode_open_for_problem(problem_id) {
         let ws_dir = state.settings.read().unwrap().get_workspace_path();
@@ -2819,6 +2910,13 @@ async fn run_all_task(
     AxumPath(id): AxumPath<String>,
 ) -> Json<RunAllSummary> {
     ensure_vscode_open_for_problem(&id, &state);
+    let ws = state.settings.read().unwrap().get_workspace_path();
+    let pid = id.clone();
+    let state_c = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let open_fn = |p: &str| ensure_vscode_open_for_problem(p, &state_c);
+        trigger_vscode_action("test", &pid, &ws, open_fn);
+    });
     state.streamdeck.update_key_status(6, "RUNNING", Some("TESTING..."));
     let res = state.runner.run_all_tests(&id);
     if res.all_passed {
@@ -2827,6 +2925,21 @@ async fn run_all_task(
         state.streamdeck.update_key_status(6, "WA", Some(&format!("{}/{}", res.passed_count, res.total_tests)));
     }
     Json(res)
+}
+
+async fn run_interactive_task(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Json<serde_json::Value> {
+    ensure_vscode_open_for_problem(&id, &state);
+    let ws = state.settings.read().unwrap().get_workspace_path();
+    let pid = id.clone();
+    let state_c = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let open_fn = |p: &str| ensure_vscode_open_for_problem(p, &state_c);
+        trigger_vscode_action("run", &pid, &ws, open_fn);
+    });
+    Json(serde_json::json!({ "success": true, "problem_id": id }))
 }
 
 async fn run_single_test_task(
@@ -3071,14 +3184,20 @@ pub fn start_detached_daemon() {
 
     #[cfg(target_os = "linux")]
     {
-        let status = std::process::Command::new("systemctl")
-            .args(["--user", "start", "algodeck.service"])
+        let mut reset_cmd = std::process::Command::new("systemctl");
+        configure_cmd_env(&mut reset_cmd);
+        let _ = reset_cmd.args(["--user", "reset-failed", "algodeck.service"]).status();
+
+        let mut sys_cmd = std::process::Command::new("systemctl");
+        configure_cmd_env(&mut sys_cmd);
+        let status = sys_cmd
+            .args(["--user", "restart", "algodeck.service"])
             .status();
         if let Ok(s) = status {
             if s.success() {
-                for _ in 0..10 {
+                for _ in 0..15 {
                     std::thread::sleep(std::time::Duration::from_millis(100));
-                    if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(300)).call().is_ok() {
+                    if ureq::get("http://127.0.0.1:8080/api/status").timeout(std::time::Duration::from_millis(250)).call().is_ok() {
                         println!("✓ Usługa algodeck.service została uruchomiona przez systemd!");
                         return;
                     }
@@ -3125,16 +3244,22 @@ pub fn start_detached_daemon() {
     }
 
     println!("⚡ Uruchamianie daemona AlgoDeck w tle...");
-    let self_exe = std::env::current_exe().unwrap_or_else(|_| {
-        dirs::home_dir()
-            .map(|h| h.join(".local/bin/algodeck"))
-            .unwrap_or_else(|| std::path::PathBuf::from("algodeck"))
-    });
+    let self_exe = if let Some(home) = dirs::home_dir() {
+        let p = home.join(".local/bin/algodeck");
+        if p.exists() {
+            p
+        } else {
+            std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"))
+        }
+    } else {
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("algodeck"))
+    };
 
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         let mut cmd = std::process::Command::new(&self_exe);
+        configure_cmd_env(&mut cmd);
         cmd.arg("daemon");
         cmd.stdin(std::process::Stdio::null());
 

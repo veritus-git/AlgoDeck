@@ -354,6 +354,84 @@ impl WorkspaceManager {
         Ok(added)
     }
 
+    pub fn add_manual_test(
+        workspace_dir: &Path,
+        problem_id: &str,
+        input: &str,
+        output: &str,
+    ) -> Result<usize, String> {
+        let p_dir = Self::get_problem_dir(workspace_dir, problem_id);
+        if !p_dir.exists() {
+            return Err("Katalog zadania nie istnieje".to_string());
+        }
+
+        let tests_dir = p_dir.join(".algo").join("tests");
+        fs::create_dir_all(&tests_dir).map_err(|e| e.to_string())?;
+
+        let mut idx = 1;
+        loop {
+            let in_file = tests_dir.join(format!("custom_{}.in", idx));
+            let out_file = tests_dir.join(format!("custom_{}.out", idx));
+            if !in_file.exists() && !out_file.exists() {
+                break;
+            }
+            idx += 1;
+        }
+
+        let stem = format!("custom_{}", idx);
+        let in_path = tests_dir.join(format!("{}.in", stem));
+        let out_path = tests_dir.join(format!("{}.out", stem));
+
+        let mut in_content = input.to_string();
+        if !in_content.is_empty() && !in_content.ends_with('\n') {
+            in_content.push('\n');
+        }
+        let mut out_content = output.to_string();
+        if !out_content.is_empty() && !out_content.ends_with('\n') {
+            out_content.push('\n');
+        }
+
+        fs::write(&in_path, in_content).map_err(|e| e.to_string())?;
+        fs::write(&out_path, out_content).map_err(|e| e.to_string())?;
+
+        let mut total_tests = 0;
+        if let Some(mut m) = Self::get_manifest(workspace_dir, problem_id) {
+            let mut manifest_tests = Vec::new();
+            if let Ok(td_entries) = fs::read_dir(&tests_dir) {
+                for te in td_entries.flatten() {
+                    let path = te.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("in") {
+                        let t_stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                        let out_f = tests_dir.join(format!("{}.out", t_stem));
+                        let tag = if t_stem.starts_with("custom_") {
+                            "[TEST RĘCZNY]".to_string()
+                        } else {
+                            "[PAKIET TESTÓW]".to_string()
+                        };
+                        manifest_tests.push(ManifestTest {
+                            id: t_stem.clone(),
+                            name: format!("Test {}", t_stem),
+                            in_file: format!("{}.in", t_stem),
+                            out_file: if out_f.exists() { format!("{}.out", t_stem) } else { String::new() },
+                            tag,
+                            is_edge_case: false,
+                        });
+                    }
+                }
+            }
+            manifest_tests.sort_by(|a, b| a.id.cmp(&b.id));
+            total_tests = manifest_tests.len();
+            m.tests = manifest_tests;
+
+            let m_path = p_dir.join(".algo").join("problem.json");
+            if let Ok(m_json) = serde_json::to_string_pretty(&m) {
+                let _ = fs::write(m_path, m_json);
+            }
+        }
+
+        Ok(total_tests)
+    }
+
     pub fn ensure_problem_scripts(
         workspace_dir: &Path,
         problem_id: &str,

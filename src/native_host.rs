@@ -36,10 +36,18 @@ fn handle_native_message(msg: &Value) -> Value {
     match action {
         "start" => {
             crate::server::start_detached_daemon();
-            let is_online = ureq::get("http://127.0.0.1:8080/api/status")
-                .timeout(std::time::Duration::from_millis(400))
-                .call()
-                .is_ok();
+            let mut is_online = false;
+            for _ in 0..15 {
+                if ureq::get("http://127.0.0.1:8080/api/status")
+                    .timeout(std::time::Duration::from_millis(200))
+                    .call()
+                    .is_ok()
+                {
+                    is_online = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
             serde_json::json!({ "success": is_online, "status": if is_online { "online" } else { "starting" } })
         }
         "stop" => {
@@ -165,7 +173,8 @@ pub fn ensure_native_manifests() {
 
             let current_exe = std::env::current_exe().unwrap_or_else(|_| bin_dir.join("algodeck"));
             let wrapper_script = format!(
-                "#!/bin/sh\nexec \"{}\" native-host\n",
+                "#!/bin/sh\nif [ -z \"$XDG_RUNTIME_DIR\" ]; then export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"; fi\nif [ -z \"$DBUS_SESSION_BUS_ADDRESS\" ]; then export DBUS_SESSION_BUS_ADDRESS=\"unix:path=/run/user/$(id -u)/bus\"; fi\nexport PATH=\"$HOME/.local/bin:$PATH:/usr/local/bin:/usr/bin\"\nif [ -x \"$HOME/.local/bin/algodeck\" ]; then\n    exec \"$HOME/.local/bin/algodeck\" native-host\nelif [ -x \"{}\" ]; then\n    exec \"{}\" native-host\nelse\n    exec algodeck native-host\nfi\n",
+                current_exe.to_string_lossy(),
                 current_exe.to_string_lossy()
             );
             let _ = std::fs::write(&wrapper_path, wrapper_script);
@@ -186,11 +195,16 @@ pub fn ensure_native_manifests() {
 
             let target_dirs = [
                 home.join(".config/google-chrome/NativeMessagingHosts"),
+                home.join(".config/google-chrome-beta/NativeMessagingHosts"),
+                home.join(".config/google-chrome-unstable/NativeMessagingHosts"),
                 home.join(".config/chromium/NativeMessagingHosts"),
                 home.join(".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"),
                 home.join(".config/microsoft-edge/NativeMessagingHosts"),
+                home.join(".config/microsoft-edge-dev/NativeMessagingHosts"),
                 home.join(".config/vivaldi/NativeMessagingHosts"),
                 home.join(".config/opera/NativeMessagingHosts"),
+                home.join(".config/opera-beta/NativeMessagingHosts"),
+                home.join(".config/opera-developer/NativeMessagingHosts"),
             ];
 
             for dir in &target_dirs {

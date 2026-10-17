@@ -621,7 +621,7 @@ function renderGallery(problems) {
     card.className = `problem-card ${isActive ? "active-card" : ""}`;
     card.id = `card-prob-${pid}`;
     card.innerHTML = `
-      <div class="problem-header">
+      <div class="problem-header" title="Kliknij, aby otworzyć zadanie w VS Code i aktywować na Stream Decku">
         <span class="problem-code-badge">${escapeHtml(pid.toUpperCase())}</span>
         <span class="problem-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
         <span class="problem-tests-count" id="count-prob-${pid}">${testsCount} testów</span>
@@ -629,14 +629,47 @@ function renderGallery(problems) {
       <div class="problem-actions">
         <button class="btn-secondary btn-act-activate" title="Aktywuj i przełącz Stream Deck">Aktywuj</button>
         <button class="btn-secondary btn-act-code" title="Otwórz w edytorze">VS Code</button>
-        <button class="btn-secondary btn-act-test" title="Uruchom testy">Testy</button>
+        <button class="btn-secondary btn-act-run" title="Skompiluj i odpal w konsoli VS Code">Odpal</button>
+        <button class="btn-secondary btn-act-test" title="Uruchom testy w VS Code">Testy</button>
         <button class="btn-secondary btn-act-add-tests" title="Dodaj paczkę testów (.zip)">+ Testy (ZIP)</button>
+        <button class="btn-secondary btn-act-manual-toggle" title="Wpisz wejście i wyjście nowego testu">+ Testy</button>
         <button class="btn-act-delete" title="Usuń to zadanie">Usuń</button>
+      </div>
+      <div class="manual-test-drawer hidden">
+        <div class="manual-test-header">
+          <span class="manual-test-title">➕ Dodaj test ręczny dla zadania '${escapeHtml(pid.toUpperCase())}'</span>
+        </div>
+        <div class="manual-test-grid">
+          <div class="manual-test-col">
+            <label class="manual-test-label">Wejście testu (cin / input):</label>
+            <textarea class="manual-test-textarea manual-in" rows="3" placeholder="Wklej wejście testu..." spellcheck="false"></textarea>
+          </div>
+          <div class="manual-test-col">
+            <label class="manual-test-label">Oczekiwane wyjście (cout / output):</label>
+            <textarea class="manual-test-textarea manual-out" rows="3" placeholder="Wklej oczekiwane wyjście..." spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="manual-test-footer">
+          <button type="button" class="btn-save-manual-test btn-primary-compact">Zapisz test</button>
+          <button type="button" class="btn-cancel-manual-test btn-secondary-compact">Anuluj</button>
+        </div>
       </div>
     `;
 
+    // Kliknięcie w nagłówek zadania otwiera je w VS Code i aktywuje
+    card.querySelector(".problem-header").addEventListener("click", async () => {
+      await fetch(`${API_BASE}/api/set-active/${pid}`, { method: "POST" });
+      await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+      activeProblemId = pid;
+      activeTaskBar.classList.remove("hidden");
+      activeTaskName.textContent = `[${pid.toUpperCase()}]`;
+      showToast(`Otwarto '${pid.toUpperCase()}' w VS Code`, "info");
+      loadProblems();
+    });
+
     card.querySelector(".btn-act-activate").addEventListener("click", async () => {
       await fetch(`${API_BASE}/api/set-active/${pid}`, { method: "POST" });
+      await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
       activeProblemId = pid;
       activeTaskBar.classList.remove("hidden");
       activeTaskName.textContent = `[${pid.toUpperCase()}]`;
@@ -649,6 +682,12 @@ function renderGallery(problems) {
       showToast(`Otwarto '${pid}' w VS Code`, "info");
     });
 
+    card.querySelector(".btn-act-run").addEventListener("click", async () => {
+      showToast(`Odpalanie '${pid.toUpperCase()}' w konsoli VS Code...`, "info");
+      await fetch(`${API_BASE}/api/run-interactive/${pid}`, { method: "POST" });
+      showToast(`✓ Uruchomiono '${pid.toUpperCase()}' w terminalu VS Code!`, "success");
+    });
+
     card.querySelector(".btn-act-test").addEventListener("click", async () => {
       showToast(`Uruchamianie testów dla '${pid}'...`, "info");
       const res = await fetch(`${API_BASE}/api/run-all/${pid}`, { method: "POST" });
@@ -657,6 +696,67 @@ function renderGallery(problems) {
         showToast(`Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, "success");
       } else {
         showToast(`Wykryto błędy w testach (${data.summary || "WA"})`, "error");
+      }
+    });
+
+    // Szuflada ręcznego dodawania testu
+    const drawer = card.querySelector(".manual-test-drawer");
+    const toggleBtn = card.querySelector(".btn-act-manual-toggle");
+    const inputEl = card.querySelector(".manual-in");
+    const outputEl = card.querySelector(".manual-out");
+    const btnSave = card.querySelector(".btn-save-manual-test");
+    const btnCancel = card.querySelector(".btn-cancel-manual-test");
+
+    toggleBtn.addEventListener("click", () => {
+      const isClosed = drawer.classList.contains("hidden");
+      if (isClosed) {
+        drawer.classList.remove("hidden");
+        toggleBtn.classList.add("active");
+        inputEl.focus();
+      } else {
+        drawer.classList.add("hidden");
+        toggleBtn.classList.remove("active");
+      }
+    });
+
+    btnCancel.addEventListener("click", () => {
+      drawer.classList.add("hidden");
+      toggleBtn.classList.remove("active");
+      inputEl.value = "";
+      outputEl.value = "";
+    });
+
+    btnSave.addEventListener("click", async () => {
+      const inVal = inputEl.value;
+      const outVal = outputEl.value;
+      if (!inVal.trim() && !outVal.trim()) {
+        showToast("Wpisz wejście lub wyjście testu!", "error");
+        return;
+      }
+      btnSave.disabled = true;
+      btnSave.textContent = "Zapisywanie...";
+      try {
+        const res = await fetch(`${API_BASE}/api/problems/${pid}/add-manual-test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: inVal, output: outVal })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast(`✓ Dodano test ręczny (łącznie: ${data.total_tests})!`, "success");
+          drawer.classList.add("hidden");
+          toggleBtn.classList.remove("active");
+          inputEl.value = "";
+          outputEl.value = "";
+          loadProblems();
+        } else {
+          showToast(data.detail || data.error || "Błąd zapisu testu!", "error");
+        }
+      } catch (err) {
+        showToast("Błąd połączenia z serwerem!", "error");
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = "Zapisz test";
       }
     });
 

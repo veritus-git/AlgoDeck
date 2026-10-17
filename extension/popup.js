@@ -980,17 +980,52 @@ function renderTasks(problems) {
     const card = document.createElement("div");
     card.className = `task-card ${isActive ? "active-task-card" : ""}`;
     card.innerHTML = `
-      <div class="task-card-header">
+      <div class="task-card-header" title="Kliknij, aby otworzyć zadanie w VS Code i aktywować na Stream Decku">
         <span class="task-code-badge">${escapeHtml(pid.toUpperCase())}</span>
         <span class="task-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
         <span class="task-meta">${testsCount} testów</span>
       </div>
       <div class="task-actions">
         <button type="button" class="btn-task-action btn-task-activate" title="Przełącz Stream Deck i otwórz w VS Code">Aktywuj</button>
+        <button type="button" class="btn-task-action btn-task-run" title="Skompiluj i odpal program w terminalu VS Code">Odpal</button>
+        <button type="button" class="btn-task-action btn-task-test" title="Kompiluj i przetestuj w VS Code">Testuj</button>
         <button type="button" class="btn-task-action btn-task-add-tests" title="Wgraj paczkę testów .zip">+ Testy (ZIP)</button>
+        <button type="button" class="btn-task-action btn-task-manual-toggle" title="Wpisz wejście i wyjście nowego testu">+ Testy</button>
         <button type="button" class="btn-task-action btn-task-delete" title="Usuń zadanie">Usuń</button>
       </div>
+      <div class="manual-test-drawer hidden">
+        <div class="manual-test-header">
+          <span class="manual-test-title">➕ Dodaj test ręczny dla zadania '${escapeHtml(pid.toUpperCase())}'</span>
+        </div>
+        <div class="manual-test-grid">
+          <div class="manual-test-col">
+            <label class="manual-test-label">Wejście testu (cin / input):</label>
+            <textarea class="manual-test-textarea manual-in" rows="3" placeholder="Wklej wejście testu..." spellcheck="false"></textarea>
+          </div>
+          <div class="manual-test-col">
+            <label class="manual-test-label">Oczekiwane wyjście (cout / output):</label>
+            <textarea class="manual-test-textarea manual-out" rows="3" placeholder="Wklej oczekiwane wyjście..." spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="manual-test-footer">
+          <button type="button" class="btn-save-manual-test btn-primary-compact">Zapisz test</button>
+          <button type="button" class="btn-cancel-manual-test btn-secondary-compact">Anuluj</button>
+        </div>
+      </div>
     `;
+
+    // Kliknięcie w nagłówek (nazwę zadania) otwiera w VS Code i aktywuje zadanie
+    card.querySelector(".task-card-header").addEventListener("click", async () => {
+      try {
+        await fetch(`${API_BASE}/api/set-active/${pid}`, { method: "POST" });
+        await fetch(`${API_BASE}/api/open-vscode/${pid}`, { method: "POST" });
+        activeProblemId = pid;
+        showToast(`Otwarto '${pid.toUpperCase()}' w VS Code!`, false);
+        loadTasks();
+      } catch (e) {
+        showToast("Błąd otwierania zadania w VS Code", true);
+      }
+    });
 
     // Aktywuj zadanie (Stream Deck + VS Code)
     card.querySelector(".btn-task-activate").addEventListener("click", async () => {
@@ -1002,6 +1037,94 @@ function renderTasks(problems) {
         loadTasks();
       } catch (e) {
         showToast("Błąd aktywacji zadania", true);
+      }
+    });
+
+    // Odpal interaktywnie w terminalu VS Code
+    card.querySelector(".btn-task-run").addEventListener("click", async () => {
+      try {
+        showToast(`Odpalanie '${pid.toUpperCase()}' w konsoli VS Code...`, false);
+        await fetch(`${API_BASE}/api/run-interactive/${pid}`, { method: "POST" });
+        showToast(`✓ Uruchomiono '${pid.toUpperCase()}' w terminalu VS Code!`, false);
+      } catch (e) {
+        showToast("Błąd uruchamiania w konsoli VS Code", true);
+      }
+    });
+
+    // Testuj w VS Code
+    card.querySelector(".btn-task-test").addEventListener("click", async () => {
+      try {
+        showToast(`Testowanie '${pid.toUpperCase()}' w VS Code...`, false);
+        const res = await fetch(`${API_BASE}/api/run-all/${pid}`, { method: "POST" });
+        const data = await res.json();
+        if (data && data.all_passed) {
+          showToast(`✓ Wszystkie testy zaliczone (${data.total_time_ms} ms)!`, false);
+        } else {
+          showToast(`Wykryto błędy w testach (${data?.summary || "WA"})`, true);
+        }
+      } catch (e) {
+        showToast("Błąd uruchamiania testów", true);
+      }
+    });
+
+    // Szuflada dodawania testów ręcznie
+    const drawer = card.querySelector(".manual-test-drawer");
+    const toggleBtn = card.querySelector(".btn-task-manual-toggle");
+    const inputEl = card.querySelector(".manual-in");
+    const outputEl = card.querySelector(".manual-out");
+    const btnSave = card.querySelector(".btn-save-manual-test");
+    const btnCancel = card.querySelector(".btn-cancel-manual-test");
+
+    toggleBtn.addEventListener("click", () => {
+      const isClosed = drawer.classList.contains("hidden");
+      if (isClosed) {
+        drawer.classList.remove("hidden");
+        toggleBtn.classList.add("active");
+        inputEl.focus();
+      } else {
+        drawer.classList.add("hidden");
+        toggleBtn.classList.remove("active");
+      }
+    });
+
+    btnCancel.addEventListener("click", () => {
+      drawer.classList.add("hidden");
+      toggleBtn.classList.remove("active");
+      inputEl.value = "";
+      outputEl.value = "";
+    });
+
+    btnSave.addEventListener("click", async () => {
+      const inVal = inputEl.value;
+      const outVal = outputEl.value;
+      if (!inVal.trim() && !outVal.trim()) {
+        showToast("Wpisz wejście lub wyjście testu!", true);
+        return;
+      }
+      btnSave.disabled = true;
+      btnSave.textContent = "Zapisywanie...";
+      try {
+        const res = await fetch(`${API_BASE}/api/problems/${pid}/add-manual-test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: inVal, output: outVal })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast(`✓ Dodano test ręczny (łącznie: ${data.total_tests})!`, false);
+          drawer.classList.add("hidden");
+          toggleBtn.classList.remove("active");
+          inputEl.value = "";
+          outputEl.value = "";
+          loadTasks();
+        } else {
+          showToast(data.detail || data.error || "Błąd zapisu testu!", true);
+        }
+      } catch (err) {
+        showToast("Błąd połączenia z serwerem!", true);
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = "Zapisz test";
       }
     });
 
