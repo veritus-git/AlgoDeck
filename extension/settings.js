@@ -62,7 +62,11 @@ const elements = {
   notifyTestResults: document.getElementById("cfg-notify-test-results"),
   notifyDaemonStatus: document.getElementById("cfg-notify-daemon-status"),
   notifyNewTaskDownload: document.getElementById("cfg-notify-new-task-download"),
-  autostart: document.getElementById("cfg-autostart")
+  autostart: document.getElementById("cfg-autostart"),
+
+  // Download Registry
+  btnClearDownloadRegistry: document.getElementById("btn-clear-download-registry"),
+  registryCountLabel: document.getElementById("registry-count-label")
 };
 
 let currentSettings = {
@@ -132,6 +136,18 @@ function updateStreamDeckStatus(connected) {
 // 2. Load & Apply Settings
 // ==============================================================================
 
+async function updateRegistryCount() {
+  if (!elements.registryCountLabel) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/registered-downloads`, { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      const count = Object.keys(data.entries || {}).length;
+      elements.registryCountLabel.textContent = count;
+    }
+  } catch (_) {}
+}
+
 async function loadSettings() {
   const isOnline = await checkConnection();
 
@@ -146,6 +162,7 @@ async function loadSettings() {
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
           chrome.storage.local.set({ algodeck_settings: currentSettings });
         }
+        await updateRegistryCount();
         await refreshStreamDeckVirtualGrid();
         return;
       }
@@ -498,12 +515,65 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.saveStatusMsg.textContent = "Weryfikacja komunikacji z silnikiem...";
     elements.saveStatusMsg.className = "save-feedback-text";
     const ok = await checkConnection();
+    if (ok) await updateRegistryCount();
     elements.saveStatusMsg.textContent = ok 
       ? "✓ Pomyślnie połączono z demonem AlgoDeck na porcie 8080!" 
       : "Brak odpowiedzi silnika. Upewnij się, że 'algodeck start' został uruchomiony.";
     elements.saveStatusMsg.className = ok ? "save-feedback-text success" : "save-feedback-text error";
     setTimeout(() => { elements.saveStatusMsg.textContent = ""; }, 3500);
   });
+
+  // Czyszczenie rejestru pobranych zadań PDF
+  if (elements.btnClearDownloadRegistry) {
+    elements.btnClearDownloadRegistry.addEventListener("click", async () => {
+      const confirmed = confirm(
+        "Czy na pewno chcesz wyczyścić pamięć pobranych zadań PDF?\n\nSpowoduje to wyzerowanie rejestru pobrań w AlgoDeck i usunięcie plików ze stagingu. Jeśli pobierzesz zadanie ponownie, silnik potraktuje je jak nowe."
+      );
+      if (!confirmed) return;
+
+      const btn = elements.btnClearDownloadRegistry;
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = "⏳ Czyszczenie...";
+
+      try {
+        const res = await fetch(`${API_BASE}/api/clear-download-registry`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        });
+
+        if (res.ok) {
+          if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+            await chrome.storage.local.remove([
+              "initial_ignored_files",
+              "initial_ignored_ids",
+              "detected_task",
+              "last_downloaded_pdf",
+              "cleared_pdf_name",
+              "dismiss_oneclick"
+            ]);
+          }
+
+          if (elements.registryCountLabel) {
+            elements.registryCountLabel.textContent = "0";
+          }
+
+          elements.saveStatusMsg.textContent = "✓ Rejestr pobrań i pamięć ignorowania zostały pomyślnie wyczyszczone.";
+          elements.saveStatusMsg.className = "save-feedback-text success";
+          setTimeout(() => { elements.saveStatusMsg.textContent = ""; }, 4000);
+        } else {
+          throw new Error("HTTP error " + res.status);
+        }
+      } catch (err) {
+        elements.saveStatusMsg.textContent = "Błąd czyszczenia rejestru: brak połączenia z demonem AlgoDeck.";
+        elements.saveStatusMsg.className = "save-feedback-text error";
+        setTimeout(() => { elements.saveStatusMsg.textContent = ""; }, 4000);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    });
+  }
 
   // Reset ścieżki workspace
   elements.btnResetWs.addEventListener("click", () => {

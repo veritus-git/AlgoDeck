@@ -456,6 +456,25 @@
             </div>
           </div>
 
+          <div class="divider"></div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-title">Pamięć zarejestrowanych zadań PDF (Baza ignorowania pobrań)</span>
+              <p class="setting-desc">
+                AlgoDeck zapamiętuje zarejestrowane treści zadań (.pdf), aby nie wysyłać powtórnych powiadomień ani popupów o tych samych plikach. Jeśli wyczyścisz folder pobranych lub historię przeglądarki i chcesz, aby zadania znów były traktowane jak świeżo pobrane, wyczyść ten rejestr.
+              </p>
+              <div id="registry-status-info" style="margin-top: 6px; font-size: 12px; color: var(--text-muted);">
+                Zarejestrowane pliki w bazie: <strong id="registry-count-label" class="code-font" style="color: var(--accent-cyan);">0</strong>
+              </div>
+            </div>
+            <div class="setting-control">
+              <button type="button" id="btn-clear-download-registry" class="btn-subtle-danger" title="Wyczyść bazę pobranych PDF i zresetuj ignorowanie">
+                🗑️ Wyczyść rejestr pobrań
+              </button>
+            </div>
+          </div>
+
           <div class="doc-callout">
             <span class="callout-icon">🛡️</span>
             <div class="callout-content">

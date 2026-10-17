@@ -287,6 +287,18 @@ impl InitialDownloads {
         snapshot
     }
 
+    pub fn clear(&mut self) -> Result<(), std::io::Error> {
+        self.ignored_files.clear();
+        let path = Self::snapshot_path();
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(content) = serde_json::to_string_pretty(self) {
+            let _ = fs::write(path, content);
+        }
+        Ok(())
+    }
+
     pub fn is_ignored(&self, file_path: &std::path::Path) -> bool {
         let filename = file_path
             .file_name()
@@ -641,6 +653,15 @@ impl DownloadedPdfRegistry {
         let content = serde_json::to_string_pretty(self)?;
         fs::write(path, content)?;
         Ok(())
+    }
+
+    pub fn clear(&mut self) -> Result<(), std::io::Error> {
+        self.entries.clear();
+        self.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.save()
     }
 
     pub fn check_and_register_if_new(&mut self, file_path: &Path) -> bool {

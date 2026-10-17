@@ -106,6 +106,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/stage-path", post(stage_by_path))
         .route("/register-download", post(register_download))
         .route("/registered-downloads", get(get_registered_downloads))
+        .route("/clear-download-registry", post(clear_download_registry))
         .route("/register-download-dirs", post(register_download_dirs))
         .route("/stage-refresh", post(stage_refresh))
         .route("/upload-staging", post(stage_file))
@@ -1326,6 +1327,28 @@ async fn stage_by_path(
 async fn get_registered_downloads() -> Json<serde_json::Value> {
     let reg = crate::config::DownloadedPdfRegistry::load_or_init();
     Json(serde_json::to_value(&reg).unwrap_or_else(|_| serde_json::json!({ "version": 1, "entries": {} })))
+}
+
+async fn clear_download_registry() -> Json<serde_json::Value> {
+    let mut reg = crate::config::DownloadedPdfRegistry::load_or_init();
+    let _ = reg.clear();
+
+    let mut init = crate::config::InitialDownloads::load_or_init();
+    let _ = init.clear();
+
+    let stage_dir = AppSettings::staging_dir();
+    if stage_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&stage_dir) {
+            for e in entries.flatten() {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "success": true,
+        "message": "Pomyślnie wyczyszczono rejestr pobranych zadań PDF i pamięć ignorowania."
+    }))
 }
 
 #[derive(Debug, Deserialize)]

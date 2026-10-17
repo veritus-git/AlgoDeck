@@ -503,6 +503,12 @@ fn test_download_registry_deduplication() {
     std::fs::write(&pdf_b, b"%PDF-1.4 DIFFERENT content for problem B").unwrap();
     assert!(reg.check_and_register_if_new(&pdf_b), "Nowe zadanie z innym hashem musi zostać zarejestrowane");
 
+    // 5. Test czyszczenia rejestru: po wyczyszczeniu wpisów pliki znów mogą być traktowane jak świeże
+    assert_eq!(reg.entries.len(), 2);
+    assert!(reg.clear().is_ok());
+    assert_eq!(reg.entries.len(), 0);
+    assert!(reg.check_and_register_if_new(&pdf_a), "Po wyczyszczeniu rejestru plik A znów musi być traktowany jako nowy");
+
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
 
