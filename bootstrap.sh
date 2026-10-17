@@ -59,19 +59,19 @@ if [ "$HAS_SUDO" = true ]; then
         sudo apt-get update -qq 2>/dev/null || true
         sudo apt-get install -y -qq \
             build-essential gdb clang pkg-config libhidapi-dev libusb-1.0-0-dev libudev-dev \
-            curl wget git unzip tar 2>/dev/null || true
+            curl wget git unzip tar wmctrl xdotool 2>/dev/null || true
     elif command -v dnf &> /dev/null; then
         sudo dnf install -y -q \
             gcc gcc-c++ gdb clang pkgconfig hidapi-devel libusb1-devel systemd-devel \
-            curl wget git unzip tar 2>/dev/null || true
+            curl wget git unzip tar wmctrl xdotool 2>/dev/null || true
     elif command -v pacman &> /dev/null; then
         sudo pacman -S --needed --noconfirm \
             base-devel gdb clang pkgconf hidapi libusb systemd-libs \
-            curl wget git unzip tar 2>/dev/null || true
+            curl wget git unzip tar wmctrl xdotool 2>/dev/null || true
     elif command -v zypper &> /dev/null; then
         sudo zypper install -y \
             gcc-c++ gdb clang pkg-config hidapi-devel libusb-1_0-devel libudev-devel \
-            curl wget git unzip tar 2>/dev/null || true
+            curl wget git unzip tar wmctrl xdotool 2>/dev/null || true
     fi
 fi
 
@@ -399,12 +399,28 @@ rm -rf "$SHARE_DIR/staging"/* 2>/dev/null || true
 mkdir -p "$SHARE_DIR/staging" 2>/dev/null || true
 
 # Wyłączenie KDE Plasma Focus Stealing Prevention (zapobiega blokowaniu focusu okien przez KWin)
-if command -v kwriteconfig6 &>/dev/null; then
-    kwriteconfig6 --file kwinrc --group Windows --key FocusStealingPreventionSeverity 0 2>/dev/null || true
+for tool in kwriteconfig6 kwriteconfig5; do
+    if command -v "$tool" &>/dev/null; then
+        "$tool" --file kwinrc --group Windows --key FocusStealingPreventionLevel 0 2>/dev/null || true
+        "$tool" --file kwinrc --group Windows --key FocusStealingPreventionSeverity 0 2>/dev/null || true
+    fi
+done
+KWINRC="$HOME/.config/kwinrc"
+if [ -f "$KWINRC" ]; then
+    if grep -q "\[Windows\]" "$KWINRC"; then
+        sed -i -E 's/FocusStealingPreventionLevel\s*=\s*[0-9]+/FocusStealingPreventionLevel=0/g' "$KWINRC" 2>/dev/null || true
+        sed -i -E 's/FocusStealingPreventionSeverity\s*=\s*[0-9]+/FocusStealingPreventionSeverity=0/g' "$KWINRC" 2>/dev/null || true
+        grep -q "FocusStealingPreventionLevel=0" "$KWINRC" || sed -i '/\[Windows\]/a FocusStealingPreventionLevel=0' "$KWINRC" 2>/dev/null || true
+    else
+        printf "\n[Windows]\nFocusStealingPreventionLevel=0\nFocusStealingPreventionSeverity=0\n" >> "$KWINRC"
+    fi
 fi
-if command -v kwriteconfig5 &>/dev/null; then
-    kwriteconfig5 --file kwinrc --group Windows --key FocusStealingPreventionSeverity 0 2>/dev/null || true
-fi
+for q in qdbus6 qdbus-qt6 qdbus; do
+    if command -v "$q" &>/dev/null; then
+        "$q" org.kde.KWin /KWin org.kde.KWin.reconfigure 2>/dev/null || true
+        break
+    fi
+done
 if command -v dbus-send &>/dev/null; then
     dbus-send --session --dest=org.kde.KWin /KWin org.kde.KWin.reconfigure 2>/dev/null || true
 fi

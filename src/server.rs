@@ -466,24 +466,57 @@ fn ensure_kde_focus_stealing_disabled() {
         return;
     }
 
-    if let Some(home) = dirs::home_dir() {
-        let kwinrc = home.join(".config").join("kwinrc");
-        if kwinrc.exists() {
-            if let Ok(content) = fs::read_to_string(&kwinrc) {
-                if !content.contains("FocusStealingPreventionSeverity=0") {
-                    let _ = std::process::Command::new("kwriteconfig6")
-                        .args(["--file", "kwinrc", "--group", "Windows", "--key", "FocusStealingPreventionSeverity", "0"])
-                        .output();
-                    let _ = std::process::Command::new("kwriteconfig5")
-                        .args(["--file", "kwinrc", "--group", "Windows", "--key", "FocusStealingPreventionSeverity", "0"])
-                        .output();
-                    let _ = std::process::Command::new("dbus-send")
-                        .args(["--session", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"])
-                        .output();
-                }
+    // 1. Zastosuj kwriteconfig6 / kwriteconfig5 (dla KDE Plasma 6 i 5)
+    for tool in ["kwriteconfig6", "kwriteconfig5"] {
+        if let Some(kwrite) = find_linux_tool_bin(tool) {
+            for key in ["FocusStealingPreventionLevel", "FocusStealingPreventionSeverity"] {
+                let mut cmd = std::process::Command::new(&kwrite);
+                configure_cmd_env(&mut cmd);
+                let _ = cmd.args(["--file", "kwinrc", "--group", "Windows", "--key", key, "0"]).output();
             }
         }
     }
+
+    // 2. Bezpośrednia weryfikacja/edycja ~/.config/kwinrc na wypadek braku kwriteconfig w PATH
+    if let Some(home) = dirs::home_dir() {
+        let kwinrc_path = home.join(".config").join("kwinrc");
+        let mut modified = false;
+        let mut content = fs::read_to_string(&kwinrc_path).unwrap_or_default();
+        for key in ["FocusStealingPreventionLevel", "FocusStealingPreventionSeverity"] {
+            let re_pattern = format!(r"{}\s*=\s*\d+", key);
+            if let Ok(re) = regex::Regex::new(&re_pattern) {
+                if re.is_match(&content) {
+                    let new_content = re.replace_all(&content, format!("{}=0", key).as_str()).to_string();
+                    if new_content != content {
+                        content = new_content;
+                        modified = true;
+                    }
+                } else if content.contains("[Windows]") {
+                    content = content.replace("[Windows]", &format!("[Windows]\n{}=0", key));
+                    modified = true;
+                } else if !content.is_empty() {
+                    content.push_str(&format!("\n[Windows]\n{}=0\n", key));
+                    modified = true;
+                }
+            }
+        }
+        if modified {
+            let _ = fs::write(&kwinrc_path, &content);
+        }
+    }
+
+    // 3. Rozkaż KWin przeładować konfigurację okien
+    for q in ["qdbus6", "qdbus-qt6", "qdbus", "qdbus-qt5"] {
+        if let Some(q_bin) = find_linux_tool_bin(q) {
+            let mut q_cmd = std::process::Command::new(&q_bin);
+            configure_cmd_env(&mut q_cmd);
+            let _ = q_cmd.args(["org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"]).output();
+            break;
+        }
+    }
+    let mut reconf = std::process::Command::new("dbus-send");
+    configure_cmd_env(&mut reconf);
+    let _ = reconf.args(["--session", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"]).output();
 }
 
 #[cfg(target_os = "linux")]
@@ -540,7 +573,7 @@ fn find_linux_tool_bin(bin: &str) -> Option<PathBuf> {
 pub fn activate_linux_window(target_classes: &[&str]) {
     ensure_kde_focus_stealing_disabled();
 
-    // 1. KWin Scripting via DBus (Wayland & X11 for KDE Plasma)
+    // 1. KWin Scripting via DBus (dla KDE Plasma 6 & Plasma 5 na Waylandzie oraz X11)
     let mut js_conditions = Vec::new();
     for cls in target_classes {
         js_conditions.push(format!("cls.indexOf(\"{}\") !== -1", cls.to_lowercase()));
@@ -552,11 +585,22 @@ pub fn activate_linux_window(target_classes: &[&str]) {
 var list = workspace.windowList ? workspace.windowList() : (workspace.clientList ? workspace.clientList() : []);
 for (var i = 0; i < list.length; i++) {{
     var c = list[i];
-    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.caption || "")).toLowerCase();
+    var cls = ((c.resourceClass || "") + " " + (c.resourceName || "") + " " + (c.caption || "") + " " + (c.desktopFileName || "")).toLowerCase();
     if ({condition}) {{
         c.minimized = false;
         c.demandsAttention = false;
-        workspace.activeWindow = c;
+        if (workspace.currentDesktop) {{
+            if (c.desktops && c.desktops.length > 0) {{
+                workspace.currentDesktop = c.desktops[0];
+            }} else if (c.desktop) {{
+                workspace.currentDesktop = c.desktop;
+            }}
+        }}
+        if ("activeWindow" in workspace) {{
+            workspace.activeWindow = c;
+        }} else if ("activeClient" in workspace) {{
+            workspace.activeClient = c;
+        }}
         if (c.activateWindow) c.activateWindow();
         break;
     }}
@@ -568,50 +612,178 @@ for (var i = 0; i < list.length; i++) {{
     let tmp_script = std::env::temp_dir().join(format!("kwin_focus_{}.js", std::process::id()));
     if fs::write(&tmp_script, &kwin_script).is_ok() {
         let script_path = tmp_script.to_string_lossy().to_string();
-        let mut dbus_cmd = std::process::Command::new("dbus-send");
-        configure_cmd_env(&mut dbus_cmd);
-        let load_res = dbus_cmd
-            .args([
-                "--session",
-                "--print-reply=literal",
-                "--dest=org.kde.KWin",
-                "/Scripting",
-                "org.kde.kwin.Scripting.loadScript",
-                &format!("string:{}", script_path),
-            ])
-            .output();
+        let plugin_name = format!("algodeck_focus_{}", std::process::id());
 
-        if let Ok(out) = load_res {
-            let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if let Some(script_id) = reply.split_whitespace().last() {
-                if let Ok(num) = script_id.parse::<i32>() {
-                    let obj_path = format!("/Scripting/Script{}", num);
-                    let mut run_cmd = std::process::Command::new("dbus-send");
-                    configure_cmd_env(&mut run_cmd);
-                    let _ = run_cmd
-                        .args([
-                            "--session",
-                            "--dest=org.kde.KWin",
-                            &obj_path,
-                            "org.kde.kwin.Script.run",
-                        ])
-                        .output();
+        let mut obj_path = String::new();
 
-                    let mut stop_cmd = std::process::Command::new("dbus-send");
-                    configure_cmd_env(&mut stop_cmd);
-                    let _ = stop_cmd
-                        .args([
-                            "--session",
-                            "--dest=org.kde.KWin",
-                            &obj_path,
-                            "org.kde.kwin.Script.stop",
-                        ])
-                        .output();
+        // 1a. Próba załadowania skryptu przez narzędzia qdbus (wspierające przeciążenia metod C++ w Qt/KWin)
+        for q in ["qdbus6", "qdbus-qt6", "qdbus", "qdbus-qt5"] {
+            if let Some(q_bin) = find_linux_tool_bin(q) {
+                let mut q_cmd = std::process::Command::new(&q_bin);
+                configure_cmd_env(&mut q_cmd);
+                if let Ok(out) = q_cmd.args(["org.kde.KWin", "/Scripting", "loadScript", &script_path, &plugin_name]).output() {
+                    let out_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !out_s.is_empty() && !out_s.contains("Error") {
+                        if out_s.starts_with('/') {
+                            obj_path = out_s;
+                        } else if let Ok(num) = out_s.parse::<i32>() {
+                            obj_path = format!("/Scripting/Script{}", num);
+                        }
+                        break;
+                    }
+                }
+                let mut q_cmd1 = std::process::Command::new(&q_bin);
+                configure_cmd_env(&mut q_cmd1);
+                if let Ok(out) = q_cmd1.args(["org.kde.KWin", "/Scripting", "loadScript", &script_path]).output() {
+                    let out_s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !out_s.is_empty() && !out_s.contains("Error") {
+                        if out_s.starts_with('/') {
+                            obj_path = out_s;
+                        } else if let Ok(num) = out_s.parse::<i32>() {
+                            obj_path = format!("/Scripting/Script{}", num);
+                        }
+                        break;
+                    }
                 }
             }
         }
+
+        // 1b. Fallback do dbus-send (KDE 6 wymaga 2 argumentów string:path string:name, KDE 5 często 1 argumentu)
+        if obj_path.is_empty() {
+            let mut dbus_cmd = std::process::Command::new("dbus-send");
+            configure_cmd_env(&mut dbus_cmd);
+            let mut load_res = dbus_cmd
+                .args([
+                    "--session",
+                    "--print-reply",
+                    "--dest=org.kde.KWin",
+                    "/Scripting",
+                    "org.kde.kwin.Scripting.loadScript",
+                    &format!("string:{}", script_path),
+                    &format!("string:{}", plugin_name),
+                ])
+                .output();
+
+            if load_res.as_ref().map(|o| !o.status.success()).unwrap_or(true) {
+                let mut dbus_cmd_1 = std::process::Command::new("dbus-send");
+                configure_cmd_env(&mut dbus_cmd_1);
+                load_res = dbus_cmd_1
+                    .args([
+                        "--session",
+                        "--print-reply",
+                        "--dest=org.kde.KWin",
+                        "/Scripting",
+                        "org.kde.kwin.Scripting.loadScript",
+                        &format!("string:{}", script_path),
+                    ])
+                    .output();
+            }
+
+            if let Ok(out) = load_res {
+                let out_str = String::from_utf8_lossy(&out.stdout);
+                if let Some(idx) = out_str.find("/Scripting/Script") {
+                    obj_path = out_str[idx..].split_whitespace().next().unwrap_or("").trim_matches('"').to_string();
+                } else if let Some(last_word) = out_str.split_whitespace().last() {
+                    let digits: String = last_word.chars().filter(|c| c.is_ascii_digit()).collect();
+                    if !digits.is_empty() {
+                        obj_path = format!("/Scripting/Script{}", digits);
+                    }
+                }
+            }
+        }
+
+        if !obj_path.is_empty() {
+            for q in ["qdbus6", "qdbus-qt6", "qdbus", "qdbus-qt5"] {
+                if let Some(q_bin) = find_linux_tool_bin(q) {
+                    let mut q_cmd = std::process::Command::new(&q_bin);
+                    configure_cmd_env(&mut q_cmd);
+                    let _ = q_cmd.args(["org.kde.KWin", &obj_path, "run"]).output();
+                    break;
+                }
+            }
+            let mut run_cmd = std::process::Command::new("dbus-send");
+            configure_cmd_env(&mut run_cmd);
+            let _ = run_cmd
+                .args([
+                    "--session",
+                    "--dest=org.kde.KWin",
+                    &obj_path,
+                    "org.kde.kwin.Script.run",
+                ])
+                .output();
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let mut stop_cmd = std::process::Command::new("dbus-send");
+            configure_cmd_env(&mut stop_cmd);
+            let _ = stop_cmd
+                .args([
+                    "--session",
+                    "--dest=org.kde.KWin",
+                    &obj_path,
+                    "org.kde.kwin.Script.stop",
+                ])
+                .output();
+
+            let mut unload_cmd = std::process::Command::new("dbus-send");
+            configure_cmd_env(&mut unload_cmd);
+            let _ = unload_cmd
+                .args([
+                    "--session",
+                    "--dest=org.kde.KWin",
+                    "/Scripting",
+                    "org.kde.kwin.Scripting.unloadScript",
+                    &format!("string:{}", plugin_name),
+                ])
+                .output();
+        }
         let _ = fs::remove_file(tmp_script);
     }
+
+    // 2. kdotool (Natywne narzędzie Wayland dla KDE Plasma)
+    if let Some(kdo) = find_linux_tool_bin("kdotool") {
+        for cls in target_classes {
+            let mut search_cmd = std::process::Command::new(&kdo);
+            configure_cmd_env(&mut search_cmd);
+            if let Ok(out) = search_cmd.args(["search", "--class", cls]).output() {
+                let out_str = String::from_utf8_lossy(&out.stdout);
+                for line in out_str.lines() {
+                    let wid = line.trim();
+                    if !wid.is_empty() {
+                        let mut act_cmd = std::process::Command::new(&kdo);
+                        configure_cmd_env(&mut act_cmd);
+                        let _ = act_cmd.args(["windowactivate", wid]).output();
+
+                        let mut raise_cmd = std::process::Command::new(&kdo);
+                        configure_cmd_env(&mut raise_cmd);
+                        let _ = raise_cmd.args(["windowraise", wid]).output();
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Aktywacja okna oczekującego uwagi w KDE (Global Accel: "Activate Window Demanding Attention")
+    // Gdyby KWin przeniósł okno w stan demands_attention, ten wbudowany skrót KWin natychmiast
+    // wynosi je na sam wierzch!
+    for q in ["qdbus6", "qdbus-qt6", "qdbus", "qdbus-qt5"] {
+        if let Some(q_bin) = find_linux_tool_bin(q) {
+            let mut q_cmd = std::process::Command::new(&q_bin);
+            configure_cmd_env(&mut q_cmd);
+            let _ = q_cmd.args(["org.kde.kglobalaccel", "/component/kwin", "invokeShortcut", "Activate Window Demanding Attention"]).output();
+            break;
+        }
+    }
+    let mut dbus_accel = std::process::Command::new("dbus-send");
+    configure_cmd_env(&mut dbus_accel);
+    let _ = dbus_accel.args([
+        "--session",
+        "--dest=org.kde.kglobalaccel",
+        "--type=method_call",
+        "/component/kwin",
+        "org.kde.kglobalaccel.Component.invokeShortcut",
+        "string:Activate Window Demanding Attention",
+    ]).output();
 
     // 2. Cinnamon Desktop (Muffin) Window Manager via DBus Eval
     let cin_conditions: Vec<String> = target_classes
