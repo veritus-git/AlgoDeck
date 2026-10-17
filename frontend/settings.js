@@ -550,6 +550,7 @@ document.addEventListener("DOMContentLoaded", () => {
               "detected_task",
               "last_downloaded_pdf",
               "cleared_pdf_name",
+              "dismissed_pdf",
               "dismiss_oneclick"
             ]);
           }

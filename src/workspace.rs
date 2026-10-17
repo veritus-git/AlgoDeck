@@ -489,7 +489,7 @@ send_notify() {{
             return 0
         fi
     fi
-    notify-send -a "AlgoDeck" -t 4000 "$@" 2>/dev/null || true
+    notify-send -a "AlgoDeck" -u normal -t 4000 "$@" 2>/dev/null || true
 }}
 
 pad_left() {{
@@ -547,7 +547,7 @@ if ! g++ -O3 -std=c++20 "${{PROB}}.cpp" -o ".algo/${{PROB}}" 2>.algo/compile.log
     echo -e "${{C_RED}}"
     cat .algo/compile.log
     echo -e "${{C_RESET}}"
-    send_notify -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ Błąd kompilacji!"
+    send_notify "AlgoDeck (${{PROB_UPPER}})" "❌ Błąd kompilacji!"
     [ "$WAIT_AT_END" = true ] && read -p "Naciśnij Enter, aby zamknąć..."
     exit 1
 fi
@@ -673,13 +673,13 @@ elif [ "$PASSED" -eq 0 ]; then
     echo -ne "${{C_RED}}${{C_BOLD}}"
     box_line "  ❌ 0% TESTÓW ZALICZONYCH (0/$TOTAL) — WSZYSTKIE TESTY OBLANE!"
     echo -e "${{C_RED}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
-    send_notify -u critical "AlgoDeck (${{PROB_UPPER}})" "❌ 0% ZALICZONE (0/$TOTAL)"
+    send_notify "AlgoDeck (${{PROB_UPPER}})" "❌ 0% ZALICZONE (0/$TOTAL)"
 else
     echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_TOP}}${{C_RESET}}"
     echo -ne "${{C_YELLOW}}${{C_BOLD}}"
     box_line "  ⚠️  $PCT% TESTÓW ZALICZONYCH ($PASSED/$TOTAL) — WYKRYTO BŁĘDY ($FAILED OBLANE)"
     echo -e "${{C_YELLOW}}${{C_BOLD}}${{BOX_BOT}}${{C_RESET}}"
-    send_notify -u critical "AlgoDeck (${{PROB_UPPER}})" "⚠️  $PCT% ZALICZONE ($PASSED/$TOTAL)"
+    send_notify "AlgoDeck (${{PROB_UPPER}})" "⚠️  $PCT% ZALICZONE ($PASSED/$TOTAL)"
 fi
 
 if [ "${{#ERRORS[@]}}" -gt 0 ] && [ "$VERBOSE" = false ]; then

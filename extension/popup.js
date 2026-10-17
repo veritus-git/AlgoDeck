@@ -143,8 +143,13 @@ function setupDetectedHandlers() {
   // Przełączamy popup z widoku 1-Klik na widok główny (view-main) z gotową zieloną pastylką pliku!
   if (btnDetClose) {
     btnDetClose.addEventListener("click", async () => {
+      let currentPdf = "";
+      const detFilenameText = document.getElementById("det-filename-text");
+      if (detFilenameText && detFilenameText.textContent) {
+        currentPdf = detFilenameText.textContent.trim();
+      }
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        await chrome.storage.local.set({ dismiss_oneclick: true });
+        await chrome.storage.local.set({ dismissed_pdf: currentPdf, dismiss_oneclick: true });
       }
       document.documentElement.classList.remove("detected-mode");
       document.body.classList.remove("detected-mode");
@@ -172,7 +177,7 @@ function setupDetectedHandlers() {
             chrome.action.setBadgeText({ text: "" });
           }
           if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-            chrome.storage.local.remove(["dismiss_oneclick", "last_downloaded_pdf", "detected_task", "cleared_pdf_name"]);
+            chrome.storage.local.remove(["dismissed_pdf", "dismiss_oneclick", "last_downloaded_pdf", "detected_task", "cleared_pdf_name"]);
           }
 
           btnDetOneclick.innerHTML = `✓ Gotowe! Uruchomiono VS Code`;
@@ -204,39 +209,43 @@ async function updatePopupViewState() {
     const state = await res.json();
     const hasPdf = Boolean(state.has_pdf || state.has_staged_pdf);
 
-    let isDismissed = false;
-    let isFresh = false;
-    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      const stored = await chrome.storage.local.get(["dismiss_oneclick", "detected_task"]);
-      isDismissed = Boolean(stored.dismiss_oneclick);
-      if (stored.detected_task && stored.detected_task.ts) {
-        // Powiadomienie 1-Klik jest świeże przez 5 minut od pobrania pliku
-        isFresh = (Date.now() - stored.detected_task.ts < 300000);
-      }
-    }
-
-    // Jeśli w Rust jest oczekujące zadanie PDF, użytkownik nie kliknął X i jest to świeże pobranie:
-    if (hasPdf && !isDismissed && isFresh) {
-      const detFilenameText = document.getElementById("det-filename-text");
-      const detCodeText = document.getElementById("det-code-text");
-      const pdfName = state.pdf_filename || (state.pdf_path ? state.pdf_path.replace(/^.*[\\\/]/, '') : "zadanie.pdf");
-      const code = state.problem_id || "ZAD";
-
-      if (detFilenameText) detFilenameText.textContent = pdfName;
-      if (detCodeText) detCodeText.textContent = code.toUpperCase();
-
-      document.documentElement.classList.remove("offline-mode");
-      document.body.classList.remove("offline-mode");
-      document.documentElement.classList.add("detected-mode");
-      document.body.classList.add("detected-mode");
-      viewOffline.classList.add("hidden");
-      viewMain.classList.add("hidden");
-      viewDetected.classList.remove("hidden");
+    if (!hasPdf) {
+      await showMainView();
       return;
     }
 
-    // W przeciwnym razie: standardowy widok z zakolejkowanym plikiem w kafelku
-    await showMainView();
+    const pdfName = state.pdf_filename || (state.pdf_path ? state.pdf_path.replace(/^.*[\\\/]/, '') : "zadanie.pdf");
+    const code = state.problem_id || "ZAD";
+
+    // Sprawdź czy użytkownik zamknął krzyżykiem (X) TEN KONKRETNY plik
+    let isDismissedForThisFile = false;
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      const stored = await chrome.storage.local.get(["dismissed_pdf"]);
+      if (stored.dismissed_pdf && stored.dismissed_pdf.toLowerCase() === pdfName.toLowerCase()) {
+        isDismissedForThisFile = true;
+      }
+    }
+
+    // Jeśli ten konkretny plik został już odrzucony przyciskiem X, pokazujemy widok główny
+    if (isDismissedForThisFile) {
+      await showMainView();
+      return;
+    }
+
+    // W przeciwnym razie: wyświetlamy dedykowany widok 1-Klik z wykrytym zadaniem!
+    const detFilenameText = document.getElementById("det-filename-text");
+    const detCodeText = document.getElementById("det-code-text");
+
+    if (detFilenameText) detFilenameText.textContent = pdfName;
+    if (detCodeText) detCodeText.textContent = code.toUpperCase();
+
+    document.documentElement.classList.remove("offline-mode");
+    document.body.classList.remove("offline-mode");
+    document.documentElement.classList.add("detected-mode");
+    document.body.classList.add("detected-mode");
+    viewOffline.classList.add("hidden");
+    viewMain.classList.add("hidden");
+    viewDetected.classList.remove("hidden");
   } catch (_) {
     await showMainView();
   }
@@ -528,7 +537,7 @@ async function syncRecentDownloads() {
       }
 
       if (success && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        await chrome.storage.local.remove(["last_downloaded_pdf"]);
+        await chrome.storage.local.remove(["last_downloaded_pdf", "cleared_pdf_name", "dismissed_pdf", "dismiss_oneclick"]);
         return true;
       }
     }
@@ -621,7 +630,7 @@ function setupStaging() {
     } catch (_) {}
     if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ cleared_pdf_name: removedName });
-      chrome.storage.local.remove(["last_downloaded_pdf", "dismiss_oneclick", "detected_task"]);
+      chrome.storage.local.remove(["last_downloaded_pdf", "dismiss_oneclick", "dismissed_pdf", "detected_task"]);
     }
     if (typeof chrome !== "undefined" && chrome.action && chrome.action.setBadgeText) {
       chrome.action.setBadgeText({ text: "" });
@@ -674,7 +683,7 @@ function setupStaging() {
           chrome.action.setBadgeText({ text: "" });
         }
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-          chrome.storage.local.remove(["last_downloaded_pdf", "last_downloaded_zip", "cleared_pdf_name", "cleared_zip_name", "dismiss_oneclick", "detected_task"]);
+          chrome.storage.local.remove(["last_downloaded_pdf", "last_downloaded_zip", "cleared_pdf_name", "cleared_zip_name", "dismiss_oneclick", "dismissed_pdf", "detected_task"]);
         }
         clearStagedStorage("all");
         hasPdfStaged = false;

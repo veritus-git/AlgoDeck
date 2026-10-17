@@ -81,7 +81,7 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onStartup)
   chrome.runtime.onStartup.addListener(async () => {
     try {
       console.log("[AlgoDeck] Start przeglądarki — czyszczenie starego stanu zadań.");
-      await chrome.storage.local.remove(["detected_task", "dismiss_oneclick", "last_downloaded_pdf"]);
+      await chrome.storage.local.remove(["detected_task", "dismiss_oneclick", "dismissed_pdf", "last_downloaded_pdf"]);
       if (chrome.action && chrome.action.setBadgeText) {
         chrome.action.setBadgeText({ text: "" });
       }
@@ -295,7 +295,7 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
       },
       dismiss_oneclick: false
     });
-    await chrome.storage.local.remove(["cleared_pdf_name"]);
+    await chrome.storage.local.remove(["cleared_pdf_name", "dismissed_pdf", "dismiss_oneclick"]);
 
     // 4. Ustaw zieloną odznakę "1" na ikonie paska rozszerzenia
     try {
@@ -308,6 +308,7 @@ async function handleCompletedDownload(downloadId, isSilentStartup = false) {
     // 5. Powiadomienie pulpitu (TYLKO jeśli to nie jest start przeglądarki i użytkownik włączył powiadomienia o nowych zadaniach)
     if (!isSilentStartup) {
       const allowNotify = regResult?.should_notify === true;
+      if (allowNotify && typeof chrome !== "undefined" && chrome.notifications && chrome.notifications.create) {
         const notifId = `algodeck_${downloadId}_${Date.now()}`;
         chrome.notifications.create(notifId, {
           type: "basic",
