@@ -465,35 +465,98 @@ if (Test-Path $StagingDir) {
 }
 $SnapshotFile = "$ConfigDir\initial_downloads.json"
 $RegistryFile = "$ConfigDir\downloaded_pdf_registry.json"
+$KnownDirsFile = "$ConfigDir\known_download_dirs.json"
 try {
-    $DownloadsPath = Join-Path $env:USERPROFILE "Downloads"
-    $IgnoredFiles = @()
-    $NowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    $PdfEntries = @{}
-    if (Test-Path $DownloadsPath) {
-        $Existing = Get-ChildItem -Path $DownloadsPath -File -ErrorAction SilentlyContinue
-        foreach ($item in $Existing) {
-            $IgnoredFiles += $item.Name
-            if ($item.Extension -ieq ".pdf") {
+    $CandidateDirs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $CandidateDirs.Add((Join-Path $env:USERPROFILE "Downloads")) | Out-Null
+
+    # Rejestr Windows (User Shell Folders - Downloads GUID)
+    try {
+        $regKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        $val = (Get-ItemProperty -Path $regKey -Name "{374DE290-123F-4565-9164-39C4925E467B}" -ErrorAction SilentlyContinue)."{374DE290-123F-4565-9164-39C4925E467B}"
+        if ($val) {
+            $expanded = [Environment]::ExpandEnvironmentVariables($val)
+            if (Test-Path $expanded) {
+                $CandidateDirs.Add($expanded) | Out-Null
+            }
+        }
+    } catch {}
+
+    # Preferencje przeglądarek (Chrome, Brave, Edge, Chromium, Vivaldi, Opera)
+    $BrowserDataRoots = @(
+        "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data",
+        "$env:LOCALAPPDATA\Google\Chrome\User Data",
+        "$env:LOCALAPPDATA\Microsoft\Edge\User Data",
+        "$env:LOCALAPPDATA\Chromium\User Data",
+        "$env:LOCALAPPDATA\Vivaldi\User Data",
+        "$env:APPDATA\Opera Software\Opera Stable"
+    )
+    foreach ($bRoot in $BrowserDataRoots) {
+        if (Test-Path $bRoot) {
+            $prefFiles = Get-ChildItem -Path $bRoot -Filter "Preferences" -Recurse -Depth 3 -ErrorAction SilentlyContinue
+            foreach ($pf in $prefFiles) {
                 try {
-                    $hash = (Get-FileHash -Path $item.FullName -Algorithm SHA256).Hash.ToLower()
-                    $modMs = [DateTimeOffset]::new($item.LastWriteTimeUtc).ToUnixTimeMilliseconds()
-                    $PdfEntries[$item.Name.ToLower()] = @{
-                        filename = $item.Name
-                        path = $item.FullName
-                        sha256 = $hash
-                        size = $item.Length
-                        modified_ms = $modMs
-                        registered_at = $NowMs
-                        is_initial = $true
+                    $jsonContent = Get-Content -Path $pf.FullName -Raw -Encoding UTF8 -ErrorAction SilentlyContinue | ConvertFrom-Json
+                    if ($jsonContent.download -and $jsonContent.download.default_directory) {
+                        $p = $jsonContent.download.default_directory
+                        if (Test-Path $p) { $CandidateDirs.Add($p) | Out-Null }
+                    }
+                    if ($jsonContent.savefile -and $jsonContent.savefile.default_directory) {
+                        $p = $jsonContent.savefile.default_directory
+                        if (Test-Path $p) { $CandidateDirs.Add($p) | Out-Null }
                     }
                 } catch {}
             }
         }
     }
+
+    # Sprawdzenie podfolderów Downloads
+    $currList = @($CandidateDirs)
+    foreach ($cd in $currList) {
+        $nested = Join-Path $cd "Downloads"
+        if (Test-Path $nested) {
+            $CandidateDirs.Add($nested) | Out-Null
+        }
+    }
+
+    $IgnoredFiles = @()
+    $NowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $PdfEntries = @{}
+
+    foreach ($dir in $CandidateDirs) {
+        if (Test-Path $dir) {
+            $Existing = Get-ChildItem -Path $dir -File -ErrorAction SilentlyContinue
+            foreach ($item in $Existing) {
+                $IgnoredFiles += $item.Name
+                if ($item.Extension -ieq ".pdf") {
+                    try {
+                        $hash = (Get-FileHash -Path $item.FullName -Algorithm SHA256).Hash.ToLower()
+                        $modMs = [DateTimeOffset]::new($item.LastWriteTimeUtc).ToUnixTimeMilliseconds()
+                        $key = $item.Name.ToLower()
+                        if (-not $PdfEntries.ContainsKey($key)) {
+                            $PdfEntries[$key] = @{
+                                filename = $item.Name
+                                path = $item.FullName
+                                sha256 = $hash
+                                size = $item.Length
+                                modified_ms = $modMs
+                                registered_at = $NowMs
+                                is_initial = $true
+                            }
+                        }
+                    } catch {}
+                }
+            }
+        }
+    }
+
+    $CandidateList = @($CandidateDirs)
+    $KnownJson = $CandidateList | ConvertTo-Json
+    [System.IO.File]::WriteAllText($KnownDirsFile, $KnownJson, [System.Text.Encoding]::UTF8)
+
     $SnapshotData = @{
         installed_at = $NowMs
-        ignored_files = $IgnoredFiles
+        ignored_files = ($IgnoredFiles | Select-Object -Unique)
     }
     $JsonStr = $SnapshotData | ConvertTo-Json -Compress
     [System.IO.File]::WriteAllText($SnapshotFile, $JsonStr, [System.Text.Encoding]::UTF8)
@@ -505,7 +568,7 @@ try {
     }
     $RegJsonStr = $RegistryData | ConvertTo-Json -Depth 4
     [System.IO.File]::WriteAllText($RegistryFile, $RegJsonStr, [System.Text.Encoding]::UTF8)
-    Write-Host "✓ Zapisano stan początkowy pobrań i fizyczny rejestr SHA256 (stare pliki będą ignorowane)." -ForegroundColor Green
+    Write-Host "✓ Zapisano stan początkowy pobrań i fizyczny rejestr SHA256 dla wszystkich przeglądarek." -ForegroundColor Green
 } catch {}
 
 # ------------------------------------------------------------------------------

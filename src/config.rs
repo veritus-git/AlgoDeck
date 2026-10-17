@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -352,6 +352,190 @@ pub fn get_downloads_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("./Downloads"))
 }
 
+pub fn register_known_download_dir(dir: &Path) {
+    if !dir.exists() || !dir.is_dir() {
+        return;
+    }
+    let known_file = if let Some(h) = dirs::home_dir() {
+        h.join(".config").join("algodeck").join("known_download_dirs.json")
+    } else {
+        PathBuf::from("./known_download_dirs.json")
+    };
+    if let Some(parent) = known_file.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let mut list: Vec<String> = if known_file.exists() {
+        fs::read_to_string(&known_file)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let dir_str = dir.to_string_lossy().to_string();
+    if !list.contains(&dir_str) {
+        list.push(dir_str);
+        if let Ok(serialized) = serde_json::to_string_pretty(&list) {
+            let _ = fs::write(known_file, serialized);
+        }
+    }
+}
+
+pub fn get_all_download_dirs() -> Vec<PathBuf> {
+    let mut dirs_set = HashSet::new();
+    let mut result = Vec::new();
+
+    let mut add_candidate = |p: PathBuf| {
+        if p.exists() && p.is_dir() {
+            let key = p.canonicalize().unwrap_or_else(|_| p.clone());
+            if dirs_set.insert(key) {
+                result.push(p);
+            }
+        }
+    };
+
+    // 1. Domyślny systemowy folder pobierania
+    let sys_dl = get_downloads_dir();
+    add_candidate(sys_dl.clone());
+    add_candidate(sys_dl.join("Downloads"));
+    add_candidate(sys_dl.join("Pobrane"));
+
+    // 2. Dirs::download_dir i katalog domowy
+    if let Some(d) = dirs::download_dir() {
+        add_candidate(d.clone());
+        add_candidate(d.join("Downloads"));
+        add_candidate(d.join("Pobrane"));
+    }
+    if let Some(h) = dirs::home_dir() {
+        add_candidate(h.join("Downloads"));
+        add_candidate(h.join("Pobrane"));
+        add_candidate(h.join("Pobrane").join("Downloads"));
+        add_candidate(h.join("Downloads").join("Pobrane"));
+    }
+
+    // 3. Dynamicznie zarejestrowane katalogi (zgłoszone z rozszerzenia przez API)
+    let known_file = if let Some(h) = dirs::home_dir() {
+        h.join(".config").join("algodeck").join("known_download_dirs.json")
+    } else {
+        PathBuf::from("./known_download_dirs.json")
+    };
+    if known_file.exists() {
+        if let Ok(txt) = fs::read_to_string(&known_file) {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&txt) {
+                for d in list {
+                    add_candidate(PathBuf::from(d));
+                }
+            }
+        }
+    }
+
+    // 4. Zaawansowane wykrywanie per-przeglądarka z plików konfiguracyjnych (Brave, Chrome, Edge, Vivaldi, Opera)
+    if let Some(h) = dirs::home_dir() {
+        #[cfg(target_os = "linux")]
+        let browser_config_roots = [
+            h.join(".config/BraveSoftware/Brave-Browser"),
+            h.join(".config/google-chrome"),
+            h.join(".config/google-chrome-stable"),
+            h.join(".config/chromium"),
+            h.join(".config/microsoft-edge"),
+            h.join(".config/microsoft-edge-stable"),
+            h.join(".config/vivaldi"),
+            h.join(".config/opera"),
+        ];
+
+        #[cfg(target_os = "macos")]
+        let browser_config_roots = [
+            h.join("Library/Application Support/BraveSoftware/Brave-Browser"),
+            h.join("Library/Application Support/Google/Chrome"),
+            h.join("Library/Application Support/Chromium"),
+            h.join("Library/Application Support/Microsoft Edge"),
+            h.join("Library/Application Support/Vivaldi"),
+        ];
+
+        #[cfg(target_os = "windows")]
+        let mut browser_config_roots = Vec::new();
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                let p = PathBuf::from(local);
+                browser_config_roots.push(p.join("BraveSoftware/Brave-Browser/User Data"));
+                browser_config_roots.push(p.join("Google/Chrome/User Data"));
+                browser_config_roots.push(p.join("Microsoft/Edge/User Data"));
+            }
+        }
+
+        for root in &browser_config_roots {
+            if root.exists() {
+                if let Ok(entries) = fs::read_dir(root) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            let pref = p.join("Preferences");
+                            if pref.exists() {
+                                if let Ok(content) = fs::read_to_string(&pref) {
+                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                                        if let Some(dl) = json.get("download").and_then(|d| d.get("default_directory")).and_then(|s| s.as_str()) {
+                                            if !dl.is_empty() {
+                                                add_candidate(PathBuf::from(dl));
+                                            }
+                                        }
+                                        if let Some(save) = json.get("savefile").and_then(|d| d.get("default_directory")).and_then(|s| s.as_str()) {
+                                            if !save.is_empty() {
+                                                add_candidate(PathBuf::from(save));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Profile Mozilla Firefox
+        #[cfg(target_os = "linux")]
+        let ff_root = h.join(".mozilla/firefox");
+        #[cfg(target_os = "macos")]
+        let ff_root = h.join("Library/Application Support/Firefox/Profiles");
+        #[cfg(target_os = "windows")]
+        let ff_root = if let Ok(appdata) = std::env::var("APPDATA") {
+            PathBuf::from(appdata).join("Mozilla/Firefox/Profiles")
+        } else {
+            PathBuf::new()
+        };
+
+        if ff_root.exists() {
+            if let Ok(entries) = fs::read_dir(&ff_root) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        let prefs = p.join("prefs.js");
+                        if prefs.exists() {
+                            if let Ok(content) = fs::read_to_string(&prefs) {
+                                for line in content.lines() {
+                                    if line.contains("browser.download.dir") {
+                                        if let Some(val) = line.split('"').nth(3) {
+                                            if !val.is_empty() {
+                                                add_candidate(PathBuf::from(val));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if result.is_empty() {
+        result.push(sys_dl);
+    }
+    result
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfRegistryEntry {
     pub filename: String,
@@ -388,55 +572,44 @@ impl DownloadedPdfRegistry {
         Ok(format!("{:x}", result))
     }
 
-    pub fn load_or_init() -> Self {
-        let path = Self::registry_path();
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(reg) = serde_json::from_str::<DownloadedPdfRegistry>(&content) {
-                    return reg;
-                }
-            }
-        }
-
+    pub fn scan_and_register_initial_files(&mut self) {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let mut reg = DownloadedPdfRegistry {
-            version: 1,
-            updated_at: now_ms,
-            entries: HashMap::new(),
-        };
+        for dl_dir in get_all_download_dirs() {
+            if dl_dir.exists() {
+                if let Ok(entries) = fs::read_dir(&dl_dir) {
+                    for e in entries.flatten() {
+                        let p = e.path();
+                        if p.is_file() {
+                            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                                if ext.eq_ignore_ascii_case("pdf") {
+                                    if let Ok(hash) = Self::compute_sha256(&p) {
+                                        let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                                        let metadata = p.metadata().ok();
+                                        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                                        let modified_ms = metadata
+                                            .and_then(|m| m.modified().ok())
+                                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                            .map(|d| d.as_millis() as u64)
+                                            .unwrap_or(0);
 
-        let dl_dir = get_downloads_dir();
-        if dl_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&dl_dir) {
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.is_file() {
-                        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                            if ext.eq_ignore_ascii_case("pdf") {
-                                if let Ok(hash) = Self::compute_sha256(&p) {
-                                    let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                                    let metadata = p.metadata().ok();
-                                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                                    let modified_ms = metadata
-                                        .and_then(|m| m.modified().ok())
-                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                        .map(|d| d.as_millis() as u64)
-                                        .unwrap_or(0);
-
-                                    let entry = PdfRegistryEntry {
-                                        filename: filename.clone(),
-                                        path: p.to_string_lossy().to_string(),
-                                        sha256: hash,
-                                        size,
-                                        modified_ms,
-                                        registered_at: now_ms,
-                                        is_initial: true,
-                                    };
-                                    reg.entries.insert(filename.to_lowercase(), entry);
+                                        let key = filename.to_lowercase();
+                                        if !self.entries.contains_key(&key) {
+                                            let entry = PdfRegistryEntry {
+                                                filename: filename.clone(),
+                                                path: p.to_string_lossy().to_string(),
+                                                sha256: hash,
+                                                size,
+                                                modified_ms,
+                                                registered_at: now_ms,
+                                                is_initial: true,
+                                            };
+                                            self.entries.insert(key, entry);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -444,7 +617,33 @@ impl DownloadedPdfRegistry {
                 }
             }
         }
+        self.updated_at = now_ms;
+    }
 
+    pub fn load_or_init() -> Self {
+        let path = Self::registry_path();
+        let mut reg = if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                serde_json::from_str::<DownloadedPdfRegistry>(&content).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        }.unwrap_or_else(|| {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            DownloadedPdfRegistry {
+                version: 1,
+                updated_at: now_ms,
+                entries: HashMap::new(),
+            }
+        });
+
+        // Zawsze upewnij się, że wszystkie obecne katalogi pobrań per-browser są w rejestrze
+        reg.scan_and_register_initial_files();
         let _ = reg.save();
         reg
     }

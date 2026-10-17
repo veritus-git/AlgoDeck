@@ -148,6 +148,29 @@ async function initDownloadIgnoreList() {
       }
     }
 
+    // Pobierz aktywne foldery pobierania z historii tej przeglądarki i zarejestruj w silniku Rust
+    if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.search) {
+      try {
+        const recentDls = await chrome.downloads.search({ limit: 100 });
+        const detectedDirs = new Set();
+        for (const dl of recentDls || []) {
+          if (dl.filename) {
+            const dir = dl.filename.replace(/[\\\/][^\\\/]+$/, '');
+            if (dir && dir.length > 2) {
+              detectedDirs.add(dir);
+            }
+          }
+        }
+        if (detectedDirs.size > 0) {
+          fetch(`${API_BASE}/api/register-download-dirs`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ directories: Array.from(detectedDirs) })
+          }).catch(() => {});
+        }
+      } catch (_) {}
+    }
+
     // Załaduj także fizyczny rejestr z silnika Rust
     try {
       const res = await fetch(`${API_BASE}/api/registered-downloads`);

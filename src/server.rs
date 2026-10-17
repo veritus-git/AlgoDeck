@@ -106,6 +106,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/stage-path", post(stage_by_path))
         .route("/register-download", post(register_download))
         .route("/registered-downloads", get(get_registered_downloads))
+        .route("/register-download-dirs", post(register_download_dirs))
         .route("/stage-refresh", post(stage_refresh))
         .route("/upload-staging", post(stage_file))
         .route("/clear-staged", post(clear_staged))
@@ -484,6 +485,7 @@ fn ensure_kde_focus_stealing_disabled() {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn configure_cmd_env(cmd: &mut std::process::Command) {
     if std::env::var("DISPLAY").is_err() {
         cmd.env("DISPLAY", ":0");
@@ -510,6 +512,7 @@ fn configure_cmd_env(cmd: &mut std::process::Command) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn find_linux_tool_bin(bin: &str) -> Option<PathBuf> {
     if let Ok(path) = std::env::var("PATH") {
         for p in std::env::split_paths(&path) {
@@ -657,6 +660,9 @@ for (var i = 0; i < list.length; i++) {{
         }
     }
 }
+
+#[cfg(not(target_os = "linux"))]
+pub fn activate_linux_window(_target_classes: &[&str]) {}
 
 pub fn open_browser_foreground(url: &str) {
     let url_str = url.to_string();
@@ -1174,21 +1180,20 @@ async fn stage_by_path(
         } else {
             let fname_opt = path.file_name().or_else(|| Path::new(&decoded).file_name()).map(|f| f.to_os_string());
             if let Some(fname) = fname_opt {
-                if let Some(dl) = dirs::download_dir() {
+                for dl in crate::config::get_all_download_dirs() {
                     let candidate = dl.join(&fname);
                     if candidate.exists() {
                         path = candidate;
-                    }
-                }
-                if !path.exists() {
-                    if let Some(home) = dirs::home_dir() {
-                        let candidate = home.join("Downloads").join(&fname);
-                        if candidate.exists() {
-                            path = candidate;
-                        }
+                        break;
                     }
                 }
             }
+        }
+    }
+
+    if path.exists() {
+        if let Some(parent) = path.parent() {
+            crate::config::register_known_download_dir(parent);
         }
     }
 
@@ -1323,6 +1328,29 @@ async fn get_registered_downloads() -> Json<serde_json::Value> {
     Json(serde_json::to_value(&reg).unwrap_or_else(|_| serde_json::json!({ "version": 1, "entries": {} })))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RegisterDirsRequest {
+    pub directories: Vec<String>,
+}
+
+async fn register_download_dirs(
+    Json(req): Json<RegisterDirsRequest>,
+) -> Json<serde_json::Value> {
+    for d in req.directories {
+        let p = PathBuf::from(d);
+        if p.exists() && p.is_dir() {
+            crate::config::register_known_download_dir(&p);
+        }
+    }
+    let mut reg = crate::config::DownloadedPdfRegistry::load_or_init();
+    reg.scan_and_register_initial_files();
+    let _ = reg.save();
+
+    let all = crate::config::get_all_download_dirs();
+    let paths: Vec<String> = all.into_iter().map(|p| p.to_string_lossy().to_string()).collect();
+    Json(serde_json::json!({ "success": true, "download_dirs": paths }))
+}
+
 async fn register_download(
     State(state): State<AppState>,
     Json(req): Json<StagePathRequest>,
@@ -1345,20 +1373,20 @@ async fn register_download(
         } else {
             let fname_opt = path.file_name().or_else(|| Path::new(&decoded).file_name()).map(|f| f.to_os_string());
             if let Some(fname) = fname_opt {
-                let dl = crate::config::get_downloads_dir();
-                let candidate = dl.join(&fname);
-                if candidate.exists() {
-                    path = candidate;
-                }
-                if !path.exists() {
-                    if let Some(home) = dirs::home_dir() {
-                        let candidate = home.join("Downloads").join(&fname);
-                        if candidate.exists() {
-                            path = candidate;
-                        }
+                for dl in crate::config::get_all_download_dirs() {
+                    let candidate = dl.join(&fname);
+                    if candidate.exists() {
+                        path = candidate;
+                        break;
                     }
                 }
             }
+        }
+    }
+
+    if path.exists() {
+        if let Some(parent) = path.parent() {
+            crate::config::register_known_download_dir(parent);
         }
     }
 
@@ -2194,12 +2222,12 @@ pub fn is_vscode_open_for_problem(problem_id: &str) -> bool {
     false
 }
 
-pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str, vscode_mode: &str) -> bool {
+pub fn send_bridge_open(_problem_id: &str, p_dir_str: &str, file_path_str: &str, vscode_mode: &str) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;
         use std::io::{Write, Read};
-        for sock_path in get_candidate_bridge_sockets(problem_id) {
+        for sock_path in get_candidate_bridge_sockets(_problem_id) {
             if let Ok(mut stream) = UnixStream::connect(&sock_path) {
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(120)));
                 let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(120)));
@@ -2233,12 +2261,12 @@ pub fn send_bridge_open(problem_id: &str, p_dir_str: &str, file_path_str: &str, 
     false
 }
 
-pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) -> bool {
+pub fn send_bridge_request(endpoint: &str, _problem_id: &str, p_dir_str: &str) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;
         use std::io::{Write, Read};
-        for sock_path in get_candidate_bridge_sockets(problem_id) {
+        for sock_path in get_candidate_bridge_sockets(_problem_id) {
             if let Ok(mut stream) = UnixStream::connect(&sock_path) {
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(120)));
                 let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(120)));
@@ -2272,11 +2300,10 @@ pub fn send_bridge_request(endpoint: &str, problem_id: &str, p_dir_str: &str) ->
 }
 
 pub fn spawn_in_system_terminal(endpoint: &str, p_dir: &std::path::Path, _problem_id: &str) {
-    let script_name = if endpoint == "test" { "test.sh" } else { "run.sh" };
-    let script_path = p_dir.join(".algo").join(script_name);
-
     #[cfg(target_os = "linux")]
     {
+        let script_name = if endpoint == "test" { "test.sh" } else { "run.sh" };
+        let script_path = p_dir.join(".algo").join(script_name);
         let script_str = script_path.to_string_lossy();
         let cmd = format!("cd '{}' && bash '{}'; echo ''; read -p 'Naciśnij Enter, aby zamknąć...' -r; exit", p_dir.display(), script_str);
 
@@ -2321,6 +2348,8 @@ pub fn spawn_in_system_terminal(endpoint: &str, p_dir: &std::path::Path, _proble
 
     #[cfg(target_os = "macos")]
     {
+        let script_name = if endpoint == "test" { "test.sh" } else { "run.sh" };
+        let script_path = p_dir.join(".algo").join(script_name);
         let script_str = script_path.to_string_lossy();
         let osa_cmd = format!(
             "tell application \"Terminal\" to do script \"cd '{}' && bash '{}'\"",

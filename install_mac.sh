@@ -441,40 +441,82 @@ SNAPSHOT_FILE="$CFG_DIR/initial_downloads.json"
 python3 -c "
 import os, json, time, hashlib
 
-dl = os.path.expanduser('~/Downloads')
+candidate_dirs = set()
+candidate_dirs.add(os.path.abspath(os.path.expanduser('~/Downloads')))
+
+# Check nested download folders
+for d in list(candidate_dirs):
+    subp = os.path.join(d, 'Downloads')
+    if os.path.isdir(subp):
+        candidate_dirs.add(os.path.abspath(subp))
+
+# Browser preferences on macOS
+browser_configs = [
+    '~/Library/Application Support/Google/Chrome',
+    '~/Library/Application Support/BraveSoftware/Brave-Browser',
+    '~/Library/Application Support/Chromium',
+    '~/Library/Application Support/Microsoft Edge',
+    '~/Library/Application Support/Vivaldi',
+    '~/Library/Application Support/Arc/User Data',
+]
+for bc in browser_configs:
+    base = os.path.expanduser(bc)
+    if os.path.isdir(base):
+        for root, dirs, files in os.walk(base):
+            if 'Preferences' in files:
+                try:
+                    with open(os.path.join(root, 'Preferences'), 'r', encoding='utf-8', errors='ignore') as pf:
+                        pj = json.load(pf)
+                        dl_p = pj.get('download', {}).get('default_directory')
+                        if dl_p and os.path.isdir(dl_p):
+                            candidate_dirs.add(os.path.abspath(dl_p))
+                        save_p = pj.get('savefile', {}).get('default_directory')
+                        if save_p and os.path.isdir(save_p):
+                            candidate_dirs.add(os.path.abspath(save_p))
+                except Exception:
+                    pass
+            if root.count(os.sep) - base.count(os.sep) >= 2:
+                dirs.clear()
+
 now_ms = int(time.time() * 1000)
 entries = {}
 all_files = []
 
-if os.path.exists(dl):
-    try:
-        for f in os.listdir(dl):
-            all_files.append(f)
-            if f.lower().endswith('.pdf'):
-                full_path = os.path.join(dl, f)
-                if os.path.isfile(full_path):
-                    try:
-                        st = os.stat(full_path)
-                        h = hashlib.sha256()
-                        with open(full_path, 'rb') as fp:
-                            while chunk := fp.read(65536):
-                                h.update(chunk)
-                        entries[f.lower()] = {
-                            'filename': f,
-                            'path': full_path,
-                            'sha256': h.hexdigest(),
-                            'size': st.st_size,
-                            'modified_ms': int(st.st_mtime * 1000),
-                            'registered_at': now_ms,
-                            'is_initial': True
-                        }
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+for d in candidate_dirs:
+    if os.path.isdir(d):
+        try:
+            for f in os.listdir(d):
+                all_files.append(f)
+                if f.lower().endswith('.pdf'):
+                    full_path = os.path.join(d, f)
+                    if os.path.isfile(full_path):
+                        try:
+                            st = os.stat(full_path)
+                            h = hashlib.sha256()
+                            with open(full_path, 'rb') as fp:
+                                while chunk := fp.read(65536):
+                                    h.update(chunk)
+                            key = f.lower()
+                            if key not in entries:
+                                entries[key] = {
+                                    'filename': f,
+                                    'path': full_path,
+                                    'sha256': h.hexdigest(),
+                                    'size': st.st_size,
+                                    'modified_ms': int(st.st_mtime * 1000),
+                                    'registered_at': now_ms,
+                                    'is_initial': True
+                                }
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
 cfg_dir = os.path.expanduser('~/.config/algodeck')
 os.makedirs(cfg_dir, exist_ok=True)
+
+with open(os.path.join(cfg_dir, 'known_download_dirs.json'), 'w') as kd:
+    json.dump(list(candidate_dirs), kd, indent=2)
 
 reg_data = {
     'version': 1,
@@ -486,7 +528,7 @@ with open(os.path.join(cfg_dir, 'downloaded_pdf_registry.json'), 'w') as out:
 
 init_data = {
     'installed_at': now_ms,
-    'ignored_files': all_files
+    'ignored_files': list(set(all_files))
 }
 with open(os.path.join(cfg_dir, 'initial_downloads.json'), 'w') as out:
     json.dump(init_data, out, indent=2)
